@@ -1,0 +1,11 @@
+[package]
+name = "proxy-component"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.98"
+wit-bindgen-rust = "0.43.0"
+wit-component = "0.235.0"
+wit-parser = { version = "0.235.0", default-features = false }
+
