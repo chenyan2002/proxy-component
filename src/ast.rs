@@ -1,9 +1,9 @@
-use anyhow::Result;
-use crate::source::{Source, Files};
-use wit_component::DecodedWasm;
-use wit_parser::{WorldItem, WorldId, Resolve, Function, FunctionKind, Type};
+use crate::source::{Files, Source};
 use crate::util::*;
+use anyhow::Result;
 use wit_bindgen_rust::to_rust_ident;
+use wit_component::DecodedWasm;
+use wit_parser::{Function, FunctionKind, Resolve, Type, WorldId, WorldItem};
 
 pub enum Mode {
     Record,
@@ -14,18 +14,18 @@ pub struct Opt {
 
 impl Opt {
     pub fn new() -> Self {
-        Self {
-            mode: Mode::Record,
-        }
+        Self { mode: Mode::Record }
     }
     fn print_ty(&self, ty: &Type) -> String {
         format!("{ty:?}")
     }
     fn generate_impl<'a>(&self, funcs: impl Iterator<Item = &'a Function>, files: &mut Files) {
         let mut out = Source::default();
-        out.push_str(r#"mod bindings;
+        out.push_str(
+            r#"mod bindings;
 impl Guest for Component {
-"#);
+"#,
+        );
         for func in funcs {
             out.push_str("fn ");
             let func_name = if let FunctionKind::Constructor(_) = &func.kind {
@@ -50,14 +50,16 @@ impl Guest for Component {
     fn generate_main_wit(&self, resolve: &Resolve, id: WorldId, files: &mut Files) {
         let mut out = Source::default();
         let world = &resolve.worlds[id];
-        out.push_str(r#"package component:proxy;
+        out.push_str(
+            r#"package component:proxy;
 interface %record {
   %record: func(method: string, args: string, ret: string);
 }
 interface replay {
   replay: func(method: string, args: string, ret: string);
 }
-"#);
+"#,
+        );
         out.push_str("world imports {\n");
         out.push_str(&format!("import {};\n", ident(self.mode.to_str())));
         for (name, import) in &world.imports {

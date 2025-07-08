@@ -1,6 +1,6 @@
+use std::collections::btree_map::{BTreeMap, Entry};
 use std::fmt::{self, Write};
 use std::ops::Deref;
-use std::collections::btree_map::{BTreeMap, Entry};
 
 #[derive(Default)]
 pub struct Files {
