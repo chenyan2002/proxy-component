@@ -18,7 +18,7 @@ impl Opt {
         let mut out = Source::default();
         let world = &resolve.worlds[id];
         let recorder = "proxy:recorder/";
-        out.push_str("package component:proxy;");
+        out.push_str("package component:proxy;\n");
         out.push_str("world imports {\n");
         out.push_str(&format!(
             "import {recorder}{}@0.1.0;\n",
@@ -29,6 +29,7 @@ impl Opt {
                 WorldItem::Interface { .. } => {
                     let name = resolve.name_world_key(name);
                     out.push_str(&format!("import {name};\n"));
+                    out.push_str(&format!("export {name};\n"));
                 }
                 _ => todo!(),
             }
@@ -44,6 +45,7 @@ impl Opt {
                 WorldItem::Interface { .. } => {
                     let name = resolve.name_world_key(name);
                     out.push_str(&format!("import {name};\n"));
+                    out.push_str(&format!("export {name};\n"));
                 }
                 _ => todo!(),
             }
@@ -65,7 +67,10 @@ package proxy:recorder@0.1.0;
 interface %record {
   %record: func(method: string, args: string, ret: string);
 }
-        "#,
+interface replay {
+  replay: func(method: string, args: string, ret: string);
+}
+"#,
         );
         Ok(())
     }

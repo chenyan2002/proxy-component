@@ -692,7 +692,7 @@ checksum = "271414315aff87387382ec3d271b52d7ae78726f5d44ac98b4f4030c91880486"
 [[package]]
 name = "wit-bindgen"
 version = "0.43.0"
-source = "git+https://github.com/chenyan2002/wit-bindgen.git?branch=proxy#b9c58a6d33d16faeb52382b9e668701189444e46"
+source = "git+https://github.com/chenyan2002/wit-bindgen.git?branch=proxy#d52e01adafa7a94b991c2bbf6d57fb3b198e763a"
 dependencies = [
  "wit-bindgen-rt 0.43.0",
  "wit-bindgen-rust-macro",
@@ -701,7 +701,7 @@ dependencies = [
 [[package]]
 name = "wit-bindgen-core"
 version = "0.43.0"
-source = "git+https://github.com/chenyan2002/wit-bindgen.git?branch=proxy#b9c58a6d33d16faeb52382b9e668701189444e46"
+source = "git+https://github.com/chenyan2002/wit-bindgen.git?branch=proxy#d52e01adafa7a94b991c2bbf6d57fb3b198e763a"
 dependencies = [
  "anyhow",
  "heck",
@@ -720,7 +720,7 @@ dependencies = [
 [[package]]
 name = "wit-bindgen-rt"
 version = "0.43.0"
-source = "git+https://github.com/chenyan2002/wit-bindgen.git?branch=proxy#b9c58a6d33d16faeb52382b9e668701189444e46"
+source = "git+https://github.com/chenyan2002/wit-bindgen.git?branch=proxy#d52e01adafa7a94b991c2bbf6d57fb3b198e763a"
 dependencies = [
  "bitflags",
  "futures",
@@ -730,7 +730,7 @@ dependencies = [
 [[package]]
 name = "wit-bindgen-rust"
 version = "0.43.0"
-source = "git+https://github.com/chenyan2002/wit-bindgen.git?branch=proxy#b9c58a6d33d16faeb52382b9e668701189444e46"
+source = "git+https://github.com/chenyan2002/wit-bindgen.git?branch=proxy#d52e01adafa7a94b991c2bbf6d57fb3b198e763a"
 dependencies = [
  "anyhow",
  "heck",
@@ -745,7 +745,7 @@ dependencies = [
 [[package]]
 name = "wit-bindgen-rust-macro"
 version = "0.43.0"
-source = "git+https://github.com/chenyan2002/wit-bindgen.git?branch=proxy#b9c58a6d33d16faeb52382b9e668701189444e46"
+source = "git+https://github.com/chenyan2002/wit-bindgen.git?branch=proxy#d52e01adafa7a94b991c2bbf6d57fb3b198e763a"
 dependencies = [
  "anyhow",
  "prettyplease",
