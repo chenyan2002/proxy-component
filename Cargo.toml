@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.98"
-wit-bindgen-rust = "0.43.0"
-wit-component = "0.235.0"
-wit-parser = { version = "0.235.0", default-features = false }
-
+clap = { version = "4.5.40", features = ["derive"] }
+tempfile = "3.20.0"
+wit-bindgen = { git = "https://github.com/chenyan2002/wit-bindgen.git", branch = "proxy" }
+wit-bindgen-core = { git = "https://github.com/chenyan2002/wit-bindgen.git", branch = "proxy" }
+wit-bindgen-rust = { git = "https://github.com/chenyan2002/wit-bindgen.git", branch = "proxy" }
