@@ -62,15 +62,7 @@ impl Opt {
         self.generate_main_wit(resolve, id, files);
         files.push(
             "deps/recorder.wit",
-            br#"
-package proxy:recorder@0.1.0;
-interface %record {
-  %record: func(method: string, args: string, ret: string);
-}
-interface replay {
-  replay: func(method: string, args: string, ret: string);
-}
-"#,
+            include_str!("../assets/recorder.wit").as_bytes(),
         );
         Ok(())
     }

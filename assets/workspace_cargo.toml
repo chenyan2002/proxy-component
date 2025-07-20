@@ -1,0 +1,13 @@
+[workspace]
+members = ["record_imports"]
+resolver = "2"
+
+[workspace.dependencies]
+wit-bindgen-rt = "0.43.0"
+
+[profile.release]
+codegen-units = 1
+opt-level = "s"
+strip = true
+lto = true
+
