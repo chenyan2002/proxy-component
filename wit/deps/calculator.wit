@@ -1,0 +1,10 @@
+package docs:calculator@0.1.0;
+
+interface calculate {
+  enum op {
+    add,
+  }
+
+  eval-expression: func(op: op, x: u32, y: u32) -> u32;
+}
+

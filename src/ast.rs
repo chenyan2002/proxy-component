@@ -62,7 +62,7 @@ impl Opt {
         self.generate_main_wit(resolve, id, files);
         files.push(
             "deps/recorder.wit",
-            include_str!("../assets/recorder.wit").as_bytes(),
+            include_str!("../wit/recorder.wit").as_bytes(),
         );
         Ok(())
     }

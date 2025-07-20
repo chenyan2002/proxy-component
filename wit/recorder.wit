@@ -8,3 +8,8 @@ interface replay {
   replay: func(method: string, args: string, ret: string);
 }
 
+world host {
+  import %record;
+  import docs:adder/add@0.1.0;
+  export docs:calculator/calculate@0.1.0;
+}
