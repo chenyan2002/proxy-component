@@ -21,10 +21,10 @@ mod bindings {
 struct Logger {
     wasi_ctx: WasiCtx,
     resource_table: ResourceTable,
-    logger: VecDeque<(String, String, String)>,
+    logger: VecDeque<(String, Vec<String>, String)>,
 }
 impl bindings::proxy::recorder::record::Host for Logger {
-    fn record(&mut self, method: String, input: String, output: String) {
+    fn record(&mut self, method: String, input: Vec<String>, output: String) {
         self.logger.push_back((method, input, output));
     }
 }

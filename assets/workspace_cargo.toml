@@ -4,6 +4,7 @@ resolver = "2"
 
 [workspace.dependencies]
 wit-bindgen-rt = "0.43.0"
+wasm-wave = "0.235.0"
 
 [profile.release]
 codegen-units = 1

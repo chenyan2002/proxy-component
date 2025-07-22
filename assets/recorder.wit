@@ -10,6 +10,4 @@ interface replay {
 
 world host {
   import %record;
-  import docs:adder/add@0.1.0;
-  export docs:calculator/calculate@0.1.0;
 }

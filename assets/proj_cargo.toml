@@ -9,4 +9,5 @@ path = "lib.rs"
 
 [dependencies]
 wit-bindgen-rt.workspace = true
+wasm-wave.workspace = true
 

@@ -68,16 +68,35 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     // 6. cargo build
     let status = Command::new("cargo")
         .arg("build")
-        .arg("--target=wasm32-wasip2")
+        .arg("--target=wasm32-unknown-unknown")
         .current_dir(tmp_dir.as_path())
         .status()
         .context("Failed to execute cargo build. Is rustup target `wasm32-wasip2` installed?")?;
     if !status.success() {
         bail!("cargo build failed with exit code: {}", status);
     }
+    let record_imports_wasm_path = tmp_dir.join("target/wasm32-unknown-unknown/debug/record_imports.wasm");
+    let status = Command::new("wasm-tools")
+        .arg("component")
+        .arg("embed")
+        .arg(wit_dir)
+        .arg(&record_imports_wasm_path)
+        .arg("-o")
+        .arg(&record_imports_wasm_path)
+        .arg("--world")
+        .arg("component:proxy/imports")
+        .status()?;
+    assert!(status.success());
+    let status = Command::new("wasm-tools")
+        .arg("component")
+        .arg("new")
+        .arg(&record_imports_wasm_path)
+        .arg("-o")
+        .arg(&record_imports_wasm_path)
+        .status()?;
+    assert!(status.success());
 
     // 7. run wac
-    let record_imports_wasm_path = tmp_dir.join("target/wasm32-wasip2/debug/record_imports.wasm");
     let output_file = "composed.wasm";
     let status = Command::new("wac")
         .arg("plug")
