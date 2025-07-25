@@ -1,5 +1,5 @@
 [workspace]
-members = ["record_imports"]
+members = ["record_imports", "record_exports"]
 resolver = "2"
 
 [workspace.dependencies]

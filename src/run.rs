@@ -25,6 +25,7 @@ struct Logger {
 }
 impl bindings::proxy::recorder::record::Host for Logger {
     fn record(&mut self, method: String, input: Vec<String>, output: String) {
+        println!("{method}: args: {input:?} ret: {output}");
         self.logger.push_back((method, input, output));
     }
 }

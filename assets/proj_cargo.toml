@@ -1,5 +1,5 @@
 [package]
-name = "record_imports"
+name = "{proj_name}"
 version = "0.1.0"
 edition = "2024"
 

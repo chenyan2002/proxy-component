@@ -47,23 +47,9 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
             .with_context(|| format!("Failed to write generated file to {}", path.display()))?;
     }
 
-    // 5. Generate Rust binding
-    // We could use `generate!` to make code simpler, but it increases build time.
-    let mut opts = Opts::default();
-    opts.proxy_component = true;
-    opts.stubs = true;
-    opts.runtime_path = Some("wit_bindgen_rt".to_owned());
-    opts.generate_all = true;
-    opts.format = true;
-    let mut generator = opts.build();
-    let (resolve, world) = parse_wit(&wit_dir, Some("imports"))?;
-    let mut files = Files::default();
-    generator.generate(&resolve, world, &mut files)?;
-    for (_name, content) in files.iter() {
-        let path = tmp_dir.join("record_imports/lib.rs");
-        eprintln!("Generating: {}", path.display());
-        fs::write(&path, content)?;
-    }
+    // 5. Generate Rust binding for both import and export interface
+    bindgen(&tmp_dir, &wit_dir, "imports", "record_imports/lib.rs")?;
+    bindgen(&tmp_dir, &wit_dir, "exports", "record_exports/lib.rs")?;
 
     // 6. cargo build
     let status = Command::new("cargo")
@@ -71,45 +57,56 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         .arg("--target=wasm32-unknown-unknown")
         .current_dir(tmp_dir.as_path())
         .status()
-        .context("Failed to execute cargo build. Is rustup target `wasm32-wasip2` installed?")?;
+        .context(
+            "Failed to execute cargo build. Is rustup target `wasm32-unknown-unknown` installed?",
+        )?;
     if !status.success() {
         bail!("cargo build failed with exit code: {}", status);
     }
-    let record_imports_wasm_path = tmp_dir.join("target/wasm32-unknown-unknown/debug/record_imports.wasm");
-    let status = Command::new("wasm-tools")
-        .arg("component")
-        .arg("embed")
-        .arg(wit_dir)
-        .arg(&record_imports_wasm_path)
-        .arg("-o")
-        .arg(&record_imports_wasm_path)
-        .arg("--world")
-        .arg("component:proxy/imports")
-        .status()?;
-    assert!(status.success());
-    let status = Command::new("wasm-tools")
-        .arg("component")
-        .arg("new")
-        .arg(&record_imports_wasm_path)
-        .arg("-o")
-        .arg(&record_imports_wasm_path)
-        .status()?;
-    assert!(status.success());
+    let imports_wasm_path =
+        component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
+    let exports_wasm_path =
+        component_new(&tmp_dir, &wit_dir, "exports", "debug/record_exports.wasm")?;
 
     // 7. run wac
     let output_file = "composed.wasm";
+    /*
     let status = Command::new("wac")
         .arg("plug")
-        .arg(args.wasm_file)
+        .arg(&args.wasm_file)
         .arg("--plug")
-        .arg(record_imports_wasm_path)
+        .arg(&imports_wasm_path)
+        .arg("-o")
+        .arg(&output_file)
+        .status()?;
+    assert!(status.success());
+    let status = Command::new("wac")
+        .arg("plug")
+        .arg(&exports_wasm_path)
+        .arg("--plug")
+    //.arg(&args.wasm_file)
+        .arg(&output_file)
+        .arg("-o")
+        .arg(&output_file)
+        .status()?;
+    assert!(status.success());*/
+
+    let imports = format!("import:proxy={}", imports_wasm_path.display());
+    let exports = format!("export:proxy={}", exports_wasm_path.display());
+    let root = format!("root:component={}", args.wasm_file.display());
+    let status = Command::new("wac")
+        .arg("compose")
+        .arg("--dep")
+        .arg(&imports)
+        .arg("--dep")
+        .arg(&exports)
+        .arg("--dep")
+        .arg(&root)
+        .arg(tmp_dir.join("compose.wac"))
         .arg("-o")
         .arg(output_file)
-        .status()
-        .context("Failed to execute wac. Is it installed and in your PATH?")?;
-    if !status.success() {
-        bail!("wac plug failed with exit code: {}", status);
-    }
+        .status()?;
+    assert!(status.success());
     eprintln!("Generated component: {output_file}");
 
     Ok(())
@@ -126,6 +123,57 @@ fn parse_wit(dir: &Path, world: Option<&str>) -> Result<(Resolve, WorldId)> {
         .context("Failed to select a world from the parsed wit files")?;
     Ok((resolve, world))
 }
+fn bindgen(tmp_dir: &Path, wit_dir: &Path, world_name: &str, dest_name: &str) -> Result<()> {
+    // We could use `generate!` to make code simpler, but it increases build time.
+    let mut opts = Opts::default();
+    opts.proxy_component = true;
+    opts.stubs = true;
+    opts.runtime_path = Some("wit_bindgen_rt".to_owned());
+    opts.generate_all = true;
+    opts.format = true;
+    let mut generator = opts.build();
+    let mut files = Files::default();
+    let (resolve, world) = parse_wit(wit_dir, Some(world_name))?;
+    generator.generate(&resolve, world, &mut files)?;
+    for (name, content) in files.iter() {
+        assert!(name.starts_with(world_name));
+        let path = tmp_dir.join(dest_name);
+        eprintln!("Generating: {}", path.display());
+        fs::write(&path, content)?;
+    }
+    Ok(())
+}
+fn component_new(
+    tmp_dir: &Path,
+    wit_dir: &Path,
+    world_name: &str,
+    wasm_file: &str,
+) -> Result<PathBuf> {
+    let wasm_path = tmp_dir
+        .join("target/wasm32-unknown-unknown/")
+        .join(wasm_file);
+    let world = "component:proxy/".to_string() + world_name;
+    let status = Command::new("wasm-tools")
+        .arg("component")
+        .arg("embed")
+        .arg(wit_dir)
+        .arg(&wasm_path)
+        .arg("-o")
+        .arg(&wasm_path)
+        .arg("--world")
+        .arg(&world)
+        .status()?;
+    assert!(status.success());
+    let status = Command::new("wasm-tools")
+        .arg("component")
+        .arg("new")
+        .arg(&wasm_path)
+        .arg("-o")
+        .arg(&wasm_path)
+        .status()?;
+    assert!(status.success());
+    Ok(wasm_path)
+}
 fn init_rust_project() -> Result<PathBuf> {
     /*let tmp_dir = tempfile::Builder::new()
     .prefix("proxy-component-")
@@ -141,14 +189,25 @@ fn init_rust_project() -> Result<PathBuf> {
         tmp_dir.join("Cargo.toml"),
         include_str!("../assets/workspace_cargo.toml"),
     )?;
+    fs::write(
+        tmp_dir.join("compose.wac"),
+        include_str!("../assets/compose.wac"),
+    )?;
 
     let wit_dir = tmp_dir.join("wit");
-    let src_dir = tmp_dir.join("record_imports");
+    let import_src_dir = tmp_dir.join("record_imports");
+    let export_src_dir = tmp_dir.join("record_exports");
     fs::create_dir_all(&wit_dir)?;
-    fs::create_dir_all(&src_dir)?;
+    fs::create_dir_all(&import_src_dir)?;
+    fs::create_dir_all(&export_src_dir)?;
+    let toml = include_str!("../assets/proj_cargo.toml");
     fs::write(
-        src_dir.join("Cargo.toml"),
-        include_str!("../assets/proj_cargo.toml"),
+        import_src_dir.join("Cargo.toml"),
+        toml.replace("{proj_name}", "record_imports"),
+    )?;
+    fs::write(
+        export_src_dir.join("Cargo.toml"),
+        toml.replace("{proj_name}", "record_exports"),
     )?;
     Ok(tmp_dir)
 }
