@@ -2,7 +2,7 @@ package component:composed;
 
 let imports = new import:proxy { ... };
 let main = new root:component { ...imports };
-//let main = new root:component { ... };
+// When export:proxy has imports, do we want to plug with import:proxy?
 let final = new export:proxy { ...main, ... };
 
 export final...;

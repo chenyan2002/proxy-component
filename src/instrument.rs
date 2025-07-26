@@ -10,8 +10,10 @@ use wit_parser::{Resolve, WorldId};
 #[derive(Parser)]
 pub struct InstrumentArgs {
     /// The path to the wasm component file.
-    #[arg()]
     wasm_file: PathBuf,
+    /// Only apply proxy to the export interfaces.
+    #[arg(short, long)]
+    export_only: bool,
 }
 
 pub fn run(args: InstrumentArgs) -> Result<()> {
@@ -42,71 +44,69 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     // 4. Write generated files to the temp directory.
     for (name, content) in files.iter() {
         let path = wit_dir.as_path().join(name);
+        std::fs::write(&path, content)?;
+    }
+    // Re-generate exports world to bring in extra imports
+    let (resolve, world) = parse_wit(&wit_dir, Some("tmp-exports"))?;
+    opts.generate_exports_world(&resolve, world, &mut files);
+    for (name, content) in files.iter() {
+        let path = wit_dir.as_path().join(name);
         eprintln!("Generating: {}", path.display());
-        std::fs::write(&path, content)
-            .with_context(|| format!("Failed to write generated file to {}", path.display()))?;
+        std::fs::write(&path, content)?;
     }
 
     // 5. Generate Rust binding for both import and export interface
-    bindgen(&tmp_dir, &wit_dir, "imports", "record_imports/lib.rs")?;
+    if !args.export_only {
+        bindgen(&tmp_dir, &wit_dir, "imports", "record_imports/lib.rs")?;
+    }
     bindgen(&tmp_dir, &wit_dir, "exports", "record_exports/lib.rs")?;
 
     // 6. cargo build
-    let status = Command::new("cargo")
-        .arg("build")
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
         .arg("--target=wasm32-unknown-unknown")
-        .current_dir(tmp_dir.as_path())
-        .status()
-        .context(
-            "Failed to execute cargo build. Is rustup target `wasm32-unknown-unknown` installed?",
-        )?;
-    if !status.success() {
-        bail!("cargo build failed with exit code: {}", status);
+        .current_dir(tmp_dir.as_path());
+    if args.export_only {
+        cmd.arg("--package").arg("record_exports");
     }
-    let imports_wasm_path =
-        component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
+    let status = cmd.status()?;
+    assert!(status.success());
+
     let exports_wasm_path =
         component_new(&tmp_dir, &wit_dir, "exports", "debug/record_exports.wasm")?;
 
     // 7. run wac
     let output_file = "composed.wasm";
-    /*
-    let status = Command::new("wac")
-        .arg("plug")
-        .arg(&args.wasm_file)
-        .arg("--plug")
-        .arg(&imports_wasm_path)
-        .arg("-o")
-        .arg(&output_file)
-        .status()?;
-    assert!(status.success());
-    let status = Command::new("wac")
-        .arg("plug")
-        .arg(&exports_wasm_path)
-        .arg("--plug")
-    //.arg(&args.wasm_file)
-        .arg(&output_file)
-        .arg("-o")
-        .arg(&output_file)
-        .status()?;
-    assert!(status.success());*/
-
-    let imports = format!("import:proxy={}", imports_wasm_path.display());
-    let exports = format!("export:proxy={}", exports_wasm_path.display());
-    let root = format!("root:component={}", args.wasm_file.display());
-    let status = Command::new("wac")
-        .arg("compose")
-        .arg("--dep")
-        .arg(&imports)
-        .arg("--dep")
-        .arg(&exports)
-        .arg("--dep")
-        .arg(&root)
-        .arg(tmp_dir.join("compose.wac"))
-        .arg("-o")
-        .arg(output_file)
-        .status()?;
-    assert!(status.success());
+    if args.export_only {
+        let status = Command::new("wac")
+            .arg("plug")
+            .arg(&exports_wasm_path)
+            .arg("--plug")
+            .arg(&args.wasm_file)
+            .arg("-o")
+            .arg(&output_file)
+            .status()?;
+        assert!(status.success());
+    } else {
+        let imports_wasm_path =
+            component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
+        let imports = format!("import:proxy={}", imports_wasm_path.display());
+        let exports = format!("export:proxy={}", exports_wasm_path.display());
+        let root = format!("root:component={}", args.wasm_file.display());
+        let status = Command::new("wac")
+            .arg("compose")
+            .arg("--dep")
+            .arg(&imports)
+            .arg("--dep")
+            .arg(&exports)
+            .arg("--dep")
+            .arg(&root)
+            .arg(tmp_dir.join("compose.wac"))
+            .arg("-o")
+            .arg(output_file)
+            .status()?;
+        assert!(status.success());
+    }
     eprintln!("Generated component: {output_file}");
 
     Ok(())
