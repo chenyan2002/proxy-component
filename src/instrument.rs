@@ -14,6 +14,9 @@ pub struct InstrumentArgs {
     /// Only apply proxy to the export interfaces.
     #[arg(short, long)]
     export_only: bool,
+    /// Only apply proxy to the import interfaces.
+    #[arg(short, long, conflicts_with("export_only"))]
+    import_only: bool,
 }
 
 pub fn run(args: InstrumentArgs) -> Result<()> {
@@ -59,7 +62,9 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     if !args.export_only {
         bindgen(&tmp_dir, &wit_dir, "imports", "record_imports/lib.rs")?;
     }
-    bindgen(&tmp_dir, &wit_dir, "exports", "record_exports/lib.rs")?;
+    if !args.import_only {
+        bindgen(&tmp_dir, &wit_dir, "exports", "record_exports/lib.rs")?;
+    }
 
     // 6. cargo build
     let mut cmd = Command::new("cargo");
@@ -69,11 +74,22 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     if args.export_only {
         cmd.arg("--package").arg("record_exports");
     }
+    if args.import_only {
+        cmd.arg("--package").arg("record_imports");
+    }
     let status = cmd.status()?;
     assert!(status.success());
 
-    let exports_wasm_path =
-        component_new(&tmp_dir, &wit_dir, "exports", "debug/record_exports.wasm")?;
+    let exports_wasm_path = if !args.import_only {
+        component_new(&tmp_dir, &wit_dir, "exports", "debug/record_exports.wasm")?
+    } else {
+        PathBuf::new()
+    };
+    let imports_wasm_path = if !args.export_only {
+        component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?
+    } else {
+        PathBuf::new()
+    };
 
     // 7. run wac
     let output_file = "composed.wasm";
@@ -87,9 +103,17 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
             .arg(&output_file)
             .status()?;
         assert!(status.success());
+    } else if args.import_only {
+        let status = Command::new("wac")
+            .arg("plug")
+            .arg(&args.wasm_file)
+            .arg("--plug")
+            .arg(&imports_wasm_path)
+            .arg("-o")
+            .arg(&output_file)
+            .status()?;
+        assert!(status.success());
     } else {
-        let imports_wasm_path =
-            component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
         let imports = format!("import:proxy={}", imports_wasm_path.display());
         let exports = format!("export:proxy={}", exports_wasm_path.display());
         let root = format!("root:component={}", args.wasm_file.display());
@@ -130,7 +154,7 @@ fn bindgen(tmp_dir: &Path, wit_dir: &Path, world_name: &str, dest_name: &str) ->
     opts.stubs = true;
     opts.runtime_path = Some("wit_bindgen_rt".to_owned());
     opts.generate_all = true;
-    opts.format = true;
+    //opts.format = true;
     let mut generator = opts.build();
     let mut files = Files::default();
     let (resolve, world) = parse_wit(wit_dir, Some(world_name))?;
