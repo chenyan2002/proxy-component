@@ -49,7 +49,14 @@ impl Opt {
         out.push_str("}\n");
         files.push("component.wit", out.as_bytes());
     }
-    pub fn generate_exports_world(&self, resolve: &Resolve, id: WorldId, files: &mut Files) {
+    pub fn generate_exports_world(
+        &self,
+        resolve: &Resolve,
+        id: WorldId,
+        files: &mut Files,
+    ) -> bool {
+        let mut cnt_imports = 0;
+        let mut cnt_exports = 0;
         let mut out = Source::default();
         let world = &resolve.worlds[id];
         let recorder = "proxy:recorder/";
@@ -61,6 +68,7 @@ impl Opt {
         for (name, import) in &world.imports {
             match import {
                 WorldItem::Interface { .. } => {
+                    cnt_imports += 1;
                     let name = resolve.name_world_key(name);
                     out.push_str(&format!("import {name};\n"));
                 }
@@ -70,6 +78,7 @@ impl Opt {
         for (name, export) in &world.exports {
             match export {
                 WorldItem::Interface { .. } => {
+                    cnt_exports += 1;
                     let name = resolve.name_world_key(name);
                     out.push_str(&format!("export {name};\n"));
                 }
@@ -78,6 +87,9 @@ impl Opt {
         }
         out.push_str("}\n");
         files.push("component.wit", out.as_bytes());
+        let extra_imports = cnt_imports - cnt_exports;
+        assert!(extra_imports >= 0);
+        extra_imports > 0
     }
     pub fn generate_component(
         &self,

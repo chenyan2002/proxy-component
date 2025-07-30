@@ -51,7 +51,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     }
     // Re-generate exports world to bring in extra imports
     let (resolve, world) = parse_wit(&wit_dir, Some("tmp-exports"))?;
-    opts.generate_exports_world(&resolve, world, &mut files);
+    let has_extra_imports = opts.generate_exports_world(&resolve, world, &mut files);
     for (name, content) in files.iter() {
         let path = wit_dir.as_path().join(name);
         eprintln!("Generating: {}", path.display());
@@ -117,6 +117,22 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         let imports = format!("import:proxy={}", imports_wasm_path.display());
         let exports = format!("export:proxy={}", exports_wasm_path.display());
         let root = format!("root:component={}", args.wasm_file.display());
+        let wac_path = tmp_dir.join("compose.wac");
+        let mut wac_script = r#"
+package component:composed;
+
+let imports = new import:proxy { ... };
+let main = new root:component { ...imports };
+"#
+        .to_string();
+        if has_extra_imports {
+            wac_script =
+                wac_script + "let final = new export:proxy { ...main, ...imports, ... };\n";
+        } else {
+            wac_script = wac_script + "let final = new export:proxy { ...main, ... };\n";
+        }
+        wac_script = wac_script + "export final...;";
+        fs::write(&wac_path, wac_script)?;
         let status = Command::new("wac")
             .arg("compose")
             .arg("--dep")
@@ -125,7 +141,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
             .arg(&exports)
             .arg("--dep")
             .arg(&root)
-            .arg(tmp_dir.join("compose.wac"))
+            .arg(&wac_path)
             .arg("-o")
             .arg(output_file)
             .status()?;
@@ -212,10 +228,6 @@ fn init_rust_project() -> Result<PathBuf> {
     fs::write(
         tmp_dir.join("Cargo.toml"),
         include_str!("../assets/workspace_cargo.toml"),
-    )?;
-    fs::write(
-        tmp_dir.join("compose.wac"),
-        include_str!("../assets/compose.wac"),
     )?;
 
     let wit_dir = tmp_dir.join("wit");
