@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::Parser;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -33,9 +33,26 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         .arg(&wit_dir)
         .status()
         .context("Failed to execute wasm-tools. Is it installed and in your PATH?")?;
-
-    if !status.success() {
-        bail!("wasm-tools component wit failed with exit code: {}", status);
+    assert!(status.success());
+    // Duplicate all wit files, and update the package name to have a prefix `wrapped-`.
+    // TODO: Also need to update cross package use and include.
+    let wit_deps = wit_dir.join("deps");
+    for entry in fs::read_dir(&wit_deps)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() && path.extension().map_or(false, |ext| ext == "wit") {
+            let content = fs::read_to_string(&path)?;
+            let content = content.replacen("package ", "package wrapped-", 1);
+            let re = regex::Regex::new(r"use (\S+:)").unwrap();
+            let content = re.replace_all(&content, "use wrapped-$1").to_string();
+            fs::write(
+                wit_deps.join(format!(
+                    "wrapped-{}",
+                    path.file_name().unwrap().to_str().unwrap()
+                )),
+                content,
+            )?;
+        }
     }
 
     // 3. Parse the main wit file from tmp_dir/wit and feed into opts.generate_component
@@ -51,7 +68,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     }
     // Re-generate exports world to bring in extra imports
     let (resolve, world) = parse_wit(&wit_dir, Some("tmp-exports"))?;
-    let has_extra_imports = opts.generate_exports_world(&resolve, world, &mut files);
+    let _has_extra_imports = opts.generate_exports_world(&resolve, world, &mut files);
     for (name, content) in files.iter() {
         let path = wit_dir.as_path().join(name);
         eprintln!("Generating: {}", path.display());
@@ -117,22 +134,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         let imports = format!("import:proxy={}", imports_wasm_path.display());
         let exports = format!("export:proxy={}", exports_wasm_path.display());
         let root = format!("root:component={}", args.wasm_file.display());
-        let wac_path = tmp_dir.join("compose.wac");
-        let mut wac_script = r#"
-package component:composed;
-
-let imports = new import:proxy { ... };
-let main = new root:component { ...imports };
-"#
-        .to_string();
-        if has_extra_imports {
-            wac_script =
-                wac_script + "let final = new export:proxy { ...main, ...imports, ... };\n";
-        } else {
-            wac_script = wac_script + "let final = new export:proxy { ...main, ... };\n";
-        }
-        wac_script = wac_script + "export final...;";
-        fs::write(&wac_path, wac_script)?;
+        let wac_path = tmp_dir.join("wit/compose.wac");
         let status = Command::new("wac")
             .arg("compose")
             .arg("--dep")
@@ -166,7 +168,12 @@ fn parse_wit(dir: &Path, world: Option<&str>) -> Result<(Resolve, WorldId)> {
 fn bindgen(tmp_dir: &Path, wit_dir: &Path, world_name: &str, dest_name: &str) -> Result<()> {
     // We could use `generate!` to make code simpler, but it increases build time.
     let mut opts = Opts::default();
-    opts.proxy_component = true;
+    let proxy_mode = match world_name {
+        "imports" => wit_bindgen_rust::ProxyMode::Import,
+        "exports" => wit_bindgen_rust::ProxyMode::Export,
+        _ => unreachable!(),
+    };
+    opts.proxy_component = Some(proxy_mode);
     opts.stubs = true;
     opts.runtime_path = Some("wit_bindgen_rt".to_owned());
     opts.generate_all = true;

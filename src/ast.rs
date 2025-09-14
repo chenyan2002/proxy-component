@@ -29,7 +29,7 @@ impl Opt {
                 WorldItem::Interface { .. } => {
                     let name = resolve.name_world_key(name);
                     out.push_str(&format!("import {name};\n"));
-                    out.push_str(&format!("export {name};\n"));
+                    out.push_str(&format!("export wrapped-{name};\n"));
                 }
                 _ => todo!(),
             }
@@ -40,7 +40,7 @@ impl Opt {
             match export {
                 WorldItem::Interface { .. } => {
                     let name = resolve.name_world_key(name);
-                    out.push_str(&format!("import {name};\n"));
+                    out.push_str(&format!("import wrapped-{name};\n"));
                     out.push_str(&format!("export {name};\n"));
                 }
                 _ => todo!(),
@@ -91,6 +91,46 @@ impl Opt {
         assert!(extra_imports >= 0);
         extra_imports > 0
     }
+    fn generate_wac(&self, resolve: &Resolve, id: WorldId, files: &mut Files) {
+        let mut out = Source::default();
+        let world = &resolve.worlds[id];
+        out.push_str(
+            r#"package component:composed;
+let imports = new import:proxy { ... };
+let main = new root:component { "#,
+        );
+        for (name, import) in &world.imports {
+            match import {
+                WorldItem::Interface { .. } => {
+                    let name = resolve.name_world_key(name);
+                    let idx = name.find('/').unwrap();
+                    let end = name.rfind('@').unwrap_or(name.len());
+                    assert!(idx < end);
+                    let name = &name[idx + 1..end];
+                    out.push_str(&format!("{name}: imports.{name}, "));
+                }
+                _ => todo!(),
+            }
+        }
+        out.push_str(" };\n");
+        out.push_str("let final = new export:proxy { ");
+        for (name, import) in &world.exports {
+            match import {
+                WorldItem::Interface { .. } => {
+                    let name = resolve.name_world_key(name);
+                    let idx = name.find('/').unwrap();
+                    let end = name.rfind('@').unwrap_or(name.len());
+                    assert!(idx < end);
+                    let name = &name[idx + 1..end];
+                    out.push_str(&format!("{name}: main.{name}, "));
+                }
+                _ => todo!(),
+            }
+        }
+        out.push_str("... };\n");
+        out.push_str("export final...;\n");
+        files.push("compose.wac", out.as_bytes());
+    }
     pub fn generate_component(
         &self,
         resolve: &Resolve,
@@ -102,6 +142,7 @@ impl Opt {
             "deps/recorder.wit",
             include_str!("../assets/recorder.wit").as_bytes(),
         );
+        self.generate_wac(resolve, id, files);
         Ok(())
     }
 }
