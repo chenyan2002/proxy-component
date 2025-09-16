@@ -49,12 +49,7 @@ impl Opt {
         out.push_str("}\n");
         files.push("component.wit", out.as_bytes());
     }
-    pub fn generate_exports_world(
-        &self,
-        resolve: &Resolve,
-        id: WorldId,
-        files: &mut Files,
-    ) -> bool {
+    pub fn generate_exports_world(&self, resolve: &Resolve, id: WorldId, files: &mut Files) {
         let mut cnt_imports = 0;
         let mut cnt_exports = 0;
         let mut out = Source::default();
@@ -89,7 +84,13 @@ impl Opt {
         files.push("component.wit", out.as_bytes());
         let extra_imports = cnt_imports - cnt_exports;
         assert!(extra_imports >= 0);
-        extra_imports > 0
+        out = Source::default();
+        if extra_imports > 0 {
+            out.push_str("...imports, ");
+        }
+        out.push_str("... };\n");
+        out.push_str("export final...;\n");
+        files.push("compose.wac", out.as_bytes());
     }
     fn generate_wac(&self, resolve: &Resolve, id: WorldId, files: &mut Files) {
         let mut out = Source::default();
@@ -127,8 +128,6 @@ let main = new root:component { "#,
                 _ => todo!(),
             }
         }
-        out.push_str("... };\n");
-        out.push_str("export final...;\n");
         files.push("compose.wac", out.as_bytes());
     }
     pub fn generate_component(

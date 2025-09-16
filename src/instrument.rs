@@ -68,7 +68,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     }
     // Re-generate exports world to bring in extra imports
     let (resolve, world) = parse_wit(&wit_dir, Some("tmp-exports"))?;
-    let _has_extra_imports = opts.generate_exports_world(&resolve, world, &mut files);
+    opts.generate_exports_world(&resolve, world, &mut files);
     for (name, content) in files.iter() {
         let path = wit_dir.as_path().join(name);
         eprintln!("Generating: {}", path.display());
