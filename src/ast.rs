@@ -1,7 +1,9 @@
 use crate::util::*;
 use anyhow::Result;
+use std::collections::HashMap;
 use wit_bindgen_core::{Files, Source, wit_parser};
-use wit_parser::{Resolve, WorldId, WorldItem};
+use wit_component::{Output, WitPrinter};
+use wit_parser::*;
 
 pub enum Mode {
     Record,
@@ -152,4 +154,70 @@ impl Mode {
             Mode::Record => "record",
         }
     }
+}
+
+pub fn generate_wrapped_wits(dir: &std::path::Path) -> Result<()> {
+    let mut resolve = Resolve::default();
+    let (main_id, _files) = resolve.push_dir(dir)?;
+    for (_, pkg) in resolve.packages.iter().filter(|(id, _)| *id != main_id) {
+        let mut printer = WitPrinter::default();
+        let mut inject_resource = HashMap::new();
+        printer.output.push_str("package wrapped-");
+        let mut pkg_name = format!("{}:{}", pkg.name.namespace, pkg.name.name);
+        if let Some(ver) = &pkg.name.version {
+            pkg_name.push_str(&format!("@{ver}"));
+        }
+        printer.output.push_str(&pkg_name);
+        printer.output.push_str(";\n");
+        for (name, id) in pkg.interfaces.iter() {
+            let iface = &resolve.interfaces[*id];
+            for (ty_name, ty_id) in iface.types.iter() {
+                let ty = &resolve.types[*ty_id];
+                if matches!(ty.kind, TypeDefKind::Resource) {
+                    let host_name = format!("host-{}", ty_name);
+                    let mut iface_name =
+                        format!("{}:{}/{}", pkg.name.namespace, pkg.name.name, name);
+                    if let Some(ver) = &pkg.name.version {
+                        iface_name.push_str(&format!("@{ver}"));
+                    }
+                    let out = format!("use {}.{{{} as {}}};", iface_name, ty_name, host_name);
+                    let func =
+                        format!("get-wrapped: static func(x: {}) -> {};", host_name, ty_name);
+                    inject_resource.insert(ty_name, (out, func));
+                }
+            }
+            printer.print_interface_outer(&resolve, *id, name)?;
+            printer.output.indent_start();
+            printer.print_interface(&resolve, *id)?;
+            printer.output.indent_end();
+        }
+        let content = printer.output.to_string();
+        let re = regex::Regex::new(r"use (\S+:)").unwrap();
+        let mut content = re.replace_all(&content, "use wrapped-$1").to_string();
+        for (res_name, (use_stmt, func_stmt)) in &inject_resource {
+            let re_resource = regex::Regex::new(&format!(
+                r"(\s*)resource\s+{}\s*(?:\{{((?:.|\n)*?)\}}|;)",
+                regex::escape(res_name)
+            ))
+            .unwrap();
+            content = re_resource
+                .replace(&content, |caps: &regex::Captures| {
+                    let indent = &caps[1];
+                    let existing_body = caps.get(2).map_or("", |m| m.as_str());
+                    let new_func = format!("{}    {}", indent, func_stmt);
+
+                    format!(
+                        "{}{}\n{}resource {} {{{}{}\n{}}}",
+                        indent, use_stmt, indent, res_name, existing_body, new_func, indent
+                    )
+                })
+                .to_string();
+        }
+        std::fs::write(
+            dir.join("deps")
+                .join(format!("wrapped-{}.wit", pkg.name.name)),
+            content,
+        )?;
+    }
+    Ok(())
 }

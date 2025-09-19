@@ -34,26 +34,9 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         .status()
         .context("Failed to execute wasm-tools. Is it installed and in your PATH?")?;
     assert!(status.success());
-    // Duplicate all wit files, and update the package name to have a prefix `wrapped-`.
-    // TODO: Also need to update cross package use and include.
-    let wit_deps = wit_dir.join("deps");
-    for entry in fs::read_dir(&wit_deps)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() && path.extension().map_or(false, |ext| ext == "wit") {
-            let content = fs::read_to_string(&path)?;
-            let content = content.replacen("package ", "package wrapped-", 1);
-            let re = regex::Regex::new(r"use (\S+:)").unwrap();
-            let content = re.replace_all(&content, "use wrapped-$1").to_string();
-            fs::write(
-                wit_deps.join(format!(
-                    "wrapped-{}",
-                    path.file_name().unwrap().to_str().unwrap()
-                )),
-                content,
-            )?;
-        }
-    }
+
+    //let wit_deps = wit_dir.join("deps");
+    crate::ast::generate_wrapped_wits(&wit_dir)?;
 
     // 3. Parse the main wit file from tmp_dir/wit and feed into opts.generate_component
     let (resolve, world) = parse_wit(&wit_dir, None)?;
