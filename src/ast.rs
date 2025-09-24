@@ -1,8 +1,8 @@
 use crate::util::*;
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use wit_bindgen_core::{Files, Source, wit_parser};
-use wit_component::{Output, WitPrinter};
+use wit_component::WitPrinter;
 use wit_parser::*;
 
 pub enum Mode {
@@ -26,6 +26,7 @@ impl Opt {
             "import {recorder}{}@0.1.0;\n",
             ident(self.mode.to_str())
         ));
+        out.push_str("export proxy:conversion/conversion;\n");
         for (name, import) in &world.imports {
             match import {
                 WorldItem::Interface { .. } => {
@@ -62,6 +63,7 @@ impl Opt {
             "import {recorder}{}@0.1.0;\n",
             ident(self.mode.to_str())
         ));
+        out.push_str("import proxy:conversion/conversion;\n");
         for (name, import) in &world.imports {
             match import {
                 WorldItem::Interface { .. } => {
@@ -159,64 +161,62 @@ impl Mode {
 pub fn generate_wrapped_wits(dir: &std::path::Path) -> Result<()> {
     let mut resolve = Resolve::default();
     let (main_id, _files) = resolve.push_dir(dir)?;
-    for (_, pkg) in resolve.packages.iter().filter(|(id, _)| *id != main_id) {
-        let mut printer = WitPrinter::default();
-        let mut inject_resource = HashMap::new();
-        printer.output.push_str("package wrapped-");
-        let mut pkg_name = format!("{}:{}", pkg.name.namespace, pkg.name.name);
-        if let Some(ver) = &pkg.name.version {
-            pkg_name.push_str(&format!("@{ver}"));
-        }
-        printer.output.push_str(&pkg_name);
-        printer.output.push_str(";\n");
-        for (name, id) in pkg.interfaces.iter() {
-            let iface = &resolve.interfaces[*id];
-            for (ty_name, ty_id) in iface.types.iter() {
-                let ty = &resolve.types[*ty_id];
-                if matches!(ty.kind, TypeDefKind::Resource) {
-                    let host_name = format!("host-{}", ty_name);
-                    let mut iface_name =
-                        format!("{}:{}/{}", pkg.name.namespace, pkg.name.name, name);
-                    if let Some(ver) = &pkg.name.version {
-                        iface_name.push_str(&format!("@{ver}"));
-                    }
-                    let out = format!("use {}.{{{} as {}}};", iface_name, ty_name, host_name);
-                    let func =
-                        format!("get-wrapped: static func(x: {}) -> {};", host_name, ty_name);
-                    inject_resource.insert(ty_name, (out, func));
+    // Generate conversion interface. Not updating resolve to avoid deep cloning the packages.
+    let mut resources = BTreeMap::new();
+    for (_, iface) in resolve
+        .interfaces
+        .iter()
+        .filter(|(_, iface)| iface.package.is_some_and(|id| id != main_id) && iface.name.is_some())
+    {
+        let pkg_id = iface.package.unwrap();
+        let pkg_name = &resolve.packages[pkg_id].name;
+        let iface_name = iface.name.as_ref().unwrap();
+        for (ty_name, ty_id) in iface.types.iter() {
+            let ty = &resolve.types[*ty_id];
+            if matches!(ty.kind, TypeDefKind::Resource) {
+                let mut resource =
+                    format!("{}:{}/{}", pkg_name.namespace, pkg_name.name, iface_name);
+                if let Some(ver) = &pkg_name.version {
+                    resource.push_str(&format!("@{ver}"));
                 }
+                resources.insert(ty_name, resource);
             }
-            printer.print_interface_outer(&resolve, *id, name)?;
-            printer.output.indent_start();
-            printer.print_interface(&resolve, *id)?;
-            printer.output.indent_end();
         }
-        let content = printer.output.to_string();
-        let re = regex::Regex::new(r"use (\S+:)").unwrap();
-        let mut content = re.replace_all(&content, "use wrapped-$1").to_string();
-        for (res_name, (use_stmt, func_stmt)) in &inject_resource {
-            let re_resource = regex::Regex::new(&format!(
-                r"(\s*)resource\s+{}\s*(?:\{{((?:.|\n)*?)\}}|;)",
-                regex::escape(res_name)
-            ))
-            .unwrap();
-            content = re_resource
-                .replace(&content, |caps: &regex::Captures| {
-                    let indent = &caps[1];
-                    let existing_body = caps.get(2).map_or("", |m| m.as_str());
-                    let new_func = format!("{}    {}", indent, func_stmt);
-
-                    format!(
-                        "{}{}\n{}resource {} {{{}{}\n{}}}",
-                        indent, use_stmt, indent, res_name, existing_body, new_func, indent
-                    )
-                })
-                .to_string();
-        }
+    }
+    let mut out = Source::default();
+    out.push_str("package proxy:conversion;\ninterface conversion {");
+    for (resource, iface) in resources.into_iter() {
+        out.push_str(&format!(
+            "\nuse {iface}.{{{resource} as host-{resource}}};\n",
+        ));
+        out.push_str(&format!(
+            "use wrapped-{iface}.{{{resource} as wrapped-{resource}}};\n",
+        ));
+        out.push_str(&format!(
+            "get-wrapped-{resource}: func(x: host-{resource}) -> wrapped-{resource};\n",
+        ));
+    }
+    out.push_str("}\n");
+    std::fs::write(dir.join("deps").join("conversion.wit"), out.as_bytes())?;
+    // rename package name
+    resolve.package_names = resolve
+        .package_names
+        .into_iter()
+        .map(|(mut name, id)| {
+            name.namespace = "wrapped-".to_string() + &name.namespace;
+            (name, id)
+        })
+        .collect();
+    for (_, pkg) in resolve.packages.iter_mut() {
+        pkg.name.namespace = "wrapped-".to_string() + &pkg.name.namespace;
+    }
+    for (id, pkg) in resolve.packages.iter().filter(|(id, _)| *id != main_id) {
+        let mut printer = WitPrinter::default();
+        printer.print_package(&resolve, id, true)?;
         std::fs::write(
             dir.join("deps")
                 .join(format!("wrapped-{}.wit", pkg.name.name)),
-            content,
+            printer.output.to_string(),
         )?;
     }
     Ok(())

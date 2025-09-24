@@ -100,7 +100,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
             .arg("--plug")
             .arg(&args.wasm_file)
             .arg("-o")
-            .arg(&output_file)
+            .arg(output_file)
             .status()?;
         assert!(status.success());
     } else if args.import_only {
@@ -110,7 +110,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
             .arg("--plug")
             .arg(&imports_wasm_path)
             .arg("-o")
-            .arg(&output_file)
+            .arg(output_file)
             .status()?;
         assert!(status.success());
     } else {
