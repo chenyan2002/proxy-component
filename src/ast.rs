@@ -1,3 +1,4 @@
+use crate::Mode;
 use crate::util::*;
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -5,17 +6,11 @@ use wit_bindgen_core::{Files, Source, wit_parser};
 use wit_component::WitPrinter;
 use wit_parser::*;
 
-pub enum Mode {
-    Record,
-}
 pub struct Opt {
     pub mode: Mode,
 }
 
 impl Opt {
-    pub fn new() -> Self {
-        Self { mode: Mode::Record }
-    }
     fn generate_main_wit(&self, resolve: &Resolve, id: WorldId, files: &mut Files) {
         let mut out = Source::default();
         let world = &resolve.worlds[id];
@@ -147,14 +142,6 @@ let main = new root:component { "#,
         );
         self.generate_wac(resolve, id, files);
         Ok(())
-    }
-}
-
-impl Mode {
-    fn to_str(&self) -> &str {
-        match self {
-            Mode::Record => "record",
-        }
     }
 }
 

@@ -11,6 +11,9 @@ use wit_parser::{Resolve, WorldId};
 pub struct InstrumentArgs {
     /// The path to the wasm component file.
     wasm_file: PathBuf,
+    /// Instrumentation mode
+    #[arg(short, long, default_value("record"))]
+    mode: crate::Mode,
     /// Only apply proxy to the export interfaces.
     #[arg(short, long)]
     export_only: bool,
@@ -40,7 +43,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
 
     // 3. Parse the main wit file from tmp_dir/wit and feed into opts.generate_component
     let (resolve, world) = parse_wit(&wit_dir, None)?;
-    let opts = crate::ast::Opt::new();
+    let opts = crate::ast::Opt { mode: args.mode };
     let mut files = Files::default();
     opts.generate_component(&resolve, world, &mut files)?;
 

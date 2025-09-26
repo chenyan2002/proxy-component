@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 
 mod ast;
 mod instrument;
@@ -10,6 +10,11 @@ mod util;
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+}
+#[derive(ValueEnum, Clone)]
+pub enum Mode {
+    Record,
+    Replay,
 }
 
 #[derive(Parser)]
@@ -25,5 +30,14 @@ fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Instrument(args) => instrument::run(args),
         Commands::Run(args) => run::run(args),
+    }
+}
+
+impl Mode {
+    fn to_str(&self) -> &str {
+        match self {
+            Mode::Record => "record",
+            Mode::Replay => "replay",
+        }
     }
 }

@@ -1,13 +1,11 @@
 package proxy:recorder@0.1.0;
 
 interface %record {
-  %record: func(method: string, args: list<string>, ret: string);
+  record-args: func(method: option<string>, args: string, is-export: bool);
+  record-ret: func(method: option<string>, ret: string, is-export: bool);
 }
 
 interface replay {
-  replay: func(method: string, args: list<string>, ret: string);
+  replay: func(method: option<string>, assert-input: option<string>, is-export: bool) -> string;
 }
 
-world host {
-  import %record;
-}

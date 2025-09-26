@@ -1,7 +1,10 @@
 use clap::Parser;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use wasmtime::component::{Component, Linker, ResourceTable};
+use wasmtime::component::types::{ComponentFunc, ComponentItem as CItem};
+use wasmtime::component::wasm_wave::{untyped::UntypedFuncCall, wasm::WasmFunc};
+use wasmtime::component::{Component, Linker, ResourceTable, Val};
 use wasmtime::*;
 use wasmtime_wasi::p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView, add_to_linker_sync};
 
@@ -9,24 +12,75 @@ use wasmtime_wasi::p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView, add_to_linker
 pub struct RunArgs {
     /// The path to the wasm component file.
     wasm_file: PathBuf,
+    /// Invoke an exported function to record execution
+    #[arg(short, long)]
+    invoke: Option<String>,
 }
 
 mod bindings {
     wasmtime::component::bindgen!({
+        // TODO: change to assets/recorder.wit
         path: "wit",
         world: "host",
     });
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+enum FuncCall {
+    ExportArgs {
+        method: String,
+        args: String,
+    },
+    ExportRet {
+        method: Option<String>,
+        ret: String,
+    },
+    ImportArgs {
+        method: Option<String>,
+        args: String,
+    },
+    ImportRet {
+        method: Option<String>,
+        ret: String,
+    },
+}
+
 struct Logger {
     wasi_ctx: WasiCtx,
     resource_table: ResourceTable,
-    logger: VecDeque<(String, Vec<String>, String)>,
+    logger: VecDeque<FuncCall>,
 }
 impl bindings::proxy::recorder::record::Host for Logger {
-    fn record(&mut self, method: String, input: Vec<String>, output: String) {
-        println!("{method}: args: {input:?} ret: {output}");
-        self.logger.push_back((method, input, output));
+    fn record_args(&mut self, method: Option<String>, args: String, is_export: bool) {
+        let call = if is_export {
+            FuncCall::ExportArgs {
+                method: method.unwrap(),
+                args,
+            }
+        } else {
+            FuncCall::ImportArgs { method, args }
+        };
+        println!("{:?}", call);
+        self.logger.push_back(call);
+    }
+    fn record_ret(&mut self, method: Option<String>, ret: String, is_export: bool) {
+        let call = if is_export {
+            FuncCall::ExportRet { method, ret }
+        } else {
+            FuncCall::ImportRet { method, ret }
+        };
+        println!("{:?}", call);
+        self.logger.push_back(call);
+    }
+}
+impl bindings::proxy::recorder::replay::Host for Logger {
+    fn replay(
+        &mut self,
+        _method: Option<String>,
+        _assert_input: Option<String>,
+        _is_export: bool,
+    ) -> String {
+        todo!()
     }
 }
 impl bindings::docs::adder::add::Host for Logger {
@@ -52,13 +106,73 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
     let mut store = Store::new(&engine, state);
 
     let component = Component::from_file(&engine, args.wasm_file)?;
-    let bindings = bindings::Host_::instantiate(&mut store, &component, &linker)?;
-    use bindings::exports::docs::calculator::calculate::Op;
-    bindings
-        .docs_calculator_calculate()
-        .call_eval_expression(&mut store, Op::Add, 3, 4)?;
-    println!("Trace: {:?}", store.data().logger);
+    if let Some(invoke) = &args.invoke {
+        let untyped_call = UntypedFuncCall::parse(invoke)?;
+        let exports = collect_export_funcs(&engine, &component);
+        println!("Exported funcs: {exports:?}");
+        assert!(exports.len() == 1);
+        let (names, func_type) = &exports[0];
+        let export = names
+            .iter()
+            .fold(None, |instance, name| {
+                component.get_export_index(instance.as_ref(), name)
+            })
+            .unwrap();
+        let instance = linker.instantiate(&mut store, &component)?;
+
+        let param_types = WasmFunc::params(func_type).collect::<Vec<_>>();
+        let params = untyped_call.to_wasm_params(&param_types)?;
+        let func = instance.get_func(&mut store, export).unwrap();
+        let mut results = vec![Val::Bool(false); func_type.results().len()];
+        func.call(&mut store, &params, &mut results)?;
+        let trace = serde_json::to_string(&store.data().logger)?;
+        println!("{trace}");
+    }
     Ok(())
+}
+
+fn collect_exports(
+    engine: &Engine,
+    item: CItem,
+    basename: Vec<String>,
+) -> Vec<(Vec<String>, CItem)> {
+    match item {
+        CItem::Component(c) => c
+            .exports(engine)
+            .flat_map(move |(name, item)| {
+                let mut names = basename.clone();
+                names.push(name.to_string());
+                collect_exports(engine, item, names)
+            })
+            .collect(),
+        CItem::ComponentInstance(c) => c
+            .exports(engine)
+            .flat_map(move |(name, item)| {
+                let mut names = basename.clone();
+                names.push(name.to_string());
+                collect_exports(engine, item, names)
+            })
+            .collect(),
+        _ => vec![(basename, item)],
+    }
+}
+fn collect_export_funcs(
+    engine: &Engine,
+    component: &Component,
+) -> Vec<(Vec<String>, ComponentFunc)> {
+    collect_exports(
+        engine,
+        CItem::Component(component.component_type()),
+        Vec::new(),
+    )
+    .into_iter()
+    .filter_map(|(names, item)| {
+        let CItem::ComponentFunc(func) = item else {
+            return None;
+        };
+        Some((names, func))
+    })
+    .collect()
 }
 
 impl IoView for Logger {
