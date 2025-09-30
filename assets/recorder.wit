@@ -9,3 +9,7 @@ interface replay {
   replay: func(method: option<string>, assert-input: option<string>, is-export: bool) -> string;
 }
 
+interface start-replay {
+  start: func();
+}
+

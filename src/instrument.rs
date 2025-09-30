@@ -1,3 +1,4 @@
+use crate::Mode;
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::fs;
@@ -13,7 +14,7 @@ pub struct InstrumentArgs {
     wasm_file: PathBuf,
     /// Instrumentation mode
     #[arg(short, long, default_value("record"))]
-    mode: crate::Mode,
+    mode: Mode,
     /// Only apply proxy to the export interfaces.
     #[arg(short, long)]
     export_only: bool,
@@ -43,7 +44,9 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
 
     // 3. Parse the main wit file from tmp_dir/wit and feed into opts.generate_component
     let (resolve, world) = parse_wit(&wit_dir, None)?;
-    let opts = crate::ast::Opt { mode: args.mode };
+    let opts = crate::ast::Opt {
+        mode: args.mode.clone(),
+    };
     let mut files = Files::default();
     opts.generate_component(&resolve, world, &mut files)?;
 
@@ -63,10 +66,22 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
 
     // 5. Generate Rust binding for both import and export interface
     if !args.export_only {
-        bindgen(&tmp_dir, &wit_dir, "imports", "record_imports/lib.rs")?;
+        bindgen(
+            &tmp_dir,
+            &wit_dir,
+            &args.mode,
+            "imports",
+            "record_imports/lib.rs",
+        )?;
     }
     if !args.import_only {
-        bindgen(&tmp_dir, &wit_dir, "exports", "record_exports/lib.rs")?;
+        bindgen(
+            &tmp_dir,
+            &wit_dir,
+            &args.mode,
+            "exports",
+            "record_exports/lib.rs",
+        )?;
     }
 
     // 6. cargo build
@@ -151,12 +166,20 @@ fn parse_wit(dir: &Path, world: Option<&str>) -> Result<(Resolve, WorldId)> {
         .context("Failed to select a world from the parsed wit files")?;
     Ok((resolve, world))
 }
-fn bindgen(tmp_dir: &Path, wit_dir: &Path, world_name: &str, dest_name: &str) -> Result<()> {
+fn bindgen(
+    tmp_dir: &Path,
+    wit_dir: &Path,
+    mode: &Mode,
+    world_name: &str,
+    dest_name: &str,
+) -> Result<()> {
     // We could use `generate!` to make code simpler, but it increases build time.
     let mut opts = Opts::default();
-    let proxy_mode = match world_name {
-        "imports" => wit_bindgen_rust::ProxyMode::Import,
-        "exports" => wit_bindgen_rust::ProxyMode::Export,
+    let proxy_mode = match (mode, world_name) {
+        (Mode::Record, "imports") => wit_bindgen_rust::ProxyMode::RecordImport,
+        (Mode::Record, "exports") => wit_bindgen_rust::ProxyMode::RecordExport,
+        (Mode::Replay, "imports") => wit_bindgen_rust::ProxyMode::ReplayImport,
+        (Mode::Replay, "exports") => wit_bindgen_rust::ProxyMode::ReplayExport,
         _ => unreachable!(),
     };
     opts.proxy_component = Some(proxy_mode);

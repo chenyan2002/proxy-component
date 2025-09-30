@@ -15,6 +15,9 @@ pub struct RunArgs {
     /// Invoke an exported function to record execution
     #[arg(short, long)]
     invoke: Option<String>,
+    /// Replay a trace file
+    #[arg(short, long)]
+    trace: Option<PathBuf>,
 }
 
 mod bindings {
@@ -78,9 +81,22 @@ impl bindings::proxy::recorder::replay::Host for Logger {
         &mut self,
         _method: Option<String>,
         _assert_input: Option<String>,
-        _is_export: bool,
+        is_export: bool,
     ) -> String {
-        todo!()
+        let mut call = self.logger.pop_front().unwrap();
+        if is_export {
+            String::new()
+        } else {
+            while !matches!(call, FuncCall::ImportRet { .. }) {
+                println!("Skip {:?}", call);
+                call = self.logger.pop_front().unwrap();
+            }
+            let FuncCall::ImportRet { ret, .. } = call else {
+                unreachable!()
+            };
+            println!("ret: {ret}");
+            ret
+        }
     }
 }
 impl bindings::docs::adder::add::Host for Logger {
@@ -96,22 +112,31 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         logger
     })?;
     bindings::docs::adder::add::add_to_linker(&mut linker, |logger| logger)?;
+    bindings::proxy::recorder::replay::add_to_linker(&mut linker, |logger| logger)?;
     add_to_linker_sync(&mut linker)?;
     let wasi = WasiCtxBuilder::new().inherit_stdio().inherit_args().build();
-    let state = Logger {
+    let mut state = Logger {
         wasi_ctx: wasi,
         resource_table: ResourceTable::new(),
         logger: VecDeque::new(),
     };
-    let mut store = Store::new(&engine, state);
+    if let Some(path) = &args.trace {
+        let trace = std::fs::read_to_string(path)?;
+        let trace: VecDeque<FuncCall> = serde_json::from_str(&trace)?;
+        state.logger = trace;
+    }
 
+    let mut store = Store::new(&engine, state);
     let component = Component::from_file(&engine, args.wasm_file)?;
     if let Some(invoke) = &args.invoke {
         let untyped_call = UntypedFuncCall::parse(invoke)?;
         let exports = collect_export_funcs(&engine, &component);
         println!("Exported funcs: {exports:?}");
-        assert!(exports.len() == 1);
-        let (names, func_type) = &exports[0];
+        let mut find_export = exports.into_iter().filter_map(|(names, func)| {
+            let func_name = names.last().unwrap();
+            (func_name == untyped_call.name()).then_some((names, func))
+        });
+        let (names, func_type) = &find_export.next().unwrap();
         let export = names
             .iter()
             .fold(None, |instance, name| {
@@ -125,8 +150,10 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         let func = instance.get_func(&mut store, export).unwrap();
         let mut results = vec![Val::Bool(false); func_type.results().len()];
         func.call(&mut store, &params, &mut results)?;
-        let trace = serde_json::to_string(&store.data().logger)?;
-        println!("{trace}");
+        if args.trace.is_none() {
+            let trace = serde_json::to_string(&store.data().logger)?;
+            std::fs::write("trace.out", &trace)?;
+        }
     }
     Ok(())
 }

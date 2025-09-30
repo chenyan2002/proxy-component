@@ -4,7 +4,8 @@ resolver = "2"
 
 [workspace.dependencies]
 wit-bindgen-rt = "0.44.0"
-wasm-wave = { version = "0.239.0", default-features = false }
+#wasm-wave = { version = "0.239.0", default-features = false }
+wasm-wave = { path = "/Users/chenyan/src/bytecodealliance/wasm-tools/crates/wasm-wave", default-features = false }
 
 [profile.release]
 codegen-units = 1

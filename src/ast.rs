@@ -21,13 +21,20 @@ impl Opt {
             "import {recorder}{}@0.1.0;\n",
             ident(self.mode.to_str())
         ));
-        out.push_str("export proxy:conversion/conversion;\n");
+        if matches!(self.mode, Mode::Record) {
+            out.push_str("export proxy:conversion/conversion;\n");
+        }
         for (name, import) in &world.imports {
             match import {
                 WorldItem::Interface { .. } => {
                     let name = resolve.name_world_key(name);
-                    out.push_str(&format!("import {name};\n"));
-                    out.push_str(&format!("export wrapped-{name};\n"));
+                    match self.mode {
+                        Mode::Record => {
+                            out.push_str(&format!("import {name};\n"));
+                            out.push_str(&format!("export wrapped-{name};\n"));
+                        }
+                        Mode::Replay => out.push_str(&format!("export {name};\n")),
+                    }
                 }
                 _ => todo!(),
             }
@@ -38,11 +45,21 @@ impl Opt {
             match export {
                 WorldItem::Interface { .. } => {
                     let name = resolve.name_world_key(name);
-                    out.push_str(&format!("import wrapped-{name};\n"));
-                    out.push_str(&format!("export {name};\n"));
+                    match self.mode {
+                        Mode::Record => {
+                            out.push_str(&format!("import wrapped-{name};\n"));
+                            out.push_str(&format!("export {name};\n"));
+                        }
+                        Mode::Replay => {
+                            out.push_str(&format!("import {name};\n"));
+                        }
+                    }
                 }
                 _ => todo!(),
             }
+        }
+        if matches!(self.mode, Mode::Replay) {
+            out.push_str("export proxy:recorder/start-replay@0.1.0;\n")
         }
         out.push_str("}\n");
         files.push("component.wit", out.as_bytes());
@@ -58,7 +75,9 @@ impl Opt {
             "import {recorder}{}@0.1.0;\n",
             ident(self.mode.to_str())
         ));
-        out.push_str("import proxy:conversion/conversion;\n");
+        if matches!(self.mode, Mode::Record) {
+            out.push_str("import proxy:conversion/conversion;\n");
+        }
         for (name, import) in &world.imports {
             match import {
                 WorldItem::Interface { .. } => {
