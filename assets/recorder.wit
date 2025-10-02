@@ -7,7 +7,7 @@ interface %record {
 
 interface replay {
   replay-export: func() -> option<tuple<string, list<string>>>;
-  assert-export-ret: func(method: option<string>) -> option<option<string>>;
+  assert-export-ret: func(method: option<string>, ret: option<string>);
   replay-import: func(method: option<string>, args: option<list<string>>) -> option<string>;
 }
 

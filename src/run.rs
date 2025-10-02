@@ -85,18 +85,16 @@ impl bindings::proxy::recorder::replay::Host for Logger {
         println!("export call: {method}({args:?})");
         Some((method, args))
     }
-    fn assert_export_ret(&mut self, assert_method: Option<String>) -> Option<Option<String>> {
-        if let FuncCall::ExportRet { .. } = self.logger.get(0)? {
+    fn assert_export_ret(&mut self, assert_method: Option<String>, assert_ret: Option<String>) {
+        if let Some(FuncCall::ExportRet { .. }) = self.logger.get(0) {
             let FuncCall::ExportRet { method, ret } = self.logger.pop_front().unwrap() else {
                 panic!()
             };
             if let (Some(method), Some(assert_method)) = (method, assert_method) {
                 assert_eq!(method, assert_method);
             }
+            assert_eq!(ret, assert_ret);
             println!("export ret: {ret:?}");
-            Some(ret)
-        } else {
-            None
         }
     }
     fn replay_import(
