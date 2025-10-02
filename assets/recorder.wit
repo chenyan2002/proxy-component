@@ -1,12 +1,14 @@
 package proxy:recorder@0.1.0;
 
 interface %record {
-  record-args: func(method: option<string>, args: string, is-export: bool);
-  record-ret: func(method: option<string>, ret: string, is-export: bool);
+  record-args: func(method: option<string>, args: list<string>, is-export: bool);
+  record-ret: func(method: option<string>, ret: option<string>, is-export: bool);
 }
 
 interface replay {
-  replay: func(method: option<string>, assert-input: option<string>, is-export: bool) -> string;
+  replay-export: func() -> option<tuple<string, list<string>>>;
+  assert-export-ret: func(method: option<string>) -> option<option<string>>;
+  replay-import: func(method: option<string>, args: option<list<string>>) -> option<string>;
 }
 
 interface start-replay {

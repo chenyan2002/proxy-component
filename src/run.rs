@@ -32,19 +32,19 @@ mod bindings {
 enum FuncCall {
     ExportArgs {
         method: String,
-        args: String,
+        args: Vec<String>,
     },
     ExportRet {
         method: Option<String>,
-        ret: String,
+        ret: Option<String>,
     },
     ImportArgs {
         method: Option<String>,
-        args: String,
+        args: Vec<String>,
     },
     ImportRet {
         method: Option<String>,
-        ret: String,
+        ret: Option<String>,
     },
 }
 
@@ -54,7 +54,7 @@ struct Logger {
     logger: VecDeque<FuncCall>,
 }
 impl bindings::proxy::recorder::record::Host for Logger {
-    fn record_args(&mut self, method: Option<String>, args: String, is_export: bool) {
+    fn record_args(&mut self, method: Option<String>, args: Vec<String>, is_export: bool) {
         let call = if is_export {
             FuncCall::ExportArgs {
                 method: method.unwrap(),
@@ -66,7 +66,7 @@ impl bindings::proxy::recorder::record::Host for Logger {
         println!("{:?}", call);
         self.logger.push_back(call);
     }
-    fn record_ret(&mut self, method: Option<String>, ret: String, is_export: bool) {
+    fn record_ret(&mut self, method: Option<String>, ret: Option<String>, is_export: bool) {
         let call = if is_export {
             FuncCall::ExportRet { method, ret }
         } else {
@@ -77,26 +77,40 @@ impl bindings::proxy::recorder::record::Host for Logger {
     }
 }
 impl bindings::proxy::recorder::replay::Host for Logger {
-    fn replay(
+    fn replay_export(&mut self) -> Option<(String, Vec<String>)> {
+        let call = self.logger.pop_front()?;
+        let FuncCall::ExportArgs { method, args } = call else {
+            panic!()
+        };
+        println!("export call: {method}({args:?})");
+        Some((method, args))
+    }
+    fn assert_export_ret(&mut self, _method: Option<String>) -> Option<Option<String>> {
+        if let FuncCall::ExportRet { .. } = self.logger.get(0)? {
+            let FuncCall::ExportRet { method, ret } = self.logger.pop_front().unwrap() else {
+                panic!()
+            };
+            println!("assert ret: {ret:?}");
+            Some(ret)
+        } else {
+            None
+        }
+    }
+    fn replay_import(
         &mut self,
         _method: Option<String>,
-        _assert_input: Option<String>,
-        is_export: bool,
-    ) -> String {
+        _args: Option<Vec<String>>,
+    ) -> Option<String> {
         let mut call = self.logger.pop_front().unwrap();
-        if is_export {
-            String::new()
-        } else {
-            while !matches!(call, FuncCall::ImportRet { .. }) {
-                println!("Skip {:?}", call);
-                call = self.logger.pop_front().unwrap();
-            }
-            let FuncCall::ImportRet { ret, .. } = call else {
-                unreachable!()
-            };
-            println!("ret: {ret}");
-            ret
+        if let FuncCall::ImportArgs { .. } = call {
+            println!("skip import: {call:?}");
+            call = self.logger.pop_front().unwrap();
         }
+        let FuncCall::ImportRet { ret, .. } = call else {
+            panic!()
+        };
+        println!("ret: {ret:?}");
+        ret
     }
 }
 impl bindings::docs::adder::add::Host for Logger {
@@ -108,11 +122,7 @@ impl bindings::docs::adder::add::Host for Logger {
 pub fn run(args: RunArgs) -> anyhow::Result<()> {
     let engine = Engine::default();
     let mut linker = Linker::<Logger>::new(&engine);
-    bindings::proxy::recorder::record::add_to_linker::<Logger, Logger>(&mut linker, |logger| {
-        logger
-    })?;
     bindings::docs::adder::add::add_to_linker(&mut linker, |logger| logger)?;
-    bindings::proxy::recorder::replay::add_to_linker(&mut linker, |logger| logger)?;
     add_to_linker_sync(&mut linker)?;
     let wasi = WasiCtxBuilder::new().inherit_stdio().inherit_args().build();
     let mut state = Logger {
@@ -121,9 +131,14 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         logger: VecDeque::new(),
     };
     if let Some(path) = &args.trace {
+        bindings::proxy::recorder::replay::add_to_linker(&mut linker, |logger| logger)?;
         let trace = std::fs::read_to_string(path)?;
-        let trace: VecDeque<FuncCall> = serde_json::from_str(&trace)?;
-        state.logger = trace;
+        state.logger = serde_json::from_str(&trace)?;
+    } else {
+        bindings::proxy::recorder::record::add_to_linker::<Logger, Logger>(
+            &mut linker,
+            |logger| logger,
+        )?;
     }
 
     let mut store = Store::new(&engine, state);
@@ -131,7 +146,7 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
     if let Some(invoke) = &args.invoke {
         let untyped_call = UntypedFuncCall::parse(invoke)?;
         let exports = collect_export_funcs(&engine, &component);
-        println!("Exported funcs: {exports:?}");
+        //println!("Exported funcs: {exports:?}");
         let mut find_export = exports.into_iter().filter_map(|(names, func)| {
             let func_name = names.last().unwrap();
             (func_name == untyped_call.name()).then_some((names, func))
