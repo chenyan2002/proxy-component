@@ -1,0 +1,9 @@
+package wasi:io;
+
+interface io {
+  resource handle {
+    get: static func() -> handle;
+    write: func(x: string);
+  }
+}
+

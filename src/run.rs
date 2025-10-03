@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use wasmtime::component::types::{ComponentFunc, ComponentItem as CItem};
 use wasmtime::component::wasm_wave::{untyped::UntypedFuncCall, wasm::WasmFunc};
-use wasmtime::component::{Component, Linker, ResourceTable, Val};
+use wasmtime::component::{Component, Linker, Resource, ResourceTable, Val};
 use wasmtime::*;
 use wasmtime_wasi::p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView, add_to_linker_sync};
 
@@ -20,11 +20,15 @@ pub struct RunArgs {
     trace: Option<PathBuf>,
 }
 
+pub struct Handle;
 mod bindings {
     wasmtime::component::bindgen!({
         // TODO: change to assets/recorder.wit
         path: "wit",
         world: "host",
+        with: {
+            "wasi:io/io/handle": crate::run::Handle,
+        }
     });
 }
 
@@ -125,11 +129,20 @@ impl bindings::docs::adder::add::Host for Logger {
         a + b
     }
 }
+impl bindings::wasi::io::io::HostHandle for Logger {
+    fn get(&mut self) -> Resource<Handle> {
+        self.resource_table.push(Handle).unwrap()
+    }
+    fn write(&mut self, _: Resource<Handle>, _: String) {}
+    fn drop(&mut self, _: Resource<Handle>) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+}
+impl bindings::wasi::io::io::Host for Logger {}
 
 pub fn run(args: RunArgs) -> anyhow::Result<()> {
     let engine = Engine::default();
     let mut linker = Linker::<Logger>::new(&engine);
-    bindings::docs::adder::add::add_to_linker(&mut linker, |logger| logger)?;
     add_to_linker_sync(&mut linker)?;
     let wasi = WasiCtxBuilder::new().inherit_stdio().inherit_args().build();
     let mut state = Logger {
@@ -142,10 +155,12 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         let trace = std::fs::read_to_string(path)?;
         state.logger = serde_json::from_str(&trace)?;
     } else {
+        bindings::docs::adder::add::add_to_linker(&mut linker, |logger| logger)?;
         bindings::proxy::recorder::record::add_to_linker::<Logger, Logger>(
             &mut linker,
             |logger| logger,
         )?;
+        bindings::wasi::io::io::add_to_linker(&mut linker, |logger| logger)?;
     }
 
     let mut store = Store::new(&engine, state);
