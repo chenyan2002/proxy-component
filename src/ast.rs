@@ -2,6 +2,7 @@ use crate::Mode;
 use crate::util::*;
 use anyhow::Result;
 use std::collections::BTreeMap;
+use std::path::Path;
 use wit_bindgen_core::{Files, Source, wit_parser};
 use wit_component::WitPrinter;
 use wit_parser::*;
@@ -63,8 +64,6 @@ impl Opt {
         files.push("component.wit", out.as_bytes());
     }
     pub fn generate_exports_world(&self, resolve: &Resolve, id: WorldId, files: &mut Files) {
-        let mut cnt_imports = 0;
-        let mut cnt_exports = 0;
         let mut out = Source::default();
         let world = &resolve.worlds[id];
         let recorder = "proxy:recorder/";
@@ -77,7 +76,6 @@ impl Opt {
         for (name, import) in &world.imports {
             match import {
                 WorldItem::Interface { .. } => {
-                    cnt_imports += 1;
                     let name = resolve.name_world_key(name);
                     out.push_str(&format!("import {name};\n"));
                 }
@@ -87,7 +85,6 @@ impl Opt {
         for (name, export) in &world.exports {
             match export {
                 WorldItem::Interface { .. } => {
-                    cnt_exports += 1;
                     let name = resolve.name_world_key(name);
                     out.push_str(&format!("export {name};\n"));
                 }
@@ -96,17 +93,14 @@ impl Opt {
         }
         out.push_str("}\n");
         files.push("component.wit", out.as_bytes());
-        let extra_imports = cnt_imports - cnt_exports;
-        assert!(extra_imports >= 0);
-        out = Source::default();
-        if extra_imports > 0 {
-            out.push_str("...imports, ");
-        }
-        out.push_str("... };\n");
-        out.push_str("export final...;\n");
-        files.push("compose.wac", out.as_bytes());
     }
-    fn generate_wac(&self, resolve: &Resolve, id: WorldId, files: &mut Files) {
+    pub fn generate_wac(
+        &self,
+        resolve: &Resolve,
+        id: WorldId,
+        exports_wasm: &Path,
+        out_dir: &Path,
+    ) {
         let mut out = Source::default();
         let world = &resolve.worlds[id];
         out.push_str(
@@ -142,7 +136,14 @@ let main = new root:component { "#,
                 _ => todo!(),
             }
         }
-        files.push("compose.wac", out.as_bytes());
+        // proxy:conversion can be DCE'ed, so we need to look at the generated wasm to make sure.
+        let has_conversion = has_conversion_import(exports_wasm).unwrap();
+        if has_conversion {
+            out.push_str("...imports, ");
+        }
+        out.push_str("... };\n");
+        out.push_str("export final...;\n");
+        std::fs::write(out_dir.join("compose.wac"), out.as_bytes()).unwrap();
     }
     pub fn generate_component(
         &self,
@@ -155,7 +156,6 @@ let main = new root:component { "#,
             "deps/recorder.wit",
             include_str!("../assets/recorder.wit").as_bytes(),
         );
-        self.generate_wac(resolve, id, files);
         Ok(())
     }
 
@@ -232,4 +232,26 @@ let main = new root:component { "#,
         }
         Ok(())
     }
+}
+
+fn has_conversion_import(file: &Path) -> Result<bool> {
+    use wit_parser::decoding::{DecodedWasm, decode};
+    let bytes = std::fs::read(file)?;
+    let DecodedWasm::Component(resolve, id) = decode(&bytes)? else {
+        panic!()
+    };
+    let world = &resolve.worlds[id];
+    let mut has_conversion = false;
+    for (name, import) in &world.imports {
+        match import {
+            WorldItem::Interface { .. } => {
+                let name = resolve.name_world_key(name);
+                if name == "proxy:conversion/conversion" {
+                    has_conversion = true;
+                }
+            }
+            _ => (),
+        }
+    }
+    Ok(has_conversion)
 }

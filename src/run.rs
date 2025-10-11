@@ -51,6 +51,21 @@ enum FuncCall {
         ret: Option<String>,
     },
 }
+impl FuncCall {
+    fn to_string(&self) -> String {
+        match self {
+            FuncCall::ExportArgs { method, args } => format!("{method}({})", args.join(", ")),
+            FuncCall::ImportArgs { method, args } => format!(
+                "{}({})",
+                method.as_deref().unwrap_or("<unknown>"),
+                args.join(", ")
+            ),
+            FuncCall::ExportRet { ret, .. } | FuncCall::ImportRet { ret, .. } => {
+                ret.as_deref().unwrap_or("()").to_owned()
+            }
+        }
+    }
+}
 
 struct Logger {
     wasi_ctx: WasiCtx,
@@ -67,7 +82,7 @@ impl bindings::proxy::recorder::record::Host for Logger {
         } else {
             FuncCall::ImportArgs { method, args }
         };
-        println!("{:?}", call);
+        println!("call: {}", call.to_string());
         self.logger.push_back(call);
     }
     fn record_ret(&mut self, method: Option<String>, ret: Option<String>, is_export: bool) {
@@ -76,29 +91,30 @@ impl bindings::proxy::recorder::record::Host for Logger {
         } else {
             FuncCall::ImportRet { method, ret }
         };
-        println!("{:?}", call);
+        println!("ret: {}", call.to_string());
         self.logger.push_back(call);
     }
 }
 impl bindings::proxy::recorder::replay::Host for Logger {
     fn replay_export(&mut self) -> Option<(String, Vec<String>)> {
         let call = self.logger.pop_front()?;
+        println!("export call: {}", call.to_string());
         let FuncCall::ExportArgs { method, args } = call else {
             panic!()
         };
-        println!("export call: {method}({args:?})");
         Some((method, args))
     }
     fn assert_export_ret(&mut self, assert_method: Option<String>, assert_ret: Option<String>) {
         if let Some(FuncCall::ExportRet { .. }) = self.logger.get(0) {
-            let FuncCall::ExportRet { method, ret } = self.logger.pop_front().unwrap() else {
+            let call = self.logger.pop_front().unwrap();
+            println!("export ret: {}", call.to_string());
+            let FuncCall::ExportRet { method, ret } = call else {
                 panic!()
             };
             if let (Some(method), Some(assert_method)) = (method, assert_method) {
                 assert_eq!(method, assert_method);
             }
             assert_eq!(ret, assert_ret);
-            println!("export ret: {ret:?}");
         }
     }
     fn replay_import(
@@ -114,13 +130,13 @@ impl bindings::proxy::recorder::replay::Host for Logger {
             if let Some(assert_args) = assert_args {
                 assert_eq!(args, &assert_args);
             }
-            println!("import call: {method:?}({args:?})");
+            println!("import call: {}", call.to_string());
             call = self.logger.pop_front().unwrap();
         }
+        println!("import ret: {}", call.to_string());
         let FuncCall::ImportRet { ret, .. } = call else {
             panic!()
         };
-        println!("import ret: {ret:?}");
         ret
     }
 }

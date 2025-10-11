@@ -54,8 +54,8 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         std::fs::write(&path, content)?;
     }
     // Re-generate exports world to bring in extra imports
-    let (resolve, world) = parse_wit(&wit_dir, Some("tmp-exports"))?;
-    opts.generate_exports_world(&resolve, world, &mut files);
+    let (export_resolve, export_world) = parse_wit(&wit_dir, Some("tmp-exports"))?;
+    opts.generate_exports_world(&export_resolve, export_world, &mut files);
     for (name, content) in files.iter() {
         let path = wit_dir.as_path().join(name);
         eprintln!("Generating: {}", path.display());
@@ -108,6 +108,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     };
 
     // 7. run wac
+    opts.generate_wac(&resolve, world, &exports_wasm_path, &wit_dir);
     let output_file = "composed.wasm";
     if args.export_only {
         let status = Command::new("wac")
