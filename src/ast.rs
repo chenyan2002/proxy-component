@@ -21,9 +21,7 @@ impl Opt {
             "import {recorder}{}@0.1.0;\n",
             ident(self.mode.to_str())
         ));
-        if matches!(self.mode, Mode::Record) {
-            out.push_str("export proxy:conversion/conversion;\n");
-        }
+        out.push_str("export proxy:conversion/conversion;\n");
         for (name, import) in &world.imports {
             match import {
                 WorldItem::Interface { .. } => {
@@ -75,9 +73,7 @@ impl Opt {
             "import {recorder}{}@0.1.0;\n",
             ident(self.mode.to_str())
         ));
-        if matches!(self.mode, Mode::Record) {
-            out.push_str("import proxy:conversion/conversion;\n");
-        }
+        out.push_str("import proxy:conversion/conversion;\n");
         for (name, import) in &world.imports {
             match import {
                 WorldItem::Interface { .. } => {
@@ -162,68 +158,78 @@ let main = new root:component { "#,
         self.generate_wac(resolve, id, files);
         Ok(())
     }
-}
 
-pub fn generate_wrapped_wits(dir: &std::path::Path) -> Result<()> {
-    let mut resolve = Resolve::default();
-    let (main_id, _files) = resolve.push_dir(dir)?;
-    // Generate conversion interface. Not updating resolve to avoid deep cloning the packages.
-    let mut resources = BTreeMap::new();
-    for (_, iface) in resolve
-        .interfaces
-        .iter()
-        .filter(|(_, iface)| iface.package.is_some_and(|id| id != main_id) && iface.name.is_some())
-    {
-        let pkg_id = iface.package.unwrap();
-        let pkg_name = &resolve.packages[pkg_id].name;
-        let iface_name = iface.name.as_ref().unwrap();
-        for (ty_name, ty_id) in iface.types.iter() {
-            let ty = &resolve.types[*ty_id];
-            if matches!(ty.kind, TypeDefKind::Resource) {
-                let mut resource =
-                    format!("{}:{}/{}", pkg_name.namespace, pkg_name.name, iface_name);
-                if let Some(ver) = &pkg_name.version {
-                    resource.push_str(&format!("@{ver}"));
+    pub fn generate_wrapped_wits(&self, dir: &std::path::Path) -> Result<()> {
+        let mut resolve = Resolve::default();
+        let (main_id, _files) = resolve.push_dir(dir)?;
+        // Generate conversion interface. Not updating resolve to avoid deep cloning the packages.
+        let mut resources = BTreeMap::new();
+        for (_, iface) in resolve.interfaces.iter().filter(|(_, iface)| {
+            iface.package.is_some_and(|id| id != main_id) && iface.name.is_some()
+        }) {
+            let pkg_id = iface.package.unwrap();
+            let pkg_name = &resolve.packages[pkg_id].name;
+            let iface_name = iface.name.as_ref().unwrap();
+            for (ty_name, ty_id) in iface.types.iter() {
+                let ty = &resolve.types[*ty_id];
+                if matches!(ty.kind, TypeDefKind::Resource) {
+                    let mut resource =
+                        format!("{}:{}/{}", pkg_name.namespace, pkg_name.name, iface_name);
+                    if let Some(ver) = &pkg_name.version {
+                        resource.push_str(&format!("@{ver}"));
+                    }
+                    assert!(resources.insert(ty_name, resource).is_none());
                 }
-                resources.insert(ty_name, resource);
             }
         }
+        let mut out = Source::default();
+        out.push_str("package proxy:conversion;\ninterface conversion {");
+        for (resource, iface) in resources.into_iter() {
+            match self.mode {
+                Mode::Record => {
+                    out.push_str(&format!(
+                        "\nuse {iface}.{{{resource} as host-{resource}}};\n",
+                    ));
+                    out.push_str(&format!(
+                        "use wrapped-{iface}.{{{resource} as wrapped-{resource}}};\n",
+                    ));
+                    out.push_str(&format!(
+                        "get-wrapped-{resource}: func(x: host-{resource}) -> wrapped-{resource};\n",
+                    ));
+                }
+                Mode::Replay => {
+                    out.push_str(&format!("\nuse {iface}.{{{resource}}};\n"));
+                    out.push_str(&format!(
+                        "get-{resource}: func(handle: u32) -> {resource};\n"
+                    ));
+                }
+            }
+        }
+        out.push_str("}\n");
+        std::fs::write(dir.join("deps").join("conversion.wit"), out.as_bytes())?;
+        if matches!(self.mode, Mode::Record) {
+            // rename package name and generate wrapped wit
+            resolve.package_names = resolve
+                .package_names
+                .into_iter()
+                .map(|(mut name, id)| {
+                    name.namespace = "wrapped-".to_string() + &name.namespace;
+                    (name, id)
+                })
+                .collect();
+            for (_, pkg) in resolve.packages.iter_mut() {
+                pkg.name.namespace = "wrapped-".to_string() + &pkg.name.namespace;
+            }
+            for (id, pkg) in resolve.packages.iter().filter(|(id, _)| *id != main_id) {
+                let mut printer = WitPrinter::default();
+                printer.print_package(&resolve, id, true)?;
+                std::fs::write(
+                    dir.join("deps")
+                        .join(format!("wrapped-{}.wit", pkg.name.name)),
+                    printer.output.to_string(),
+                )?;
+            }
+        }
+        Ok(())
     }
-    let mut out = Source::default();
-    out.push_str("package proxy:conversion;\ninterface conversion {");
-    for (resource, iface) in resources.into_iter() {
-        out.push_str(&format!(
-            "\nuse {iface}.{{{resource} as host-{resource}}};\n",
-        ));
-        out.push_str(&format!(
-            "use wrapped-{iface}.{{{resource} as wrapped-{resource}}};\n",
-        ));
-        out.push_str(&format!(
-            "get-wrapped-{resource}: func(x: host-{resource}) -> wrapped-{resource};\n",
-        ));
-    }
-    out.push_str("}\n");
-    std::fs::write(dir.join("deps").join("conversion.wit"), out.as_bytes())?;
-    // rename package name
-    resolve.package_names = resolve
-        .package_names
-        .into_iter()
-        .map(|(mut name, id)| {
-            name.namespace = "wrapped-".to_string() + &name.namespace;
-            (name, id)
-        })
-        .collect();
-    for (_, pkg) in resolve.packages.iter_mut() {
-        pkg.name.namespace = "wrapped-".to_string() + &pkg.name.namespace;
-    }
-    for (id, pkg) in resolve.packages.iter().filter(|(id, _)| *id != main_id) {
-        let mut printer = WitPrinter::default();
-        printer.print_package(&resolve, id, true)?;
-        std::fs::write(
-            dir.join("deps")
-                .join(format!("wrapped-{}.wit", pkg.name.name)),
-            printer.output.to_string(),
-        )?;
-    }
-    Ok(())
 }

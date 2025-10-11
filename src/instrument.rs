@@ -39,14 +39,12 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         .context("Failed to execute wasm-tools. Is it installed and in your PATH?")?;
     assert!(status.success());
 
-    //let wit_deps = wit_dir.join("deps");
-    crate::ast::generate_wrapped_wits(&wit_dir)?;
-
     // 3. Parse the main wit file from tmp_dir/wit and feed into opts.generate_component
     let (resolve, world) = parse_wit(&wit_dir, None)?;
     let opts = crate::ast::Opt {
         mode: args.mode.clone(),
     };
+    opts.generate_wrapped_wits(&wit_dir)?;
     let mut files = Files::default();
     opts.generate_component(&resolve, world, &mut files)?;
 
