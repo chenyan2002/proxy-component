@@ -178,13 +178,16 @@ let main = new root:component { "#,
                     if let Some(ver) = &pkg_name.version {
                         resource.push_str(&format!("@{ver}"));
                     }
-                    assert!(resources.insert(ty_name, resource).is_none());
+                    assert!(resources.insert(*ty_id, (ty_name, resource)).is_none());
                 }
             }
         }
         let mut out = Source::default();
         out.push_str("package proxy:conversion;\ninterface conversion {");
-        for (resource, iface) in resources.into_iter() {
+        for (resource, iface) in resources.into_values() {
+            //use heck::ToKebabCase;
+            //let func_name = format!("{iface}-{resource}").to_kebab_case();
+            let func_name = resource.clone();
             match self.mode {
                 Mode::Record => {
                     out.push_str(&format!(
@@ -194,13 +197,13 @@ let main = new root:component { "#,
                         "use wrapped-{iface}.{{{resource} as wrapped-{resource}}};\n",
                     ));
                     out.push_str(&format!(
-                        "get-wrapped-{resource}: func(x: host-{resource}) -> wrapped-{resource};\n",
+                        "get-wrapped-{func_name}: func(x: host-{resource}) -> wrapped-{resource};\n",
                     ));
                 }
                 Mode::Replay => {
                     out.push_str(&format!("\nuse {iface}.{{{resource}}};\n"));
                     out.push_str(&format!(
-                        "get-{resource}: func(handle: u32) -> {resource};\n"
+                        "get-{func_name}: func(handle: u32) -> {resource};\n"
                     ));
                 }
             }
