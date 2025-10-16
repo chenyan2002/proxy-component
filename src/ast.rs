@@ -106,32 +106,29 @@ impl Opt {
         out.push_str(
             r#"package component:composed;
 let imports = new import:proxy { ... };
-let main = new root:component { "#,
+let main = new root:component {
+"#,
         );
+        let prefix = match self.mode {
+            Mode::Record => "wrapped-",
+            Mode::Replay => "",
+        };
         for (name, import) in &world.imports {
             match import {
                 WorldItem::Interface { .. } => {
                     let name = resolve.name_world_key(name);
-                    let idx = name.find('/').unwrap();
-                    let end = name.rfind('@').unwrap_or(name.len());
-                    assert!(idx < end);
-                    let name = &name[idx + 1..end];
-                    out.push_str(&format!("{name}: imports.{name}, "));
+                    out.push_str(&format!("\"{name}\": imports[\"{prefix}{name}\"],\n"));
                 }
                 _ => todo!(),
             }
         }
-        out.push_str(" };\n");
-        out.push_str("let final = new export:proxy { ");
+        out.push_str("};\n");
+        out.push_str("let final = new export:proxy {\n");
         for (name, import) in &world.exports {
             match import {
                 WorldItem::Interface { .. } => {
                     let name = resolve.name_world_key(name);
-                    let idx = name.find('/').unwrap();
-                    let end = name.rfind('@').unwrap_or(name.len());
-                    assert!(idx < end);
-                    let name = &name[idx + 1..end];
-                    out.push_str(&format!("{name}: main.{name}, "));
+                    out.push_str(&format!("\"{prefix}{name}\": main[\"{name}\"],\n"));
                 }
                 _ => todo!(),
             }
@@ -139,9 +136,9 @@ let main = new root:component { "#,
         // proxy:conversion can be DCE'ed, so we need to look at the generated wasm to make sure.
         let has_conversion = has_conversion_import(exports_wasm).unwrap();
         if has_conversion {
-            out.push_str("...imports, ");
+            out.push_str("...imports,\n");
         }
-        out.push_str("... };\n");
+        out.push_str("...\n};\n");
         out.push_str("export final...;\n");
         std::fs::write(out_dir.join("compose.wac"), out.as_bytes()).unwrap();
     }
