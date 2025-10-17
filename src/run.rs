@@ -156,8 +156,13 @@ impl bindings::wasi::io::io::HostHandle for Logger {
 }
 impl bindings::wasi::io::io::Host for Logger {}
 
+const MAX_FUEL: u64 = u64::MAX;
+
 pub fn run(args: RunArgs) -> anyhow::Result<()> {
-    let engine = Engine::default();
+    let mut config = Config::new();
+    config.consume_fuel(true);
+    let engine = Engine::new(&config)?;
+
     let mut linker = Linker::<Logger>::new(&engine);
     add_to_linker_sync(&mut linker)?;
     let wasi = WasiCtxBuilder::new().inherit_stdio().inherit_args().build();
@@ -180,6 +185,7 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
     }
 
     let mut store = Store::new(&engine, state);
+    store.set_fuel(MAX_FUEL)?;
     let component = Component::from_file(&engine, args.wasm_file)?;
     if let Some(invoke) = &args.invoke {
         let untyped_call = UntypedFuncCall::parse(invoke)?;
@@ -208,6 +214,8 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
             std::fs::write("trace.out", &trace)?;
         }
     }
+    let fuel = MAX_FUEL - store.get_fuel()?;
+    println!("Executed {fuel} Wasm instructions.");
     Ok(())
 }
 
