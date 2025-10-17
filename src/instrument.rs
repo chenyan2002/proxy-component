@@ -161,7 +161,7 @@ fn parse_wit(dir: &Path, world: Option<&str>) -> Result<(Resolve, WorldId)> {
         .with_context(|| format!("Failed to parse wit files in {}", dir.display()))?;
 
     let world = resolve
-        .select_world(pkg, world)
+        .select_world(&[pkg], world)
         .context("Failed to select a world from the parsed wit files")?;
     Ok((resolve, world))
 }
