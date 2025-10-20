@@ -71,6 +71,7 @@ struct Logger {
     wasi_ctx: WasiCtx,
     resource_table: ResourceTable,
     logger: VecDeque<FuncCall>,
+    exit_called: bool,
 }
 impl bindings::proxy::recorder::record::Host for Logger {
     fn record_args(&mut self, method: Option<String>, args: Vec<String>, is_export: bool) {
@@ -138,6 +139,13 @@ impl bindings::proxy::recorder::replay::Host for Logger {
                 assert_eq!(args, assert_args);
             }
             println!("import call: {}", call.to_string());
+            if method
+                .as_ref()
+                .is_some_and(|m| m.starts_with("wasi:cli/exit"))
+            {
+                self.exit_called = true;
+                return Some("Something that can crash".to_string());
+            }
             call = self.logger.pop_front().unwrap();
         }
         println!("import ret: {}", call.to_string());
@@ -167,7 +175,8 @@ const MAX_FUEL: u64 = u64::MAX;
 
 pub fn run(args: RunArgs) -> anyhow::Result<()> {
     let mut config = Config::new();
-    config.consume_fuel(true)
+    config
+        .consume_fuel(true)
         //.debug_info(true)
         .wasm_backtrace_details(WasmBacktraceDetails::Enable);
     let engine = Engine::new(&config)?;
@@ -179,6 +188,7 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         wasi_ctx: wasi,
         resource_table: ResourceTable::new(),
         logger: VecDeque::new(),
+        exit_called: false,
     };
     if let Some(path) = &args.trace {
         bindings::proxy::recorder::replay::add_to_linker(&mut linker, |logger| logger)?;
@@ -217,7 +227,16 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         let params = untyped_call.to_wasm_params(&param_types)?;
         let func = instance.get_func(&mut store, export).unwrap();
         let mut results = vec![Val::Bool(false); func_type.results().len()];
-        func.call(&mut store, &params, &mut results)?;
+        match func.call(&mut store, &params, &mut results) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if store.data().exit_called {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            }
+        }?;
         if args.trace.is_none() {
             let trace = serde_json::to_string(&store.data().logger)?;
             std::fs::write("trace.out", &trace)?;
