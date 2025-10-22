@@ -15,7 +15,7 @@ In the future, we can apply the same technique to other use cases, such as servi
 ```
 $ cargo run instrument -m record <component.wasm>
 ```
-Run `composed.wasm` in the host runtime the original wasm is supposed to run. The runtime also needs to implement 
+Run `composed.wasm` in the host runtime which the original wasm is supposed to run. The runtime also needs to implement 
 the [`record` interface](https://github.com/chenyan2002/proxy-component/blob/main/assets/recorder.wit#L3). See this [example PR](https://github.com/fastly/Viceroy/pull/546).
 
 In the future, we can make the `record` interface as a component, so that we don't need to make any changes to the host runtime.
@@ -35,3 +35,10 @@ in a regular `wasmtime` without the host interface.
 Another interesting use case is that we can replay the trace with a different Wasm binary, likely with a different compiler flag, or
 a different optimization strategy, to compare the performance. We have assertions in the replay phase to make sure that the trace
 is still valid with the new binary.
+
+## Prerequisite
+
+* rustup target add wasm32-unknown-unknown
+* wasm-tools
+* wit-bindgen
+* wac
