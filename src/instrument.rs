@@ -130,7 +130,7 @@ fn bindgen(
         .status()?;
     assert!(status.success());
     let binding_file = out_dir.join(world_name.to_owned() + ".rs");
-    crate::analyze::analyze(&binding_file, "fastly::compute::http_body::write")?;
+    crate::analyze::analyze(&binding_file)?;
     Ok(())
 }
 fn component_new(
