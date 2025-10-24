@@ -1,6 +1,6 @@
 use clap::{Parser, ValueEnum};
 
-mod analyze;
+mod codegen;
 mod ast;
 mod instrument;
 mod run;
