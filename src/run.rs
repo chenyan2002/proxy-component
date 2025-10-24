@@ -4,9 +4,9 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use wasmtime::component::types::{ComponentFunc, ComponentItem as CItem};
 use wasmtime::component::wasm_wave::{untyped::UntypedFuncCall, wasm::WasmFunc};
-use wasmtime::component::{Component, Linker, Resource, ResourceTable, Val};
+use wasmtime::component::{Component, HasSelf, Linker, Resource, ResourceTable, Val};
 use wasmtime::*;
-use wasmtime_wasi::p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView, add_to_linker_sync};
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView, p2::add_to_linker_sync};
 
 #[derive(Parser)]
 pub struct RunArgs {
@@ -191,16 +191,18 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         exit_called: false,
     };
     if let Some(path) = &args.trace {
-        bindings::proxy::recorder::replay::add_to_linker(&mut linker, |logger| logger)?;
+        bindings::proxy::recorder::replay::add_to_linker::<_, HasSelf<_>>(&mut linker, |logger| {
+            logger
+        })?;
         let trace = std::fs::read_to_string(path)?;
         state.logger = serde_json::from_str(&trace)?;
     } else {
-        bindings::docs::adder::add::add_to_linker(&mut linker, |logger| logger)?;
-        bindings::proxy::recorder::record::add_to_linker::<Logger, Logger>(
+        bindings::docs::adder::add::add_to_linker::<_, HasSelf<_>>(&mut linker, |logger| logger)?;
+        bindings::proxy::recorder::record::add_to_linker::<Logger, HasSelf<Logger>>(
             &mut linker,
             |logger| logger,
         )?;
-        bindings::wasi::io::io::add_to_linker(&mut linker, |logger| logger)?;
+        bindings::wasi::io::io::add_to_linker::<_, HasSelf<_>>(&mut linker, |logger| logger)?;
     }
 
     let mut store = Store::new(&engine, state);
@@ -291,13 +293,11 @@ fn collect_export_funcs(
     .collect()
 }
 
-impl IoView for Logger {
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.resource_table
-    }
-}
 impl WasiView for Logger {
-    fn ctx(&mut self) -> &mut WasiCtx {
-        &mut self.wasi_ctx
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi_ctx,
+            table: &mut self.resource_table,
+        }
     }
 }
