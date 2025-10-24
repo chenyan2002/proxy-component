@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use wit_bindgen_core::{Files, wit_parser};
-use wit_bindgen_rust::Opts;
+//use wit_bindgen_rust::Opts;
 use wit_parser::{Resolve, WorldId};
 
 #[derive(Parser)]
@@ -57,56 +57,44 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     }
 
     // 5. Generate Rust binding for both import and export interface
-    bindgen(
-        &tmp_dir,
-        &wit_dir,
-        &args.mode,
-        "imports",
-        "record_imports/lib.rs",
-    )?;
-    bindgen(
-        &tmp_dir,
-        &wit_dir,
-        &args.mode,
-        "exports",
-        "record_exports/lib.rs",
-    )?;
+    bindgen(&tmp_dir, &wit_dir, &args.mode, "imports", "record_imports")?;
+    bindgen(&tmp_dir, &wit_dir, &args.mode, "exports", "record_exports")?;
+    /*
+        // 6. cargo build
+        let mut cmd = Command::new("cargo");
+        cmd.arg("build")
+            .arg("--target=wasm32-unknown-unknown")
+            .current_dir(tmp_dir.as_path());
+        let status = cmd.status()?;
+        assert!(status.success());
 
-    // 6. cargo build
-    let mut cmd = Command::new("cargo");
-    cmd.arg("build")
-        .arg("--target=wasm32-unknown-unknown")
-        .current_dir(tmp_dir.as_path());
-    let status = cmd.status()?;
-    assert!(status.success());
+        let exports_wasm_path =
+            component_new(&tmp_dir, &wit_dir, "exports", "debug/record_exports.wasm")?;
+        let imports_wasm_path =
+            component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
 
-    let exports_wasm_path =
-        component_new(&tmp_dir, &wit_dir, "exports", "debug/record_exports.wasm")?;
-    let imports_wasm_path =
-        component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
-
-    // 7. run wac
-    opts.generate_wac(&resolve, world, &exports_wasm_path, &wit_dir);
-    let output_file = "composed.wasm";
-    let imports = format!("import:proxy={}", imports_wasm_path.display());
-    let exports = format!("export:proxy={}", exports_wasm_path.display());
-    let root = format!("root:component={}", args.wasm_file.display());
-    let wac_path = tmp_dir.join("wit/compose.wac");
-    let status = Command::new("wac")
-        .arg("compose")
-        .arg("--dep")
-        .arg(&imports)
-        .arg("--dep")
-        .arg(&exports)
-        .arg("--dep")
-        .arg(&root)
-        .arg(&wac_path)
-        .arg("-o")
-        .arg(output_file)
-        .status()?;
-    assert!(status.success());
-    eprintln!("Generated component: {output_file}");
-
+        // 7. run wac
+        opts.generate_wac(&resolve, world, &exports_wasm_path, &wit_dir);
+        let output_file = "composed.wasm";
+        let imports = format!("import:proxy={}", imports_wasm_path.display());
+        let exports = format!("export:proxy={}", exports_wasm_path.display());
+        let root = format!("root:component={}", args.wasm_file.display());
+        let wac_path = tmp_dir.join("wit/compose.wac");
+        let status = Command::new("wac")
+            .arg("compose")
+            .arg("--dep")
+            .arg(&imports)
+            .arg("--dep")
+            .arg(&exports)
+            .arg("--dep")
+            .arg(&root)
+            .arg(&wac_path)
+            .arg("-o")
+            .arg(output_file)
+            .status()?;
+        assert!(status.success());
+        eprintln!("Generated component: {output_file}");
+    */
     Ok(())
 }
 
@@ -117,7 +105,7 @@ fn parse_wit(dir: &Path, world: Option<&str>) -> Result<(Resolve, WorldId)> {
         .with_context(|| format!("Failed to parse wit files in {}", dir.display()))?;
 
     let world = resolve
-        .select_world(pkg, world)
+        .select_world(&[pkg], world)
         .context("Failed to select a world from the parsed wit files")?;
     Ok((resolve, world))
 }
@@ -128,30 +116,21 @@ fn bindgen(
     world_name: &str,
     dest_name: &str,
 ) -> Result<()> {
-    // We could use `generate!` to make code simpler, but it increases build time.
-    let mut opts = Opts::default();
-    let proxy_mode = match (mode, world_name) {
-        (Mode::Record, "imports") => wit_bindgen_rust::ProxyMode::RecordImport,
-        (Mode::Record, "exports") => wit_bindgen_rust::ProxyMode::RecordExport,
-        (Mode::Replay, "imports") => wit_bindgen_rust::ProxyMode::ReplayImport,
-        (Mode::Replay, "exports") => wit_bindgen_rust::ProxyMode::ReplayExport,
-        _ => unreachable!(),
-    };
-    opts.proxy_component = Some(proxy_mode);
-    opts.stubs = true;
-    opts.runtime_path = Some("wit_bindgen_rt".to_owned());
-    opts.generate_all = true;
-    //opts.format = true;
-    let mut generator = opts.build();
-    let mut files = Files::default();
-    let (resolve, world) = parse_wit(wit_dir, Some(world_name))?;
-    generator.generate(&resolve, world, &mut files)?;
-    for (name, content) in files.iter() {
-        assert!(name.starts_with(world_name));
-        let path = tmp_dir.join(dest_name);
-        eprintln!("Generating: {}", path.display());
-        fs::write(&path, content)?;
-    }
+    let out_dir = tmp_dir.join(dest_name);
+    let status = Command::new("wit-bindgen")
+        .arg("rust")
+        .arg(wit_dir)
+        .arg("--world")
+        .arg(&world_name)
+        .arg("--generate-all")
+        .arg("--runtime-path")
+        .arg("wit_bindgen_rt")
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .status()?;
+    assert!(status.success());
+    let binding_file = out_dir.join(world_name.to_owned() + ".rs");
+    crate::analyze::analyze(&binding_file, "fastly::compute::http_body::write")?;
     Ok(())
 }
 fn component_new(
