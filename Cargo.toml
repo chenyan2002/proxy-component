@@ -13,10 +13,15 @@ serde = "1.0.226"
 serde_json = "1.0.145"
 syn = { version = "2.0.108", features = ["visit-mut"] }
 tempfile = "3.20.0"
-wasmtime = { version = "37.0.0", features = ["wave"] }
-wasmtime-wasi = "37.0.0"
 #wit-bindgen-core = { git = "https://github.com/chenyan2002/wit-bindgen.git", branch = "proxy" }
 #wit-bindgen-rust = { git = "https://github.com/chenyan2002/wit-bindgen.git", branch = "proxy" }
 wit-bindgen-core = "0.46.0"
 wit-bindgen-rust = "0.46.0"
 wit-component = "0.239.0"
+
+wasmtime = { version = "37.0.0", features = ["wave"], optional = true }
+wasmtime-wasi = { version = "37.0.0", optional = true }
+
+[features]
+run = ["wasmtime", "wasmtime-wasi"]
+

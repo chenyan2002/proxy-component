@@ -1,4 +1,4 @@
-use crate::Mode;
+use crate::{Mode, codegen};
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::fs;
@@ -129,7 +129,16 @@ fn bindgen(
         .status()?;
     assert!(status.success());
     let binding_file = out_dir.join(world_name.to_owned() + ".rs");
-    crate::codegen::generate(&binding_file, &out_dir.join("lib.rs"))?;
+    let codegen_mode = match mode {
+        Mode::Record => codegen::GenerateMode::Instrument,
+        Mode::Replay => codegen::GenerateMode::Virtualize,
+    };
+    let codegen_opt = codegen::GenerateArgs {
+        bindings: binding_file.clone(),
+        output_file: out_dir.join("lib.rs"),
+        mode: codegen_mode,
+    };
+    codegen_opt.generate()?;
     let status = Command::new("mv")
         .arg(&binding_file)
         .arg(out_dir.join("bindings.rs"))
