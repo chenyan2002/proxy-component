@@ -1,6 +1,10 @@
 use anyhow::Result;
+use quote::ToTokens;
 use std::path::Path;
-use syn::{File, FnArg, Item, ItemFn, ItemMod, ItemTrait, PatType, TraitItem, parse_quote};
+use syn::{
+    File, FnArg, Item, ItemFn, ItemMod, ItemTrait, PatType, TraitItem, parse_quote,
+    visit_mut::VisitMut,
+};
 
 struct TraitInfo {
     module_path: Vec<String>,
@@ -20,11 +24,15 @@ pub fn generate(bindings: &Path, output_file: &Path) -> Result<()> {
 }
 
 fn generate_preamble() -> File {
-    syn::parse_str(r#"
+    syn::parse_str(
+        r#"
     mod bindings;
+    use bindings::*;
     struct Stub;
     bindings::export!(Stub with_types_in bindings);
-    "#).unwrap()
+    "#,
+    )
+    .unwrap()
 }
 
 fn find_all_traits(items: &[Item], current_path: Vec<String>) -> Vec<TraitInfo> {
@@ -85,8 +93,13 @@ fn generate_impl_with_methods(trait_info: &TraitInfo) -> Item {
                 methods.push(syn::ImplItem::Type(impl_item));
             }
             TraitItem::Fn(method) => {
-                let sig = &method.sig;
+                let mut sig = method.sig.clone();
+                let mut transformer = FullTypePath {
+                    module_path: &trait_info.module_path,
+                };
+                transformer.visit_signature_mut(&mut sig);
                 let stub_impl = parse_quote! {
+                    #[allow(unused_variables)]
                     #sig {
                         unimplemented!()
                     }
@@ -132,11 +145,44 @@ fn find_function<'a>(items: &'a [Item], path: &[&str]) -> Option<&'a ItemFn> {
     }
     None
 }
+
+const BUILTIN_TYPES: &[&str] = &[
+    "Self", "Result", "Option", "Vec", "Box", "Rc", "Arc", "String", "str", "u8", "u16", "u32",
+    "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "f32", "f64", "bool",
+    "char", "_rt",
+];
+struct FullTypePath<'a> {
+    module_path: &'a [String],
+}
+impl<'a> VisitMut for FullTypePath<'a> {
+    fn visit_type_path_mut(&mut self, ty: &mut syn::TypePath) {
+        if ty.qself.is_none() && !ty.path.segments.is_empty() && ty.path.leading_colon.is_none() {
+            let ident = &ty.path.segments[0].ident.to_string();
+            if BUILTIN_TYPES.contains(&ident.as_str()) {
+                if ident == "_rt" {
+                    assert!(ty.path.segments.len() == 2);
+                    ty.path.segments = ty.path.segments.iter().skip(1).cloned().collect();
+                }
+                syn::visit_mut::visit_type_path_mut(self, ty);
+                return;
+            }
+            let module_idents = self
+                .module_path
+                .iter()
+                .map(|s| syn::parse_str::<syn::Ident>(s).unwrap());
+            let original = &ty.path;
+            *ty = parse_quote! {
+                #(#module_idents)::*::#original
+            };
+        }
+        syn::visit_mut::visit_type_path_mut(self, ty);
+    }
+}
 /*
 fn analyze_function_signature(func: &ItemFn) {
     println!("Function: {}", func.sig.ident);
     println!("Signature: {}\n", quote::quote!(#func.sig));
-    
+
     for (i, arg) in func.sig.inputs.iter().enumerate() {
         match arg {
             FnArg::Receiver(receiver) => {
@@ -149,13 +195,13 @@ fn analyze_function_signature(func: &ItemFn) {
             FnArg::Typed(PatType { pat, ty, .. }) => {
                 let param_name = quote::quote!(#pat).to_string();
                 let type_str = quote::quote!(#ty).to_string();
-                
+
                 // Check if it's a reference type
                 let is_borrowed = type_str.trim().starts_with("&");
-                
-                println!("  Arg {}: {} : {} ({})", 
-                    i, 
-                    param_name, 
+
+                println!("  Arg {}: {} : {} ({})",
+                    i,
+                    param_name,
                     type_str,
                     if is_borrowed { "borrowed" } else { "owned" }
                 );

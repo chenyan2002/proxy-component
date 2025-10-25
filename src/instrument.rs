@@ -59,19 +59,19 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     // 5. Generate Rust binding for both import and export interface
     bindgen(&tmp_dir, &wit_dir, &args.mode, "imports", "record_imports")?;
     bindgen(&tmp_dir, &wit_dir, &args.mode, "exports", "record_exports")?;
-        // 6. cargo build
-        let mut cmd = Command::new("cargo");
-        cmd.arg("build")
-            .arg("--target=wasm32-unknown-unknown")
-            .current_dir(tmp_dir.as_path());
-        let status = cmd.status()?;
-        assert!(status.success());
+    // 6. cargo build
+    let mut cmd = Command::new("cargo");
+    cmd.arg("build")
+        .arg("--target=wasm32-unknown-unknown")
+        .current_dir(tmp_dir.as_path());
+    let status = cmd.status()?;
+    assert!(status.success());
 
-        let exports_wasm_path =
-            component_new(&tmp_dir, &wit_dir, "exports", "debug/record_exports.wasm")?;
-        let imports_wasm_path =
-            component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
-/*
+    let exports_wasm_path =
+        component_new(&tmp_dir, &wit_dir, "exports", "debug/record_exports.wasm")?;
+    let imports_wasm_path =
+        component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
+    /*
         // 7. run wac
         opts.generate_wac(&resolve, world, &exports_wasm_path, &wit_dir);
         let output_file = "composed.wasm";
@@ -131,9 +131,9 @@ fn bindgen(
     let binding_file = out_dir.join(world_name.to_owned() + ".rs");
     crate::codegen::generate(&binding_file, &out_dir.join("lib.rs"))?;
     let status = Command::new("mv")
-    .arg(&binding_file)
-    .arg(out_dir.join("bindings.rs"))
-    .status()?;
+        .arg(&binding_file)
+        .arg(out_dir.join("bindings.rs"))
+        .status()?;
     assert!(status.success());
     Ok(())
 }
