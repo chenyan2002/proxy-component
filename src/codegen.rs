@@ -117,12 +117,22 @@ impl GenerateArgs {
                     if method.sig.ident.to_string().starts_with("_resource_") {
                         continue;
                     }
+                    let module_path = &trait_info.module_path;
                     let mut sig = method.sig.clone();
-                    let mut transformer = FullTypePath {
-                        module_path: &trait_info.module_path,
-                    };
+                    let mut transformer = FullTypePath { module_path };
                     transformer.visit_signature_mut(&mut sig);
-                    let stub_impl = self.generate_func_body(&trait_info.module_path, &sig);
+                    let stub_impl = match self.mode {
+                        GenerateMode::Stubs => parse_quote! {
+                            #[allow(unused_variables)]
+                            #sig {
+                                unimplemented!()
+                            }
+                        },
+                        GenerateMode::Instrument => {
+                            self.generate_instrument_func(module_path, &sig)
+                        }
+                        GenerateMode::Virtualize => todo!(),
+                    };
                     methods.push(syn::ImplItem::Fn(stub_impl));
                 }
                 _ => (),
@@ -137,7 +147,11 @@ impl GenerateArgs {
         }
     }
 
-    fn generate_func_body(&self, module_path: &[String], sig: &syn::Signature) -> syn::ImplItemFn {
+    fn generate_instrument_func(
+        &self,
+        module_path: &[String],
+        sig: &syn::Signature,
+    ) -> syn::ImplItemFn {
         parse_quote! {
             #[allow(unused_variables)]
             #sig {
