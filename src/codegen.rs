@@ -27,69 +27,42 @@ pub enum GenerateMode {
     Virtualize,
 }
 
+struct State<'a> {
+    mode: GenerateMode,
+    ast: &'a File,
+    info: Vec<TraitInfo>,
+    output: File,
+}
 struct TraitInfo {
     module_path: Vec<String>,
     trait_item: ItemTrait,
 }
+
 impl GenerateArgs {
     pub fn generate(&self) -> Result<()> {
         let file = std::fs::read_to_string(&self.bindings)?;
         let ast = syn::parse_file(&file)?;
-        let traits = self.find_all_traits(&ast.items, vec![]);
-        let mut output = self.generate_preamble();
-        let stubs = self.generate_stubs(&traits);
-        output.items.extend(stubs);
-        let output = prettyplease::unparse(&output);
+        let info = find_all_traits(&ast.items, vec![]);
+        let mut state = State {
+            mode: self.mode.clone(),
+            ast: &ast,
+            info,
+            output: generate_preamble(&self.mode),
+        };
+        state.generate_stubs();
+        let output = prettyplease::unparse(&state.output);
         std::fs::write(&self.output_file, output)?;
         Ok(())
     }
-
-    fn generate_preamble(&self) -> File {
-        syn::parse_str(
-            r#"
-    mod bindings;
-    use bindings::*;
-    struct Stub;
-    bindings::export!(Stub with_types_in bindings);
-    "#,
-        )
-        .unwrap()
-    }
-
-    fn find_all_traits(&self, items: &[Item], current_path: Vec<String>) -> Vec<TraitInfo> {
-        let mut traits = Vec::new();
-        for item in items {
-            match item {
-                Item::Trait(trait_item) => {
-                    traits.push(TraitInfo {
-                        module_path: current_path.clone(),
-                        trait_item: trait_item.clone(),
-                    });
-                }
-                Item::Mod(module) => {
-                    if let Some((_, ref mod_items)) = module.content {
-                        let mut new_path = current_path.clone();
-                        let mod_name = module.ident.to_string();
-                        if current_path.is_empty() && mod_name != "exports" {
-                            continue;
-                        }
-                        new_path.push(mod_name);
-                        traits.extend(self.find_all_traits(mod_items, new_path));
-                    }
-                }
-                _ => {}
-            }
-        }
-        traits
-    }
-
-    fn generate_stubs(&self, traits: &[TraitInfo]) -> Vec<Item> {
+}
+impl<'ast> State<'ast> {
+    fn generate_stubs(&mut self) {
         let mut items = Vec::new();
-        for trait_info in traits {
+        for trait_info in self.info.iter() {
             let impl_with_methods = self.generate_impl_with_methods(trait_info);
             items.push(impl_with_methods);
         }
-        items
+        self.output.items.extend(items);
     }
 
     fn generate_impl_with_methods(&self, trait_info: &TraitInfo) -> Item {
@@ -138,8 +111,6 @@ impl GenerateArgs {
                 _ => (),
             }
         }
-
-        // Create the impl block
         parse_quote! {
             impl #trait_path for Stub {
                 #(#methods)*
@@ -159,34 +130,71 @@ impl GenerateArgs {
             }
         }
     }
+}
 
-    fn find_function<'a>(&self, items: &'a [Item], path: &[&str]) -> Option<&'a ItemFn> {
-        if path.is_empty() {
-            return None;
-        }
-        if path.len() == 1 {
-            for item in items {
-                if let Item::Fn(func) = item {
-                    if func.sig.ident.to_string() == path[0] {
-                        return Some(func);
-                    }
-                }
-            }
-            return None;
-        }
-        for item in items {
-            if let Item::Mod(module) = item {
-                if module.ident == path[0] {
-                    if let Some((_, ref items)) = module.content {
-                        return self.find_function(items, &path[1..]);
-                    } else {
-                        return None;
-                    }
-                }
-            }
-        }
-        None
+fn generate_preamble(_mode: &GenerateMode) -> File {
+    syn::parse_str(
+        r#"
+    mod bindings;
+    use bindings::*;
+    struct Stub;
+    bindings::export!(Stub with_types_in bindings);
+    "#,
+    )
+    .unwrap()
+}
+fn find_function<'a>(items: &'a [Item], path: &[&str]) -> Option<&'a ItemFn> {
+    if path.is_empty() {
+        return None;
     }
+    if path.len() == 1 {
+        for item in items {
+            if let Item::Fn(func) = item {
+                if func.sig.ident.to_string() == path[0] {
+                    return Some(func);
+                }
+            }
+        }
+        return None;
+    }
+    for item in items {
+        if let Item::Mod(module) = item {
+            if module.ident == path[0] {
+                if let Some((_, ref items)) = module.content {
+                    return find_function(items, &path[1..]);
+                } else {
+                    return None;
+                }
+            }
+        }
+    }
+    None
+}
+fn find_all_traits(items: &[Item], current_path: Vec<String>) -> Vec<TraitInfo> {
+    let mut traits = Vec::new();
+    for item in items {
+        match item {
+            Item::Trait(trait_item) => {
+                traits.push(TraitInfo {
+                    module_path: current_path.clone(),
+                    trait_item: trait_item.clone(),
+                });
+            }
+            Item::Mod(module) => {
+                if let Some((_, ref mod_items)) = module.content {
+                    let mut new_path = current_path.clone();
+                    let mod_name = module.ident.to_string();
+                    if current_path.is_empty() && mod_name != "exports" {
+                        continue;
+                    }
+                    new_path.push(mod_name);
+                    traits.extend(find_all_traits(mod_items, new_path));
+                }
+            }
+            _ => {}
+        }
+    }
+    traits
 }
 const BUILTIN_TYPES: &[&str] = &[
     "Self", "Result", "Option", "Vec", "Box", "Rc", "Arc", "String", "str", "u8", "u16", "u32",
