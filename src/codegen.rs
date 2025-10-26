@@ -205,28 +205,6 @@ impl<'ast> State<'ast> {
         res
     }
     fn find_all_items(&mut self, items: &[Item], current_path: Vec<String>) {
-        // First pass: collect struct names that have WasmResource impl in this module
-        let mut resource_structs = std::collections::HashSet::new();
-        for item in items {
-            if let Item::Impl(impl_block) = item {
-                if let Some((_, trait_path, _)) = &impl_block.trait_ {
-                    if let Some(last_trait_seg) = trait_path.segments.last() {
-                        if last_trait_seg.ident == "WasmResource"
-                            && trait_path.segments.len() == 2
-                            && trait_path.segments[0].ident == "_rt"
-                        {
-                            // This is a _rt::WasmResource impl
-                            if let syn::Type::Path(type_path) = &*impl_block.self_ty {
-                                if let Some(last_segment) = type_path.path.segments.last() {
-                                    resource_structs.insert(last_segment.ident.to_string());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         for item in items {
             match item {
                 Item::Trait(trait_item) if matches!(trait_item.vis, Visibility::Public(_)) => {
@@ -236,17 +214,19 @@ impl<'ast> State<'ast> {
                         .push(trait_item.clone());
                 }
                 Item::Struct(struct_item) if matches!(struct_item.vis, Visibility::Public(_)) => {
-                    if resource_structs.contains(&struct_item.ident.to_string()) {
-                        self.types
-                            .entry(current_path.clone())
-                            .or_insert_with(Vec::new)
-                            .push(TypeInfo::Resource(struct_item.clone()));
+                    let has_repr_transparent = struct_item.attrs.iter().any(|attr| {
+                        attr.path().is_ident("repr")
+                            && attr.to_token_stream().to_string().contains("transparent")
+                    });
+                    let type_info = if has_repr_transparent {
+                        TypeInfo::Resource(struct_item.clone())
                     } else {
-                        self.types
-                            .entry(current_path.clone())
-                            .or_insert_with(Vec::new)
-                            .push(TypeInfo::Struct(struct_item.clone()));
-                    }
+                        TypeInfo::Struct(struct_item.clone())
+                    };
+                    self.types
+                        .entry(current_path.clone())
+                        .or_insert_with(Vec::new)
+                        .push(type_info);
                 }
                 Item::Enum(enum_item) if matches!(enum_item.vis, Visibility::Public(_)) => {
                     self.types
