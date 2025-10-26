@@ -1,8 +1,8 @@
 use anyhow::Result;
 use quote::ToTokens;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use syn::{
-    File, FnArg, Item, ItemFn, ItemMod, ItemTrait, PatType, TraitItem, parse_quote,
+    File, FnArg, Ident, Item, ItemTrait, Signature, TraitItem, Type, parse_quote,
     visit_mut::VisitMut,
 };
 
@@ -64,25 +64,38 @@ impl<'ast> State<'ast> {
         }
         self.output.items.extend(items);
     }
-
     fn generate_impl_with_methods(&self, trait_info: &TraitInfo) -> Item {
-        let trait_name = &trait_info.trait_item.ident;
-        let full_path = if trait_info.module_path.is_empty() {
-            trait_name.to_string()
-        } else {
-            format!("{}::{}", trait_info.module_path.join("::"), trait_name)
-        };
+        let trait_name = &trait_info.trait_item.ident.to_string();
+        let full_path = format!("{}::{}", trait_info.module_path.join("::"), trait_name);
         let trait_path: syn::Path = syn::parse_str(&full_path).unwrap();
-
+        let import_path = self.get_proxy_path(&trait_info.module_path).join("::");
+        let resource = match trait_name.strip_prefix("Guest") {
+            Some("") => None,
+            Some(name) => Some(name.to_string()),
+            None => unreachable!(),
+        };
+        let stub: syn::Path = match (&self.mode, &resource) {
+            (GenerateMode::Instrument, Some(resource)) => {
+                let resource_path = format!("{}::{}", import_path, resource);
+                syn::parse_str(&resource_path).unwrap()
+            }
+            (_, _) => parse_quote! { Stub },
+        };
         // Collect all method signatures from the trait
         let mut methods = Vec::new();
-
         for item in &trait_info.trait_item.items {
             match item {
                 TraitItem::Type(assoc_type) => {
                     let type_name = &assoc_type.ident;
+                    let stub: syn::Path = match &self.mode {
+                        GenerateMode::Instrument => {
+                            let resource_path = format!("{}::{}", import_path, type_name);
+                            syn::parse_str(&resource_path).unwrap()
+                        }
+                        _ => parse_quote! { Stub },
+                    };
                     let impl_item = parse_quote! {
-                        type #type_name = Stub;
+                        type #type_name = #stub;
                     };
                     methods.push(syn::ImplItem::Type(impl_item));
                 }
@@ -102,7 +115,7 @@ impl<'ast> State<'ast> {
                             }
                         },
                         GenerateMode::Instrument => {
-                            self.generate_instrument_func(module_path, &sig)
+                            self.generate_instrument_func(module_path, &sig, &resource)
                         }
                         GenerateMode::Virtualize => todo!(),
                     };
@@ -112,23 +125,65 @@ impl<'ast> State<'ast> {
             }
         }
         parse_quote! {
-            impl #trait_path for Stub {
+            impl #trait_path for #stub {
                 #(#methods)*
             }
         }
     }
-
     fn generate_instrument_func(
         &self,
         module_path: &[String],
-        sig: &syn::Signature,
+        sig: &Signature,
+        resource: &Option<String>,
     ) -> syn::ImplItemFn {
+        if module_path.join("::") == "exports::proxy::conversion::conversion" {
+            return parse_quote! { #[allow(unused_variables)] #sig { todo!() } };
+        }
+        let func_name = &sig.ident;
+        let (is_method, args) = extract_arg_info(sig);
+        let mut import_func = self.get_proxy_path(module_path);
+        import_func.push(func_name.to_string());
+        println!("{:?}", import_func);
+        let import_sig = find_function(&self.ast.items, &import_func).unwrap();
+        let (_, import_args) = extract_arg_info(import_sig);
+        let call_args = args
+            .iter()
+            .zip(import_args.iter())
+            .map(|(arg, import_arg)| -> syn::Expr {
+                let ident = &arg.ident;
+                if import_arg.is_borrowed {
+                    parse_quote! { &#ident }
+                } else {
+                    parse_quote! { #ident }
+                }
+            });
+        let func: syn::Expr = match (resource.is_some(), is_method.is_some()) {
+            (true, true) => parse_quote! { self.#func_name },
+            (true, false) => parse_quote! { Self::#func_name },
+            (false, _) => syn::parse_str(&import_func.join("::")).unwrap(),
+        };
         parse_quote! {
-            #[allow(unused_variables)]
             #sig {
-                unimplemented!()
+                #func(#(#call_args),*)
             }
         }
+    }
+    fn get_proxy_path(&self, src_path: &[String]) -> Vec<String> {
+        assert!(matches!(self.mode, GenerateMode::Instrument));
+        assert!(src_path.len() >= 3);
+        let mut res = src_path.to_vec();
+        let mut wrapped_idx = 0;
+        if res[0] == "exports" {
+            res.remove(0);
+        } else {
+            res.insert(0, "exports".to_string());
+            wrapped_idx = 1;
+        }
+        match res[wrapped_idx].strip_prefix("wrapped_") {
+            Some(name) => res[wrapped_idx] = name.to_string(),
+            None => res[wrapped_idx] = "wrapped_".to_string() + &res[wrapped_idx],
+        }
+        res
     }
 }
 
@@ -143,28 +198,49 @@ fn generate_preamble(_mode: &GenerateMode) -> File {
     )
     .unwrap()
 }
-fn find_function<'a>(items: &'a [Item], path: &[&str]) -> Option<&'a ItemFn> {
+fn find_function<'a>(items: &'a [Item], path: &[String]) -> Option<&'a Signature> {
     if path.is_empty() {
         return None;
     }
     if path.len() == 1 {
         for item in items {
-            if let Item::Fn(func) = item {
-                if func.sig.ident.to_string() == path[0] {
-                    return Some(func);
+            match item {
+                Item::Fn(func) => {
+                    if func.sig.ident == path[0] {
+                        return Some(&func.sig);
+                    }
                 }
+                Item::Impl(impl_block) => {
+                    for impl_item in &impl_block.items {
+                        if let syn::ImplItem::Fn(method) = impl_item
+                            && method.sig.ident == path[0]
+                        {
+                            return Some(&method.sig);
+                        }
+                    }
+                }
+                Item::Trait(trait_block) => {
+                    for trait_item in &trait_block.items {
+                        if let syn::TraitItem::Fn(method) = trait_item
+                            && method.sig.ident == path[0]
+                        {
+                            return Some(&method.sig);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         return None;
     }
     for item in items {
-        if let Item::Mod(module) = item {
-            if module.ident == path[0] {
-                if let Some((_, ref items)) = module.content {
-                    return find_function(items, &path[1..]);
-                } else {
-                    return None;
-                }
+        if let Item::Mod(module) = item
+            && module.ident == path[0]
+        {
+            if let Some((_, ref items)) = module.content {
+                return find_function(items, &path[1..]);
+            } else {
+                return None;
             }
         }
     }
@@ -228,35 +304,29 @@ impl<'a> VisitMut for FullTypePath<'a> {
         syn::visit_mut::visit_type_path_mut(self, ty);
     }
 }
-/*
-fn analyze_function_signature(func: &ItemFn) {
-    println!("Function: {}", func.sig.ident);
-    println!("Signature: {}\n", quote::quote!(#func.sig));
 
-    for (i, arg) in func.sig.inputs.iter().enumerate() {
+struct ArgInfo {
+    ident: Ident,
+    is_borrowed: bool,
+}
+fn extract_arg_info(sig: &Signature) -> (Option<bool>, Vec<ArgInfo>) {
+    let mut is_method = None;
+    let mut arg_infos = Vec::new();
+    for arg in sig.inputs.iter() {
         match arg {
             FnArg::Receiver(receiver) => {
-                if receiver.reference.is_some() {
-                    println!("  Arg {}: &self (borrowed)", i);
-                } else {
-                    println!("  Arg {}: self (owned)", i);
-                }
+                let is_borrowed = receiver.reference.is_some();
+                is_method = Some(is_borrowed);
             }
-            FnArg::Typed(PatType { pat, ty, .. }) => {
-                let param_name = quote::quote!(#pat).to_string();
-                let type_str = quote::quote!(#ty).to_string();
-
-                // Check if it's a reference type
-                let is_borrowed = type_str.trim().starts_with("&");
-
-                println!("  Arg {}: {} : {} ({})",
-                    i,
-                    param_name,
-                    type_str,
-                    if is_borrowed { "borrowed" } else { "owned" }
-                );
+            FnArg::Typed(pat_type) => {
+                let ident = match &*pat_type.pat {
+                    syn::Pat::Ident(ident) => ident.ident.clone(),
+                    _ => unreachable!(),
+                };
+                let is_borrowed = matches!(&*pat_type.ty, Type::Reference(_));
+                arg_infos.push(ArgInfo { ident, is_borrowed });
             }
         }
     }
+    (is_method, arg_infos)
 }
-*/
