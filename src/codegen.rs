@@ -1,9 +1,10 @@
 use anyhow::Result;
 use quote::ToTokens;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use syn::{
-    File, FnArg, Ident, Item, ItemTrait, Signature, TraitItem, Type, parse_quote,
-    visit_mut::VisitMut,
+    File, FnArg, Ident, Item, ItemEnum, ItemStruct, ItemTrait, Signature, TraitItem, Type,
+    Visibility, parse_quote, visit_mut::VisitMut,
 };
 
 #[derive(clap::Parser)]
@@ -30,25 +31,29 @@ pub enum GenerateMode {
 struct State<'a> {
     mode: GenerateMode,
     ast: &'a File,
-    info: Vec<TraitInfo>,
+    traits: BTreeMap<Vec<String>, Vec<ItemTrait>>,
+    types: BTreeMap<Vec<String>, Vec<TypeInfo>>,
     output: File,
 }
-struct TraitInfo {
-    module_path: Vec<String>,
-    trait_item: ItemTrait,
+enum TypeInfo {
+    Struct(ItemStruct),
+    Enum(ItemEnum),
+    Resource(ItemStruct),
 }
 
 impl GenerateArgs {
     pub fn generate(&self) -> Result<()> {
         let file = std::fs::read_to_string(&self.bindings)?;
         let ast = syn::parse_file(&file)?;
-        let info = find_all_traits(&ast.items, vec![]);
+
         let mut state = State {
             mode: self.mode.clone(),
             ast: &ast,
-            info,
+            traits: BTreeMap::new(),
+            types: BTreeMap::new(),
             output: generate_preamble(&self.mode),
         };
+        state.find_all_items(&ast.items, vec![]);
         state.generate_stubs();
         let output = prettyplease::unparse(&state.output);
         std::fs::write(&self.output_file, output)?;
@@ -57,18 +62,33 @@ impl GenerateArgs {
 }
 impl<'ast> State<'ast> {
     fn generate_stubs(&mut self) {
-        let mut items = Vec::new();
-        for trait_info in self.info.iter() {
-            let impl_with_methods = self.generate_impl_with_methods(trait_info);
-            items.push(impl_with_methods);
+        for (module_path, traits) in &self.traits {
+            for trait_item in traits {
+                let impl_item = self.generate_impl_with_methods(trait_item, module_path);
+                self.output.items.push(impl_item);
+            }
         }
-        self.output.items.extend(items);
+        for (module_path, items) in &self.types {
+            for item_info in items {
+                match item_info {
+                    TypeInfo::Resource(resource) => {
+                        self.output.items.push(Item::Struct(resource.clone()));
+                    }
+                    TypeInfo::Struct(struct_item) => {
+                        self.output.items.push(Item::Struct(struct_item.clone()));
+                    }
+                    TypeInfo::Enum(enum_item) => {
+                        self.output.items.push(Item::Enum(enum_item.clone()));
+                    }
+                }
+            }
+        }
     }
-    fn generate_impl_with_methods(&self, trait_info: &TraitInfo) -> Item {
-        let trait_name = &trait_info.trait_item.ident.to_string();
-        let full_path = format!("{}::{}", trait_info.module_path.join("::"), trait_name);
+    fn generate_impl_with_methods(&self, trait_item: &ItemTrait, module_path: &[String]) -> Item {
+        let trait_name = &trait_item.ident.to_string();
+        let full_path = format!("{}::{}", module_path.join("::"), trait_name);
         let trait_path: syn::Path = syn::parse_str(&full_path).unwrap();
-        let import_path = self.get_proxy_path(&trait_info.module_path).join("::");
+        let import_path = self.get_proxy_path(module_path).join("::");
         let resource = match trait_name.strip_prefix("Guest") {
             Some("") => None,
             Some(name) => Some(name.to_string()),
@@ -83,7 +103,7 @@ impl<'ast> State<'ast> {
         };
         // Collect all method signatures from the trait
         let mut methods = Vec::new();
-        for item in &trait_info.trait_item.items {
+        for item in &trait_item.items {
             match item {
                 TraitItem::Type(assoc_type) => {
                     let type_name = &assoc_type.ident;
@@ -103,7 +123,6 @@ impl<'ast> State<'ast> {
                     if method.sig.ident.to_string().starts_with("_resource_") {
                         continue;
                     }
-                    let module_path = &trait_info.module_path;
                     let mut sig = method.sig.clone();
                     let mut transformer = FullTypePath { module_path };
                     transformer.visit_signature_mut(&mut sig);
@@ -185,6 +204,71 @@ impl<'ast> State<'ast> {
         }
         res
     }
+    fn find_all_items(&mut self, items: &[Item], current_path: Vec<String>) {
+        // First pass: collect struct names that have WasmResource impl in this module
+        let mut resource_structs = std::collections::HashSet::new();
+        for item in items {
+            if let Item::Impl(impl_block) = item {
+                if let Some((_, trait_path, _)) = &impl_block.trait_ {
+                    if let Some(last_trait_seg) = trait_path.segments.last() {
+                        if last_trait_seg.ident == "WasmResource"
+                            && trait_path.segments.len() == 2
+                            && trait_path.segments[0].ident == "_rt"
+                        {
+                            // This is a _rt::WasmResource impl
+                            if let syn::Type::Path(type_path) = &*impl_block.self_ty {
+                                if let Some(last_segment) = type_path.path.segments.last() {
+                                    resource_structs.insert(last_segment.ident.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for item in items {
+            match item {
+                Item::Trait(trait_item) if matches!(trait_item.vis, Visibility::Public(_)) => {
+                    self.traits
+                        .entry(current_path.clone())
+                        .or_insert_with(Vec::new)
+                        .push(trait_item.clone());
+                }
+                Item::Struct(struct_item) if matches!(struct_item.vis, Visibility::Public(_)) => {
+                    if resource_structs.contains(&struct_item.ident.to_string()) {
+                        self.types
+                            .entry(current_path.clone())
+                            .or_insert_with(Vec::new)
+                            .push(TypeInfo::Resource(struct_item.clone()));
+                    } else {
+                        self.types
+                            .entry(current_path.clone())
+                            .or_insert_with(Vec::new)
+                            .push(TypeInfo::Struct(struct_item.clone()));
+                    }
+                }
+                Item::Enum(enum_item) if matches!(enum_item.vis, Visibility::Public(_)) => {
+                    self.types
+                        .entry(current_path.clone())
+                        .or_insert_with(Vec::new)
+                        .push(TypeInfo::Enum(enum_item.clone()));
+                }
+                Item::Mod(module) if matches!(module.vis, Visibility::Public(_)) => {
+                    if let Some((_, ref mod_items)) = module.content {
+                        let mut new_path = current_path.clone();
+                        let mod_name = module.ident.to_string();
+                        if current_path.is_empty() && mod_name == "_rt" {
+                            continue;
+                        }
+                        new_path.push(mod_name);
+                        self.find_all_items(mod_items, new_path);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 fn generate_preamble(_mode: &GenerateMode) -> File {
@@ -246,32 +330,7 @@ fn find_function<'a>(items: &'a [Item], path: &[String]) -> Option<&'a Signature
     }
     None
 }
-fn find_all_traits(items: &[Item], current_path: Vec<String>) -> Vec<TraitInfo> {
-    let mut traits = Vec::new();
-    for item in items {
-        match item {
-            Item::Trait(trait_item) => {
-                traits.push(TraitInfo {
-                    module_path: current_path.clone(),
-                    trait_item: trait_item.clone(),
-                });
-            }
-            Item::Mod(module) => {
-                if let Some((_, ref mod_items)) = module.content {
-                    let mut new_path = current_path.clone();
-                    let mod_name = module.ident.to_string();
-                    if current_path.is_empty() && mod_name != "exports" {
-                        continue;
-                    }
-                    new_path.push(mod_name);
-                    traits.extend(find_all_traits(mod_items, new_path));
-                }
-            }
-            _ => {}
-        }
-    }
-    traits
-}
+
 const BUILTIN_TYPES: &[&str] = &[
     "Self", "Result", "Option", "Vec", "Box", "Rc", "Arc", "String", "str", "u8", "u16", "u32",
     "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "f32", "f64", "bool",
