@@ -1,5 +1,5 @@
 use anyhow::Result;
-use quote::ToTokens;
+use quote::{ToTokens, quote};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use syn::{
@@ -78,14 +78,15 @@ impl<'ast> State<'ast> {
             for item_info in items {
                 match item_info {
                     TypeInfo::Resource(resource) => {
-                        let item = self.generate_resource_traits(resource, module_path);
-                        self.output.extend(item);
+                        let items = self.resource_traits(resource, module_path);
+                        self.output.extend(items);
                     }
                     TypeInfo::Struct(struct_item) => {
                         //self.output.push(Item::Struct(struct_item.clone()));
                     }
                     TypeInfo::Enum(enum_item) => {
-                        //self.output.push(Item::Enum(enum_item.clone()));
+                        let items = self.enum_traits(enum_item, module_path);
+                        self.output.extend(items);
                     }
                 }
             }
@@ -170,9 +171,9 @@ impl<'ast> State<'ast> {
             .map(|(arg, import_arg)| -> syn::Expr {
                 let ident = &arg.ident;
                 if import_arg.is_borrowed {
-                    parse_quote! { &#ident }
+                    parse_quote! { &#ident.to_import() }
                 } else {
-                    parse_quote! { #ident }
+                    parse_quote! { #ident.to_import() }
                 }
             });
         let func: syn::Expr = match (resource.is_some(), is_method.is_some()) {
@@ -182,35 +183,93 @@ impl<'ast> State<'ast> {
         };
         parse_quote! {
             #sig {
-                #func(#(#call_args),*)
+                #func(#(#call_args),*).to_export()
             }
         }
     }
-    fn generate_resource_traits(&self, resource: &ItemStruct, module_path: &[String]) -> Vec<Item> {
+    fn resource_traits(&self, resource: &ItemStruct, module_path: &[String]) -> Vec<Item> {
         let mut res = Vec::new();
-        let in_import = module_path[0] != "exports";
         let resource_path = make_path(module_path, &resource.ident.to_string());
         if let GenerateMode::Instrument = &self.mode {
+            let output_path = self.get_proxy_path(module_path);
+            let output_owned = make_path(&output_path, &resource.ident.to_string());
+            let in_import = module_path[0] != "exports";
             if in_import {
-                let export_path = self.get_proxy_path(module_path);
-                let export_owned = make_path(&export_path, &resource.ident.to_string());
                 let export_borrow =
-                    make_path(&export_path, &format!("{}Borrow<'a>", &resource.ident));
+                    make_path(&output_path, &format!("{}Borrow<'a>", &resource.ident));
                 res.push(parse_quote! {
                 impl ToExport for #resource_path {
-                  type Output = #export_owned;
+                  type Output = #output_owned;
                   fn to_export(self) -> Self::Output {
-                    todo!()
+                    Self::Output::new(self)
                   }
                 }});
                 res.push(parse_quote! {
                 impl<'a> ToExport for &'a #resource_path {
                   type Output = #export_borrow;
                   fn to_export(self) -> Self::Output {
-                    todo!()
+                    unsafe { Self::Output::lift(self as *const _ as usize) }
                   }
                 }});
+            } else {
+                let export_borrow =
+                    make_path(module_path, &format!("{}Borrow<'a>", &resource.ident));
+                res.push(parse_quote! {
+                    impl ToImport for #resource_path {
+                        type Output = #output_owned;
+                        fn to_import(self) -> Self::Output {
+                            self.into_inner()
+                        }
+                    }
+                });
+                res.push(parse_quote! {
+                    impl<'a> ToImport for #export_borrow {
+                        type Output = &'a #output_owned;
+                        fn to_import(self) -> Self::Output {
+                            todo!()
+                            //type T = #output_owned;
+                            //let ptr = unsafe { &mut *self.as_ptr::<T>() };
+                            //ptr.as_ref().unwrap()*/
+                        }
+                    }
+                });
             }
+        }
+        res
+    }
+    fn enum_traits(&self, enum_item: &ItemEnum, module_path: &[String]) -> Vec<Item> {
+        let mut res = Vec::new();
+        let enum_name = make_path(module_path, &enum_item.ident.to_string());
+        let (impl_generics, ty_generics, where_clause) = enum_item.generics.split_for_impl();
+        if let GenerateMode::Instrument = &self.mode {
+            let is_import = module_path[0] != "exports";
+            let output_path = self.get_proxy_path(module_path);
+            let output_path = make_path(&output_path, &enum_item.ident.to_string());
+            let (trait_name, func) = if is_import {
+                (quote! {ToExport}, quote! {to_export})
+            } else {
+                (quote! {ToImport}, quote! {to_import})
+            };
+            let match_arms = enum_item.variants.iter().map(|variant| {
+                let tag = &variant.ident;
+                match &variant.fields {
+                    syn::Fields::Unit => quote! { Self::#tag => Self::Output::#tag },
+                    syn::Fields::Unnamed(_) => {
+                        quote! { Self::#tag(e) => Self::Output::#tag(e.#func()) }
+                    }
+                    syn::Fields::Named(_) => unreachable!(),
+                }
+            });
+            res.push(parse_quote! {
+                impl #impl_generics #trait_name for #enum_name #ty_generics #where_clause {
+                    type Output = #output_path;
+                    fn #func(self) -> Self::Output {
+                        match self {
+                            #(#match_arms),*
+                        }
+                    }
+                }
+            });
         }
         res
     }
@@ -246,6 +305,11 @@ impl<'ast> State<'ast> {
                             && attr.to_token_stream().to_string().contains("transparent")
                     });
                     let type_info = if has_repr_transparent {
+                        if struct_item.ident.to_string().ends_with("Borrow")
+                            && current_path[0] == "exports"
+                        {
+                            continue;
+                        }
                         TypeInfo::Resource(struct_item.clone())
                     } else {
                         TypeInfo::Struct(struct_item.clone())
@@ -294,6 +358,30 @@ impl<'ast> State<'ast> {
             trait ToImport {
               type Output;
               fn to_import(self) -> Self::Output;
+            }
+            impl crate::ToExport for String {
+                type Output = String;
+                fn to_export(self) -> Self::Output {
+                    self
+                }
+            }
+            impl crate::ToImport for String {
+              type Output = String;
+              fn to_import(self) -> Self::Output {
+                self
+              }
+            }
+            impl<T: crate::ToExport> crate::ToExport for Vec::<T> {
+                type Output = Vec::<T::Output>;
+                fn to_export(self) -> Self::Output {
+                    self.into_iter().map(|x| x.to_export()).collect()
+                }
+            }
+            impl<T: crate::ToImport> crate::ToImport for Vec::<T> {
+                type Output = Vec::<T::Output>;
+                fn to_import(self) -> Self::Output {
+                    self.into_iter().map(|x| x.to_import()).collect()
+                }
             }
             impl<Ok, Err> ToExport for Result<Ok, Err>
             where Ok: ToExport, Err: ToExport {
