@@ -85,7 +85,8 @@ impl<'ast> State<'ast> {
                         self.output.extend(items);
                     }
                     TypeInfo::Struct(struct_item) => {
-                        //self.output.push(Item::Struct(struct_item.clone()));
+                        let items = self.struct_traits(struct_item, module_path);
+                        self.output.extend(items);
                     }
                     TypeInfo::Enum(enum_item) => {
                         let items = self.enum_traits(enum_item, module_path);
@@ -266,6 +267,32 @@ impl<'ast> State<'ast> {
         }
         res
     }
+    fn struct_traits(&self, struct_item: &ItemStruct, module_path: &[String]) -> Vec<Item> {
+        let mut res = Vec::new();
+        let struct_name = make_path(module_path, &struct_item.ident.to_string());
+        let (impl_generics, ty_generics, where_clause) = struct_item.generics.split_for_impl();
+        if let GenerateMode::Instrument = &self.mode {
+            let (output_path, trait_name, func) = self.get_proxy_path(module_path);
+            let output_path = make_path(&output_path, &struct_item.ident.to_string());
+            let fields = match &struct_item.fields {
+                syn::Fields::Unit => quote! { Self::Output },
+                syn::Fields::Named(fields) => {
+                    let field_names = fields.named.iter().map(|f| &f.ident);
+                    quote! { Self::Output { #(#field_names: self.#field_names.#func()),* } }
+                }
+                syn::Fields::Unnamed(_) => unreachable!(),
+            };
+            res.push(parse_quote! {
+                impl #impl_generics #trait_name for #struct_name #ty_generics #where_clause {
+                    type Output = #output_path;
+                    fn #func(self) -> Self::Output {
+                        #fields
+                    }
+                }
+            });
+        }
+        res
+    }
     fn enum_traits(&self, enum_item: &ItemEnum, module_path: &[String]) -> Vec<Item> {
         let mut res = Vec::new();
         let enum_name = make_path(module_path, &enum_item.ident.to_string());
@@ -315,19 +342,23 @@ impl<'ast> State<'ast> {
         }
         let (trait_name, func) = if from_export {
             assert!(self.module_paths.contains(&res));
-            (parse_quote! {ToImport}, parse_quote! {to_import})
+            ("ToImport", "to_import")
         } else if !self.module_paths.contains(&res) {
             res.remove(0);
             assert!(self.module_paths.contains(&res));
             if res[0].starts_with("wrapped_") {
-                (parse_quote! {ToImport}, parse_quote! {to_import})
+                ("ToImport", "to_import")
             } else {
-                (parse_quote! {ToExport}, parse_quote! {to_export})
+                ("ToExport", "to_export")
             }
         } else {
-            (parse_quote! {ToExport}, parse_quote! {to_export})
+            ("ToExport", "to_export")
         };
-        (res, trait_name, func)
+        (
+            res,
+            syn::parse_str(trait_name).unwrap(),
+            syn::parse_str(func).unwrap(),
+        )
     }
     fn find_all_items(&mut self, items: &[Item], current_path: Vec<String>) {
         for item in items {
