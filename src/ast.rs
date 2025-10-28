@@ -196,6 +196,9 @@ let main = new root:component {
                     out.push_str(&format!(
                         "get-wrapped-{func_name}: func(x: host-{resource}) -> wrapped-{resource};\n",
                     ));
+                    out.push_str(&format!(
+                        "get-host-{func_name}: func(x: wrapped-{resource}) -> host-{resource};\n",
+                    ));
                 }
                 Mode::Replay => {
                     out.push_str(&format!("\nuse {iface}.{{{resource}}};\n"));
