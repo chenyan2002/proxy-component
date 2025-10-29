@@ -3,6 +3,7 @@ use clap::{Parser, ValueEnum};
 mod ast;
 mod codegen;
 mod instrument;
+mod traits;
 mod util;
 
 #[cfg(feature = "run")]
