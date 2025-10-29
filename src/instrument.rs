@@ -71,29 +71,27 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         component_new(&tmp_dir, &wit_dir, "exports", "debug/record_exports.wasm")?;
     let imports_wasm_path =
         component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
-    /*
-        // 7. run wac
-        opts.generate_wac(&resolve, world, &exports_wasm_path, &wit_dir);
-        let output_file = "composed.wasm";
-        let imports = format!("import:proxy={}", imports_wasm_path.display());
-        let exports = format!("export:proxy={}", exports_wasm_path.display());
-        let root = format!("root:component={}", args.wasm_file.display());
-        let wac_path = tmp_dir.join("wit/compose.wac");
-        let status = Command::new("wac")
-            .arg("compose")
-            .arg("--dep")
-            .arg(&imports)
-            .arg("--dep")
-            .arg(&exports)
-            .arg("--dep")
-            .arg(&root)
-            .arg(&wac_path)
-            .arg("-o")
-            .arg(output_file)
-            .status()?;
-        assert!(status.success());
-        eprintln!("Generated component: {output_file}");
-    */
+    // 7. run wac
+    opts.generate_wac(&resolve, world, &exports_wasm_path, &wit_dir);
+    let output_file = "composed.wasm";
+    let imports = format!("import:proxy={}", imports_wasm_path.display());
+    let exports = format!("export:proxy={}", exports_wasm_path.display());
+    let root = format!("root:component={}", args.wasm_file.display());
+    let wac_path = tmp_dir.join("wit/compose.wac");
+    let status = Command::new("wac")
+        .arg("compose")
+        .arg("--dep")
+        .arg(&imports)
+        .arg("--dep")
+        .arg(&exports)
+        .arg("--dep")
+        .arg(&root)
+        .arg(&wac_path)
+        .arg("-o")
+        .arg(output_file)
+        .status()?;
+    assert!(status.success());
+    eprintln!("Generated component: {output_file}");
     Ok(())
 }
 
