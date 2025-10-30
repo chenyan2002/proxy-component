@@ -114,17 +114,18 @@ fn bindgen(
     dest_name: &str,
 ) -> Result<()> {
     let out_dir = tmp_dir.join(dest_name);
-    let status = Command::new("wit-bindgen")
-        .arg("rust")
-        .arg(wit_dir)
-        .arg("--world")
-        .arg(world_name)
-        .arg("--generate-all")
-        .arg("--runtime-path")
-        .arg("wit_bindgen_rt")
-        .arg("--out-dir")
-        .arg(&out_dir)
-        .status()?;
+    let status =
+        Command::new("/Users/chenyan/src/bytecodealliance/wit-bindgen/target/debug/wit-bindgen")
+            .arg("rust")
+            .arg(wit_dir)
+            .arg("--world")
+            .arg(world_name)
+            .arg("--generate-all")
+            .arg("--runtime-path")
+            .arg("wit_bindgen_rt")
+            .arg("--out-dir")
+            .arg(&out_dir)
+            .status()?;
     assert!(status.success());
     let binding_file = out_dir.join(world_name.to_owned() + ".rs");
     let codegen_mode = match mode {

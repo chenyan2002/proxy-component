@@ -203,7 +203,7 @@ let main = new root:component {
                 Mode::Replay => {
                     out.push_str(&format!("\nuse {iface}.{{{resource}}};\n"));
                     out.push_str(&format!(
-                        "get-{func_name}: func(handle: u32) -> {resource};\n"
+                        "get-mock-{func_name}: func(handle: u32) -> {resource};\n"
                     ));
                 }
             }

@@ -30,7 +30,9 @@ impl<'a> TraitGenerator<'a> {
             for (module_path, info) in &self.state.types {
                 for ty in info {
                     match ty {
-                        TypeInfo::Resource(item) => items.extend(t.resource_trait(module_path, item)),
+                        TypeInfo::Resource(item) => {
+                            items.extend(t.resource_trait(module_path, item))
+                        }
                         TypeInfo::Struct(item) => items.extend(t.struct_trait(module_path, item)),
                         TypeInfo::Enum(item) => items.extend(t.enum_trait(module_path, item)),
                     }

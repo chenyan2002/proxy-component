@@ -125,7 +125,11 @@ impl<'ast> State<'ast> {
                             }
                         },
                         GenerateMode::Instrument => {
-                            self.generate_instrument_func(module_path, &sig, &resource)
+                            if module_path.join("::") == "exports::proxy::conversion::conversion" {
+                                self.generate_conversion_func(&sig)
+                            } else {
+                                self.generate_instrument_func(module_path, &sig, &resource)
+                            }
                         }
                         GenerateMode::Virtualize => todo!(),
                     };
@@ -146,9 +150,6 @@ impl<'ast> State<'ast> {
         sig: &Signature,
         resource: &Option<String>,
     ) -> syn::ImplItemFn {
-        if module_path.join("::") == "exports::proxy::conversion::conversion" {
-            return parse_quote! { #[allow(unused_variables)] #sig { todo!() } };
-        }
         let func_name = &sig.ident;
         let (is_method, args) = extract_arg_info(sig);
         let mut import_func = get_proxy_path(module_path);
@@ -174,6 +175,23 @@ impl<'ast> State<'ast> {
         parse_quote! {
             #sig {
                 #func(#(#call_args),*).to_export()
+            }
+        }
+    }
+    fn generate_conversion_func(&self, sig: &Signature) -> syn::ImplItemFn {
+        let func_name = &sig.ident.to_string();
+        let body: syn::Expr = if func_name.starts_with("get_wrapped_") {
+            parse_quote! { x.to_export() }
+        } else if func_name.starts_with("get_host_") {
+            parse_quote! { x.to_import() }
+        } else if func_name.starts_with("get_mock_") {
+            todo!()
+        } else {
+            unreachable!()
+        };
+        parse_quote! {
+            #sig {
+                #body
             }
         }
     }

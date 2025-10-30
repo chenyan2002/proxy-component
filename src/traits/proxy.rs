@@ -72,10 +72,9 @@ impl Trait for ProxyTrait<'_> {
                 impl<'a> ToImport for #export_borrow {
                     type Output = &'a #output_owned;
                     fn to_import(self) -> Self::Output {
-                        todo!()
-                        //type T = #output_owned;
-                        //let ptr = unsafe { &mut *self.as_ptr::<T>() };
-                        //ptr.as_ref().unwrap()*/
+                        type T = #output_owned;
+                        let ptr = unsafe { &mut *self.as_ptr::<T>() };
+                        ptr.as_ref().unwrap()
                     }
                 }
             });
