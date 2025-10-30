@@ -1347,6 +1347,7 @@ dependencies = [
  "clap",
  "heck",
  "prettyplease",
+ "proc-macro2",
  "quote",
  "serde",
  "serde_json",

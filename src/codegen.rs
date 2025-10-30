@@ -254,6 +254,15 @@ impl<'ast> State<'ast> {
           bindings::export!(Stub with_types_in bindings);
         };
         self.output = file.items;
+        match &self.mode {
+            GenerateMode::Instrument => {
+                self.output.push(parse_quote! {
+                    #[allow(unused_imports)]
+                    use wasm_wave::{wasm::WasmValue, value::{Value, Type, convert::{ToRust, ToValue, ValueTyped}}};
+                });
+            }
+            _ => (),
+        }
     }
     fn into_output_file(self) -> File {
         File {

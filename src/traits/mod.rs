@@ -2,6 +2,7 @@ use crate::codegen::{GenerateMode, State, TypeInfo};
 use syn::{Item, ItemEnum, ItemStruct};
 
 mod proxy;
+mod wave;
 
 pub struct TraitGenerator<'a> {
     state: &'a State<'a>,
@@ -19,6 +20,7 @@ impl<'a> TraitGenerator<'a> {
     pub fn new(state: &'a State<'a>) -> TraitGenerator<'a> {
         let mut traits: Vec<Box<dyn Trait + 'a>> = Vec::new();
         if matches!(state.mode, GenerateMode::Instrument) {
+            traits.push(Box::new(wave::TypeTrait));
             traits.push(Box::new(proxy::ProxyTrait::new(state)));
         }
         TraitGenerator { state, traits }

@@ -21,6 +21,7 @@ wit-component = "0.239.0"
 
 wasmtime = { version = "37.0.0", features = ["wave"], optional = true }
 wasmtime-wasi = { version = "37.0.0", optional = true }
+proc-macro2 = "1.0.103"
 
 [features]
 run = ["wasmtime", "wasmtime-wasi"]
