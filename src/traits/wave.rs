@@ -42,7 +42,7 @@ impl Trait for WaveTrait {
                 res.push(parse_quote! {
                 impl<'a> ToValue for &'a #resource_path {
                     fn to_value(&self) -> Value {
-                        Value::make_resource(&#resource_path::value_type(), self.handle(), true).unwrap()
+                        Value::make_resource(&<&#resource_path>::value_type(), self.handle(), true).unwrap()
                     }
                 }
                 });

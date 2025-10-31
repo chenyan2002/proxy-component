@@ -183,7 +183,7 @@ impl<'ast> State<'ast> {
         match &self.mode {
             GenerateMode::Instrument => parse_quote! {
                 #sig {
-                    #func(#(#call_args.to_import()),*).to_export()
+                    #func(#(#call_args.to_proxy()),*).to_proxy()
                 }
             },
             GenerateMode::Record => {
@@ -197,25 +197,30 @@ impl<'ast> State<'ast> {
                 } else {
                     quote! { mut }
                 };
-                let ret_val = if matches!(sig.output, syn::ReturnType::Default) {
-                    quote! { None }
-                } else {
-                    quote! { Some(&wave_res) }
-                };
                 let display_name = wit_func_name(module_path, resource, func_name);
                 let is_export = !module_path[1].starts_with("wrapped_");
+                let record_ret = if has_no_return_type(&sig.output) {
+                    quote! {
+                        #func(#(#call_args),*);
+                        proxy::recorder::record::record_ret(Some(#display_name), None, #is_export);
+                    }
+                } else {
+                    quote! {
+                       let res = #func(#(#call_args),*);
+                       let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
+                       proxy::recorder::record::record_ret(Some(#display_name), Some(&wave_res), #is_export);
+                       res.to_proxy()
+                    }
+                };
                 parse_quote! {
                     #sig {
                         let #is_mut params: Vec<String> = #init_vec;
                         #(
-                            let #arg_names = #arg_names.to_import();
+                            let #arg_names = #arg_names.to_proxy();
                             params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*
                         proxy::recorder::record::record_args(Some(#display_name), &params, #is_export);
-                        let res = #func(#(#call_args.to_import()),*);
-                        let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                        proxy::recorder::record::record_ret(Some(#display_name), #ret_val, #is_export);
-                        res.to_export()
+                        #record_ret
                     }
                 }
             }
@@ -225,9 +230,9 @@ impl<'ast> State<'ast> {
     fn generate_conversion_func(&self, sig: &Signature) -> syn::ImplItemFn {
         let func_name = &sig.ident.to_string();
         let body: syn::Expr = if func_name.starts_with("get_wrapped_") {
-            parse_quote! { x.to_export() }
+            parse_quote! { x.to_proxy() }
         } else if func_name.starts_with("get_host_") {
-            parse_quote! { x.to_import() }
+            parse_quote! { x.to_proxy() }
         } else if func_name.starts_with("get_mock_") {
             todo!()
         } else {
@@ -463,14 +468,23 @@ fn wit_func_name(module_path: &[String], resource: &Option<String>, func_name: &
         .strip_prefix("wrapped_")
         .unwrap_or(&module_path[1]);
     res.push_str(&nonwrapped.to_kebab_case());
-    res.push_str(":");
+    res.push(':');
     res.push_str(&module_path[2].to_kebab_case());
-    res.push_str("/");
+    res.push('/');
     res.push_str(&module_path[3].to_kebab_case());
     if let Some(name) = resource {
         res.push_str(&format!("/{}", name.to_kebab_case()));
     }
-    res.push_str(".");
+    res.push('.');
     res.push_str(&func_name.to_string().to_kebab_case());
     res
+}
+fn has_no_return_type(ret: &syn::ReturnType) -> bool {
+    match ret {
+        syn::ReturnType::Default => true,
+        syn::ReturnType::Type(_, ty) => match **ty {
+            Type::Tuple(ref tuple) if tuple.elems.is_empty() => true,
+            _ => false,
+        },
+    }
 }
