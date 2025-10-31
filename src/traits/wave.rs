@@ -79,7 +79,6 @@ impl Trait for WaveTrait {
     }
     fn struct_trait(&self, module_path: &[String], struct_item: &ItemStruct) -> Vec<Item> {
         let mut res = Vec::new();
-        let use_path: syn::Path = syn::parse_str(&module_path.join("::")).unwrap();
         let in_import = module_path[0] != "exports";
         let struct_name = make_path(module_path, &struct_item.ident.to_string());
         let (impl_generics, ty_generics, where_clause) = struct_item.generics.split_for_impl();
@@ -104,7 +103,6 @@ impl Trait for WaveTrait {
             impl #impl_generics ValueTyped for #struct_name #ty_generics #where_clause {
                 #[allow(unused_imports)]
                 fn value_type() -> Type {
-                    use #use_path::*;
                     let fields = vec![
                         #((#wit_names, <#tys as ValueTyped>::value_type())),*
                     ];
@@ -129,7 +127,6 @@ impl Trait for WaveTrait {
     }
     fn enum_trait(&self, module_path: &[String], enum_item: &ItemEnum) -> Vec<Item> {
         let mut res = Vec::new();
-        let use_path: syn::Path = syn::parse_str(&module_path.join("::")).unwrap();
         let in_import = module_path[0] != "exports";
         let enum_name = make_path(module_path, &enum_item.ident.to_string());
         let (impl_generics, ty_generics, where_clause) = enum_item.generics.split_for_impl();
@@ -150,7 +147,6 @@ impl Trait for WaveTrait {
             impl #impl_generics ValueTyped for #enum_name #ty_generics #where_clause {
                 #[allow(unused_imports)]
                 fn value_type() -> Type {
-                    use #use_path::*;
                     let cases = vec![#(#cases),*];
                     Type::variant(cases).unwrap()
                 }

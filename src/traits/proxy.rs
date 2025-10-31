@@ -40,6 +40,14 @@ impl Trait for ProxyTrait<'_> {
                         }
                     }
                 });
+                res.push(parse_quote! {
+                    impl<'a> ToProxy for &'a #resource_path {
+                        type Output = &'a #output_path;
+                        fn to_proxy(self) -> Self::Output {
+                            unreachable!()
+                        }
+                    }
+                });
             } else {
                 let export_borrow =
                     make_path(&output_path, &format!("{}Borrow<'a>", &resource.ident));

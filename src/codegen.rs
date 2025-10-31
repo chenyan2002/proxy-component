@@ -266,7 +266,12 @@ impl<'ast> State<'ast> {
                         }
                         TypeInfo::Resource(struct_item.clone())
                     } else {
-                        TypeInfo::Struct(struct_item.clone())
+                        let mut struct_item = struct_item.clone();
+                        let mut transformer = FullTypePath {
+                            module_path: &current_path,
+                        };
+                        transformer.visit_item_struct_mut(&mut struct_item);
+                        TypeInfo::Struct(struct_item)
                     };
                     self.types
                         .entry(current_path.clone())
@@ -274,10 +279,15 @@ impl<'ast> State<'ast> {
                         .push(type_info);
                 }
                 Item::Enum(enum_item) if matches!(enum_item.vis, Visibility::Public(_)) => {
+                    let mut enum_item = enum_item.clone();
+                    let mut transformer = FullTypePath {
+                        module_path: &current_path,
+                    };
+                    transformer.visit_item_enum_mut(&mut enum_item);
                     self.types
                         .entry(current_path.clone())
                         .or_default()
-                        .push(TypeInfo::Enum(enum_item.clone()));
+                        .push(TypeInfo::Enum(enum_item));
                 }
                 Item::Mod(module) if matches!(module.vis, Visibility::Public(_)) => {
                     if let Some((_, ref mod_items)) = module.content {
