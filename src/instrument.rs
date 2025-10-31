@@ -129,8 +129,8 @@ fn bindgen(
     assert!(status.success());
     let binding_file = out_dir.join(world_name.to_owned() + ".rs");
     let codegen_mode = match mode {
-        Mode::Record => codegen::GenerateMode::Instrument,
-        Mode::Replay => codegen::GenerateMode::Virtualize,
+        Mode::Record => codegen::GenerateMode::Record,
+        Mode::Replay => codegen::GenerateMode::Replay,
     };
     let codegen_opt = codegen::GenerateArgs {
         bindings: binding_file.clone(),

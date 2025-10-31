@@ -1,5 +1,6 @@
 use anyhow::Result;
-use quote::ToTokens;
+use heck::ToKebabCase;
+use quote::{ToTokens, quote};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use syn::{
@@ -21,11 +22,18 @@ pub struct GenerateArgs {
 pub enum GenerateMode {
     /// An arbitrary component, we can only generate an empty stub.
     Stubs,
-    /// A instrument component which imports and exports the same interface.
+    /// An instrument component which imports and exports the same interface.
     /// The generated code will redirect the export interface to call the corresponding import interface.
     Instrument,
+    /// An instrument component which records all import calls.
+    Record,
     /// A virtualized component with no imports. Currently only used for replay.
-    Virtualize,
+    Replay,
+}
+impl GenerateMode {
+    pub fn is_instrument(&self) -> bool {
+        matches!(self, GenerateMode::Instrument | GenerateMode::Record)
+    }
 }
 
 pub struct State<'a> {
@@ -85,8 +93,8 @@ impl<'ast> State<'ast> {
             Some(name) => Some(name.to_string()),
             None => unreachable!(),
         };
-        let stub: syn::Path = match (&self.mode, &resource) {
-            (GenerateMode::Instrument, Some(resource)) => {
+        let stub: syn::Path = match (&self.mode.is_instrument(), &resource) {
+            (true, Some(resource)) => {
                 let import_path = get_proxy_path(module_path);
                 make_path(&import_path, resource)
             }
@@ -98,12 +106,11 @@ impl<'ast> State<'ast> {
             match item {
                 TraitItem::Type(assoc_type) => {
                     let type_name = &assoc_type.ident;
-                    let stub: syn::Path = match &self.mode {
-                        GenerateMode::Instrument => {
-                            let import_path = get_proxy_path(module_path);
-                            make_path(&import_path, &type_name.to_string())
-                        }
-                        _ => parse_quote! { Stub },
+                    let stub: syn::Path = if self.mode.is_instrument() {
+                        let import_path = get_proxy_path(module_path);
+                        make_path(&import_path, &type_name.to_string())
+                    } else {
+                        parse_quote! { Stub }
                     };
                     let impl_item = parse_quote! {
                         type #type_name = #stub;
@@ -124,14 +131,14 @@ impl<'ast> State<'ast> {
                                 unimplemented!()
                             }
                         },
-                        GenerateMode::Instrument => {
+                        GenerateMode::Instrument | GenerateMode::Record => {
                             if module_path.join("::") == "exports::proxy::conversion::conversion" {
                                 self.generate_conversion_func(&sig)
                             } else {
                                 self.generate_instrument_func(module_path, &sig, &resource)
                             }
                         }
-                        GenerateMode::Virtualize => todo!(),
+                        GenerateMode::Replay => todo!(),
                     };
                     methods.push(syn::ImplItem::Fn(stub_impl));
                 }
@@ -156,15 +163,16 @@ impl<'ast> State<'ast> {
         import_func.push(func_name.to_string());
         let import_sig = find_function(&self.ast.items, &import_func).unwrap();
         let (_, import_args) = extract_arg_info(import_sig);
+        let arg_names = args.iter().map(|arg| &arg.ident);
         let call_args = args
             .iter()
             .zip(import_args.iter())
             .map(|(arg, import_arg)| -> syn::Expr {
                 let ident = &arg.ident;
                 if import_arg.is_borrowed {
-                    parse_quote! { &#ident.to_import() }
+                    parse_quote! { &#ident }
                 } else {
-                    parse_quote! { #ident.to_import() }
+                    parse_quote! { #ident }
                 }
             });
         let func: syn::Expr = match (resource.is_some(), is_method.is_some()) {
@@ -172,10 +180,46 @@ impl<'ast> State<'ast> {
             (true, false) => parse_quote! { Self::#func_name },
             (false, _) => syn::parse_str(&import_func.join("::")).unwrap(),
         };
-        parse_quote! {
-            #sig {
-                #func(#(#call_args),*).to_export()
+        match &self.mode {
+            GenerateMode::Instrument => parse_quote! {
+                #sig {
+                    #func(#(#call_args.to_import()),*).to_export()
+                }
+            },
+            GenerateMode::Record => {
+                let init_vec = if is_method.is_some() {
+                    quote! { vec![wasm_wave::to_string(&ToValue::to_value(&self)).unwrap()] }
+                } else {
+                    quote! { Vec::new() }
+                };
+                let is_mut = if args.is_empty() {
+                    quote! {}
+                } else {
+                    quote! { mut }
+                };
+                let ret_val = if matches!(sig.output, syn::ReturnType::Default) {
+                    quote! { None }
+                } else {
+                    quote! { Some(&wave_res) }
+                };
+                let display_name = wit_func_name(module_path, resource, func_name);
+                let is_export = !module_path[1].starts_with("wrapped_");
+                parse_quote! {
+                    #sig {
+                        let #is_mut params: Vec<String> = #init_vec;
+                        #(
+                            let #arg_names = #arg_names.to_import();
+                            params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
+                        )*
+                        proxy::recorder::record::record_args(Some(#display_name), &params, #is_export);
+                        let res = #func(#(#call_args.to_import()),*);
+                        let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
+                        proxy::recorder::record::record_ret(Some(#display_name), #ret_val, #is_export);
+                        res.to_export()
+                    }
+                }
             }
+            _ => unreachable!(),
         }
     }
     fn generate_conversion_func(&self, sig: &Signature) -> syn::ImplItemFn {
@@ -255,10 +299,21 @@ impl<'ast> State<'ast> {
         };
         self.output = file.items;
         match &self.mode {
-            GenerateMode::Instrument => {
+            GenerateMode::Record => {
                 self.output.push(parse_quote! {
                     #[allow(unused_imports)]
                     use wasm_wave::{wasm::WasmValue, value::{Value, Type, convert::{ToRust, ToValue, ValueTyped}}};
+                });
+            }
+            GenerateMode::Replay => {
+                self.output.push(parse_quote! {
+                    #[allow(unused_imports)]
+                    use wasm_wave::{wasm::WasmValue, value::{Value, Type, convert::{ToRust, ToValue, ValueTyped}}};
+                    use std::collections::BTreeMap;
+                    use std::cell::RefCell;
+                    thread_local! {
+                        static TABLE: RefCell<BTreeMap<u32, u32>> = RefCell::new(BTreeMap::new());
+                    }
                 });
             }
             _ => (),
@@ -399,4 +454,23 @@ pub fn get_proxy_path(src_path: &[String]) -> Vec<String> {
 pub fn make_path(module_path: &[String], name: &str) -> syn::Path {
     let path = format!("{}::{}", module_path.join("::"), name);
     syn::parse_str(&path).unwrap()
+}
+fn wit_func_name(module_path: &[String], resource: &Option<String>, func_name: &Ident) -> String {
+    assert!(module_path.len() == 4);
+    assert!(module_path[0] == "exports");
+    let mut res = String::new();
+    let nonwrapped = module_path[1]
+        .strip_prefix("wrapped_")
+        .unwrap_or(&module_path[1]);
+    res.push_str(&nonwrapped.to_kebab_case());
+    res.push_str(":");
+    res.push_str(&module_path[2].to_kebab_case());
+    res.push_str("/");
+    res.push_str(&module_path[3].to_kebab_case());
+    if let Some(name) = resource {
+        res.push_str(&format!("/{}", name.to_kebab_case()));
+    }
+    res.push_str(".");
+    res.push_str(&func_name.to_string().to_kebab_case());
+    res
 }

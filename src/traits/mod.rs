@@ -19,9 +19,24 @@ pub trait Trait {
 impl<'a> TraitGenerator<'a> {
     pub fn new(state: &'a State<'a>) -> TraitGenerator<'a> {
         let mut traits: Vec<Box<dyn Trait + 'a>> = Vec::new();
-        if matches!(state.mode, GenerateMode::Instrument) {
-            traits.push(Box::new(wave::TypeTrait));
-            traits.push(Box::new(proxy::ProxyTrait::new(state)));
+        match &state.mode {
+            GenerateMode::Stubs => (),
+            GenerateMode::Instrument => traits.push(Box::new(proxy::ProxyTrait::new(state))),
+            GenerateMode::Record => {
+                traits.push(Box::new(wave::WaveTrait {
+                    to_value: true,
+                    to_rust: false,
+                    has_replay_table: false,
+                }));
+                traits.push(Box::new(proxy::ProxyTrait::new(state)));
+            }
+            GenerateMode::Replay => {
+                traits.push(Box::new(wave::WaveTrait {
+                    to_value: true,
+                    to_rust: true,
+                    has_replay_table: true,
+                }));
+            }
         }
         TraitGenerator { state, traits }
     }
