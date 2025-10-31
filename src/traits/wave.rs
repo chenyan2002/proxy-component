@@ -1,6 +1,6 @@
 use crate::codegen::make_path;
 use crate::traits::Trait;
-use heck::ToKebabCase;
+use heck::{ToKebabCase, ToSnakeCase};
 use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
@@ -47,6 +47,26 @@ impl Trait for WaveTrait {
                 }
                 });
             }
+            if self.to_rust {
+                let call = format!("get_mock_{}", resource.ident.to_string().to_snake_case());
+                let call: syn::Ident = syn::parse_str(&call).unwrap();
+                res.push(parse_quote! {
+                impl ToRust<#resource_path> for Value {
+                    fn to_rust(&self) -> #resource_path {
+                        let (handle, _is_borrowed) = self.unwrap_resource();
+                        //assert!(!is_borrowed);
+                        proxy::conversion::conversion::#call(handle)
+                    }
+                }
+                });
+                res.push(parse_quote! {
+                impl<'a> ToRust<&'a #resource_path> for Value {
+                    fn to_rust(&self) -> &'a #resource_path {
+                        unreachable!()
+                    }
+                }
+                });
+            }
         } else {
             let borrow_path = make_path(module_path, &format!("{}Borrow<'a>", resource.ident));
             res.push(parse_quote! {
@@ -73,6 +93,29 @@ impl Trait for WaveTrait {
                         Value::make_resource(&#resource_path::value_type(), handle, true).unwrap()
                     }
                 }});
+            }
+            if self.to_rust && self.has_replay_table {
+                res.push(parse_quote! {
+                impl ToRust<#resource_path> for Value {
+                    fn to_rust(&self) -> #resource_path {
+                        let (expect_handle, is_borrowed) = self.unwrap_resource();
+                        assert!(!is_borrowed);
+                        let handle = #resource_path::new(Stub);
+                        let ptr = handle.as_ptr::<Stub>() as u32;
+                        TABLE.with(|map| { map.borrow_mut().insert(ptr, expect_handle) });
+                        // Assertion will hold after https://github.com/WebAssembly/component-model/issues/395 lands on wac
+                        // assert_eq!(expect_handle, handle.handle());
+                        handle
+                    }
+                }
+                });
+                res.push(parse_quote! {
+                impl<'a> ToRust<#borrow_path> for Value {
+                    fn to_rust(&self) -> #borrow_path {
+                        unreachable!()
+                    }
+                }
+                });
             }
         }
         res
@@ -119,6 +162,18 @@ impl Trait for WaveTrait {
                         #((#wit_names, self.#field_names.to_value())),*
                     ];
                     Value::make_record(&ty, fields).unwrap()
+                }
+            }
+            });
+        }
+        if self.to_rust && !in_import {
+            res.push(parse_quote! {
+            impl #impl_generics ToRust<#struct_name #ty_generics> for Value #where_clause {
+                fn to_rust(&self) -> #struct_name #ty_generics {
+                    let fields: BTreeMap<_, _> = self.unwrap_record().collect();
+                    #struct_name {
+                        #(#field_names: fields[#wit_names].to_rust()),*
+                    }
                 }
             }
             });
@@ -171,6 +226,31 @@ impl Trait for WaveTrait {
                     match self {
                         #(#arms),*
                     }.unwrap()
+                }
+            }
+            });
+        }
+        if self.to_rust && !in_import {
+            let arms = enum_item.variants.iter().map(|variant| {
+                let tag = &variant.ident;
+                let wit_name = tag.to_string().to_kebab_case();
+                match &variant.fields {
+                    syn::Fields::Unit => quote! {
+                        (ref case, None) if case == #wit_name => #enum_name::#tag
+                    },
+                    syn::Fields::Unnamed(_) => quote! {
+                        (ref case, Some(val)) if case == #wit_name => #enum_name::#tag(val.to_rust())
+                    },
+                    syn::Fields::Named(_) => unreachable!(),
+                }
+            });
+            res.push(parse_quote! {
+            impl #impl_generics ToRust<#enum_name #ty_generics> for Value #where_clause {
+                fn to_rust(&self) -> #enum_name #ty_generics {
+                    match self.unwrap_variant() {
+                        #(#arms),*,
+                        _ => unreachable!(),
+                    }
                 }
             }
             });

@@ -138,7 +138,13 @@ impl<'ast> State<'ast> {
                                 self.generate_instrument_func(module_path, &sig, &resource)
                             }
                         }
-                        GenerateMode::Replay => todo!(),
+                        GenerateMode::Replay => {
+                            if module_path.join("::") == "exports::proxy::conversion::conversion" {
+                                self.generate_conversion_func(&sig)
+                            } else {
+                                self.generate_replay_func(module_path, &sig, &resource)
+                            }
+                        }
                     };
                     methods.push(syn::ImplItem::Fn(stub_impl));
                 }
@@ -148,6 +154,45 @@ impl<'ast> State<'ast> {
         parse_quote! {
             impl #trait_path for #stub {
                 #(#methods)*
+            }
+        }
+    }
+    fn generate_replay_func(
+        &self,
+        module_path: &[String],
+        sig: &Signature,
+        resource: &Option<String>,
+    ) -> syn::ImplItemFn {
+        let func_name = &sig.ident;
+        let (is_method, args) = extract_arg_info(sig);
+        let arg_names = args.iter().map(|arg| &arg.ident);
+        let display_name = wit_func_name(module_path, resource, func_name);
+        let is_export = module_path.join("::") == "exports::proxy::recorder::start_replay";
+        if !is_export {
+            let ret_ty = get_return_type(&sig.output);
+            let replay_import = if let Some(ret_ty) = ret_ty {
+                quote! {
+                    let wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&args)).unwrap();
+                    let ret: Value = wasm_wave::from_str(&<#ret_ty as ValueTyped>::value_type(), &wave).unwrap();
+                    ret.to_rust()
+                }
+            } else {
+                quote! {
+                    let wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&args));
+                    assert!(wave.is_none());
+                }
+            };
+            parse_quote! {
+                #sig {
+                    let args = vec![#( wasm_wave::to_string(&#arg_names.to_value()).unwrap() ),*];
+                    #replay_import
+                }
+            }
+        } else {
+            parse_quote! {
+                #sig {
+                    todo!()
+                }
             }
         }
     }
@@ -199,7 +244,7 @@ impl<'ast> State<'ast> {
                 };
                 let display_name = wit_func_name(module_path, resource, func_name);
                 let is_export = !module_path[1].starts_with("wrapped_");
-                let record_ret = if has_no_return_type(&sig.output) {
+                let record_ret = if get_return_type(&sig.output).is_none() {
                     quote! {
                         #func(#(#call_args),*);
                         proxy::recorder::record::record_ret(Some(#display_name), None, #is_export);
@@ -229,12 +274,22 @@ impl<'ast> State<'ast> {
     }
     fn generate_conversion_func(&self, sig: &Signature) -> syn::ImplItemFn {
         let func_name = &sig.ident.to_string();
-        let body: syn::Expr = if func_name.starts_with("get_wrapped_") {
-            parse_quote! { x.to_proxy() }
+        let body = if func_name.starts_with("get_wrapped_") {
+            quote! { x.to_proxy() }
         } else if func_name.starts_with("get_host_") {
-            parse_quote! { x.to_proxy() }
+            quote! { x.to_proxy() }
         } else if func_name.starts_with("get_mock_") {
-            todo!()
+            let syn::ReturnType::Type(_, resource) = &sig.output else {
+                unreachable!()
+            };
+            quote! {
+                let res = #resource::new(Stub);
+                let ptr = res.as_ptr::<Stub>() as u32;
+                TABLE.with(|map| {
+                    map.borrow_mut().insert(ptr, handle);
+                });
+                res
+            }
         } else {
             unreachable!()
         };
@@ -317,11 +372,11 @@ impl<'ast> State<'ast> {
             GenerateMode::Record => {
                 self.output.push(parse_quote! {
                     #[allow(unused_imports)]
-                    use wasm_wave::{wasm::WasmValue, value::{Value, Type, convert::{ToRust, ToValue, ValueTyped}}};
+                    use wasm_wave::{wasm::WasmValue, value::{Value, Type, convert::{ToValue, ValueTyped}}};
                 });
             }
             GenerateMode::Replay => {
-                self.output.push(parse_quote! {
+                let code: File = parse_quote! {
                     #[allow(unused_imports)]
                     use wasm_wave::{wasm::WasmValue, value::{Value, Type, convert::{ToRust, ToValue, ValueTyped}}};
                     use std::collections::BTreeMap;
@@ -329,7 +384,8 @@ impl<'ast> State<'ast> {
                     thread_local! {
                         static TABLE: RefCell<BTreeMap<u32, u32>> = RefCell::new(BTreeMap::new());
                     }
-                });
+                };
+                self.output.extend(code.items);
             }
             _ => (),
         }
@@ -489,12 +545,12 @@ fn wit_func_name(module_path: &[String], resource: &Option<String>, func_name: &
     res.push_str(&func_name.to_string().to_kebab_case());
     res
 }
-fn has_no_return_type(ret: &syn::ReturnType) -> bool {
+fn get_return_type(ret: &syn::ReturnType) -> Option<Type> {
     match ret {
-        syn::ReturnType::Default => true,
+        syn::ReturnType::Default => None,
         syn::ReturnType::Type(_, ty) => match **ty {
-            Type::Tuple(ref tuple) if tuple.elems.is_empty() => true,
-            _ => false,
+            Type::Tuple(ref tuple) if tuple.elems.is_empty() => None,
+            _ => Some(*ty.clone()),
         },
     }
 }
