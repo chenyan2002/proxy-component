@@ -41,6 +41,7 @@ pub struct State<'a> {
     pub ast: &'a File,
     pub traits: BTreeMap<Vec<String>, Vec<ItemTrait>>,
     pub types: BTreeMap<Vec<String>, Vec<TypeInfo>>,
+    pub funcs: BTreeMap<Vec<String>, Vec<Signature>>,
     pub module_paths: BTreeSet<Vec<String>>,
     pub output: Vec<Item>,
 }
@@ -60,6 +61,7 @@ impl GenerateArgs {
             ast: &ast,
             traits: BTreeMap::new(),
             types: BTreeMap::new(),
+            funcs: BTreeMap::new(),
             module_paths: BTreeSet::new(),
             output: Vec::new(),
         };
@@ -142,7 +144,7 @@ impl<'ast> State<'ast> {
                             if module_path.join("::") == "exports::proxy::conversion::conversion" {
                                 self.generate_conversion_func(&sig)
                             } else {
-                                self.generate_replay_func(module_path, &sig, &resource)
+                                self.generate_replay_func(module_path, &sig)
                             }
                         }
                     };
@@ -157,18 +159,13 @@ impl<'ast> State<'ast> {
             }
         }
     }
-    fn generate_replay_func(
-        &self,
-        module_path: &[String],
-        sig: &Signature,
-        resource: &Option<String>,
-    ) -> syn::ImplItemFn {
+    fn generate_replay_func(&self, module_path: &[String], sig: &Signature) -> syn::ImplItemFn {
         let func_name = &sig.ident;
         let (is_method, args) = extract_arg_info(sig);
         let arg_names = args.iter().map(|arg| &arg.ident);
-        let display_name = wit_func_name(module_path, resource, func_name);
         let is_export = module_path.join("::") == "exports::proxy::recorder::start_replay";
         if !is_export {
+            let display_name = wit_func_name(module_path, &None, func_name);
             let ret_ty = get_return_type(&sig.output);
             let replay_import = if let Some(ret_ty) = ret_ty {
                 quote! {
@@ -189,9 +186,11 @@ impl<'ast> State<'ast> {
                 }
             }
         } else {
+            assert!(func_name == "start");
             parse_quote! {
                 #sig {
-                    todo!()
+                    while let Some((method, args)) = proxy::recorder::replay::replay_export() {
+                    }
                 }
             }
         }
@@ -204,9 +203,8 @@ impl<'ast> State<'ast> {
     ) -> syn::ImplItemFn {
         let func_name = &sig.ident;
         let (is_method, args) = extract_arg_info(sig);
-        let mut import_func = get_proxy_path(module_path);
-        import_func.push(func_name.to_string());
-        let import_sig = find_function(&self.ast.items, &import_func).unwrap();
+        let mut import_path = get_proxy_path(module_path);
+        let import_sig = self.find_function(&import_path, &func_name).unwrap();
         let (_, import_args) = extract_arg_info(import_sig);
         let arg_names = args.iter().map(|arg| &arg.ident);
         let call_args = args
@@ -223,7 +221,9 @@ impl<'ast> State<'ast> {
         let func: syn::Expr = match (resource.is_some(), is_method.is_some()) {
             (true, true) => parse_quote! { self.#func_name },
             (true, false) => parse_quote! { Self::#func_name },
-            (false, _) => syn::parse_str(&import_func.join("::")).unwrap(),
+            (false, _) => {
+                syn::parse_str(&format!("{}::{}", import_path.join("::"), func_name)).unwrap()
+            }
         };
         match &self.mode {
             GenerateMode::Instrument => parse_quote! {
@@ -303,10 +303,35 @@ impl<'ast> State<'ast> {
         for item in items {
             match item {
                 Item::Trait(trait_item) if matches!(trait_item.vis, Visibility::Public(_)) => {
+                    let trait_item = trait_item.clone();
+                    for item in &trait_item.items {
+                        if let syn::TraitItem::Fn(method) = item {
+                            self.funcs
+                                .entry(current_path.clone())
+                                .or_default()
+                                .push(method.sig.clone());
+                        }
+                    }
                     self.traits
                         .entry(current_path.clone())
                         .or_default()
-                        .push(trait_item.clone());
+                        .push(trait_item);
+                }
+                Item::Impl(impl_item) => {
+                    for item in &impl_item.items {
+                        if let syn::ImplItem::Fn(method) = item {
+                            self.funcs
+                                .entry(current_path.clone())
+                                .or_default()
+                                .push(method.sig.clone());
+                        }
+                    }
+                }
+                Item::Fn(func_item) if matches!(func_item.vis, Visibility::Public(_)) => {
+                    self.funcs
+                        .entry(current_path.clone())
+                        .or_default()
+                        .push(func_item.sig.clone());
                 }
                 Item::Struct(struct_item) if matches!(struct_item.vis, Visibility::Public(_)) => {
                     let has_repr_transparent = struct_item.attrs.iter().any(|attr| {
@@ -397,55 +422,10 @@ impl<'ast> State<'ast> {
             attrs: Vec::new(),
         }
     }
-}
-
-fn find_function<'a>(items: &'a [Item], path: &[String]) -> Option<&'a Signature> {
-    if path.is_empty() {
-        return None;
+    fn find_function(&self, module_path: &[String], func: &Ident) -> Option<&Signature> {
+        let module = self.funcs.get(module_path)?;
+        module.iter().find(|sig| sig.ident == *func)
     }
-    if path.len() == 1 {
-        for item in items {
-            match item {
-                Item::Fn(func) => {
-                    if func.sig.ident == path[0] {
-                        return Some(&func.sig);
-                    }
-                }
-                Item::Impl(impl_block) => {
-                    for impl_item in &impl_block.items {
-                        if let syn::ImplItem::Fn(method) = impl_item
-                            && method.sig.ident == path[0]
-                        {
-                            return Some(&method.sig);
-                        }
-                    }
-                }
-                Item::Trait(trait_block) => {
-                    for trait_item in &trait_block.items {
-                        if let syn::TraitItem::Fn(method) = trait_item
-                            && method.sig.ident == path[0]
-                        {
-                            return Some(&method.sig);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        return None;
-    }
-    for item in items {
-        if let Item::Mod(module) = item
-            && module.ident == path[0]
-        {
-            if let Some((_, ref items)) = module.content {
-                return find_function(items, &path[1..]);
-            } else {
-                return None;
-            }
-        }
-    }
-    None
 }
 
 const BUILTIN_TYPES: &[&str] = &[
