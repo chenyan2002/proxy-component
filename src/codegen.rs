@@ -41,7 +41,7 @@ pub struct State<'a> {
     pub ast: &'a File,
     pub traits: BTreeMap<Vec<String>, Vec<ItemTrait>>,
     pub types: BTreeMap<Vec<String>, Vec<TypeInfo>>,
-    pub funcs: BTreeMap<Vec<String>, Vec<Signature>>,
+    pub funcs: BTreeMap<Vec<String>, BTreeMap<Option<String>, Vec<Signature>>>,
     pub module_paths: BTreeSet<Vec<String>>,
     pub output: Vec<Item>,
 }
@@ -90,11 +90,7 @@ impl<'ast> State<'ast> {
     fn generate_impl_with_methods(&self, trait_item: &ItemTrait, module_path: &[String]) -> Item {
         let trait_name = &trait_item.ident.to_string();
         let trait_path = make_path(module_path, trait_name);
-        let resource = match trait_name.strip_prefix("Guest") {
-            Some("") => None,
-            Some(name) => Some(name.to_string()),
-            None => unreachable!(),
-        };
+        let resource = get_resource_from_trait_name(trait_name);
         let stub: syn::Path = match (&self.mode.is_instrument(), &resource) {
             (true, Some(resource)) => {
                 let import_path = get_proxy_path(module_path);
@@ -187,6 +183,23 @@ impl<'ast> State<'ast> {
             }
         } else {
             assert!(func_name == "start");
+            let arms = self
+                .funcs
+                .iter()
+                .filter(|(path, _)| path[0] != "exports")
+                .flat_map(|(path, resources)| {
+                    resources.iter().flat_map(|(resource, sigs)| {
+                        sigs.iter().filter_map(|sig| {
+                            let (_, is_borrowed) = extract_arg_info(sig);
+                            let display_name = wit_func_name(path, resource, &sig.ident);
+                            Some(quote! {
+                                #display_name => {
+
+                                }
+                            })
+                        })
+                    })
+                });
             parse_quote! {
                 #sig {
                     while let Some((method, args)) = proxy::recorder::replay::replay_export() {
@@ -203,8 +216,10 @@ impl<'ast> State<'ast> {
     ) -> syn::ImplItemFn {
         let func_name = &sig.ident;
         let (is_method, args) = extract_arg_info(sig);
-        let mut import_path = get_proxy_path(module_path);
-        let import_sig = self.find_function(&import_path, &func_name).unwrap();
+        let import_path = get_proxy_path(module_path);
+        let import_sig = self
+            .find_function(&import_path, resource, &func_name)
+            .unwrap();
         let (_, import_args) = extract_arg_info(import_sig);
         let arg_names = args.iter().map(|arg| &arg.ident);
         let call_args = args
@@ -304,12 +319,16 @@ impl<'ast> State<'ast> {
             match item {
                 Item::Trait(trait_item) if matches!(trait_item.vis, Visibility::Public(_)) => {
                     let trait_item = trait_item.clone();
+                    let resource = get_resource_from_trait_name(&trait_item.ident.to_string());
+                    let funcs = self
+                        .funcs
+                        .entry(current_path.clone())
+                        .or_default()
+                        .entry(resource)
+                        .or_default();
                     for item in &trait_item.items {
                         if let syn::TraitItem::Fn(method) = item {
-                            self.funcs
-                                .entry(current_path.clone())
-                                .or_default()
-                                .push(method.sig.clone());
+                            funcs.push(method.sig.clone());
                         }
                     }
                     self.traits
@@ -317,19 +336,32 @@ impl<'ast> State<'ast> {
                         .or_default()
                         .push(trait_item);
                 }
-                Item::Impl(impl_item) => {
+                Item::Impl(impl_item) if impl_item.trait_.is_none() => {
+                    let resource = if let Type::Path(type_path) = &*impl_item.self_ty {
+                        type_path.path.segments.last().unwrap().ident.to_string()
+                    } else {
+                        unreachable!()
+                    };
+                    let funcs = self
+                        .funcs
+                        .entry(current_path.clone())
+                        .or_default()
+                        .entry(Some(resource))
+                        .or_default();
                     for item in &impl_item.items {
                         if let syn::ImplItem::Fn(method) = item {
-                            self.funcs
-                                .entry(current_path.clone())
-                                .or_default()
-                                .push(method.sig.clone());
+                            if !matches!(method.vis, Visibility::Public(_)) {
+                                continue;
+                            }
+                            funcs.push(method.sig.clone());
                         }
                     }
                 }
                 Item::Fn(func_item) if matches!(func_item.vis, Visibility::Public(_)) => {
                     self.funcs
                         .entry(current_path.clone())
+                        .or_default()
+                        .entry(None)
                         .or_default()
                         .push(func_item.sig.clone());
                 }
@@ -422,9 +454,15 @@ impl<'ast> State<'ast> {
             attrs: Vec::new(),
         }
     }
-    fn find_function(&self, module_path: &[String], func: &Ident) -> Option<&Signature> {
+    fn find_function(
+        &self,
+        module_path: &[String],
+        resource: &Option<String>,
+        func: &Ident,
+    ) -> Option<&Signature> {
         let module = self.funcs.get(module_path)?;
-        module.iter().find(|sig| sig.ident == *func)
+        let funcs = module.get(resource)?;
+        funcs.iter().find(|sig| sig.ident == *func)
     }
 }
 
@@ -532,5 +570,12 @@ fn get_return_type(ret: &syn::ReturnType) -> Option<Type> {
             Type::Tuple(ref tuple) if tuple.elems.is_empty() => None,
             _ => Some(*ty.clone()),
         },
+    }
+}
+fn get_resource_from_trait_name(trait_name: &str) -> Option<String> {
+    let resource = trait_name.strip_prefix("Guest").unwrap();
+    match resource {
+        "" => None,
+        name => Some(name.to_string()),
     }
 }
