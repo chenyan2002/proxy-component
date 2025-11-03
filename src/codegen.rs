@@ -186,15 +186,38 @@ impl<'ast> State<'ast> {
             let arms = self
                 .funcs
                 .iter()
-                .filter(|(path, _)| path[0] != "exports")
+                .filter(|(path, _)| path[0] != "exports" && path[0] != "proxy")
                 .flat_map(|(path, resources)| {
-                    resources.iter().flat_map(|(resource, sigs)| {
-                        sigs.iter().filter_map(|sig| {
-                            let (_, is_borrowed) = extract_arg_info(sig);
+                    resources.iter().flat_map(move |(resource, sigs)| {
+                        sigs.iter().filter_map(move |sig| {
+                            let (is_method, args) = extract_arg_info(sig);
+                            if is_method.is_some() {
+                                return None;
+                            }
+                            let arg_name = args.iter().map(|arg| &arg.ident);
+                            let arg_idx = args.iter().enumerate().map(|(idx, _)| quote! { args[#idx] });
+                            let call_param = args.iter().map(|arg| arg.call_param());
+                            let ty = args.iter().map(|arg| {
+                                let mut ty = arg.ty.clone();
+                                FullTypePath {
+                                    module_path: path,
+                                }.visit_type_mut(&mut ty);
+                                ty
+                            });
+                            let func_name = if let Some(resource) = resource {
+                                format!("{}::{}", resource, sig.ident)
+                            } else {
+                                sig.ident.to_string()
+                            };
+                            let func = make_path(path, &func_name);
                             let display_name = wit_func_name(path, resource, &sig.ident);
                             Some(quote! {
                                 #display_name => {
-
+                                    #(
+                                        let arg_value: Value = wasm_wave::from_str(&<#ty as ValueTyped>::value_type(), &#arg_idx).unwrap();
+                                        let #arg_name = arg_value.to_rust();
+                                    )*
+                                    #func(#(#call_param),*);
                                 }
                             })
                         })
@@ -203,6 +226,10 @@ impl<'ast> State<'ast> {
             parse_quote! {
                 #sig {
                     while let Some((method, args)) = proxy::recorder::replay::replay_export() {
+                        match method.as_str() {
+                            #(#arms)*
+                            _ => unreachable!(),
+                        }
                     }
                 }
             }
@@ -353,11 +380,18 @@ impl<'ast> State<'ast> {
                             if !matches!(method.vis, Visibility::Public(_)) {
                                 continue;
                             }
+                            if BUILTIN_FUNCS.contains(&method.sig.ident.to_string().as_str()) {
+                                continue;
+                            }
+                            println!("{current_path:?} {}", method.sig.ident);
                             funcs.push(method.sig.clone());
                         }
                     }
                 }
-                Item::Fn(func_item) if matches!(func_item.vis, Visibility::Public(_)) => {
+                Item::Fn(func_item)
+                    if matches!(func_item.vis, Visibility::Public(_))
+                        && current_path.len() >= 3 =>
+                {
                     self.funcs
                         .entry(current_path.clone())
                         .or_default()
@@ -471,6 +505,17 @@ const BUILTIN_TYPES: &[&str] = &[
     "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "f32", "f64", "bool",
     "char", "_rt",
 ];
+const BUILTIN_FUNCS: &[&str] = &[
+    "as_ptr",
+    "get",
+    "get_mut",
+    "into_inner",
+    "from_handle",
+    "take_handle",
+    "handle",
+    "dtor",
+    "lift",
+];
 struct FullTypePath<'a> {
     module_path: &'a [String],
 }
@@ -502,6 +547,7 @@ impl<'a> VisitMut for FullTypePath<'a> {
 struct ArgInfo {
     ident: Ident,
     is_borrowed: bool,
+    ty: Type,
 }
 fn extract_arg_info(sig: &Signature) -> (Option<bool>, Vec<ArgInfo>) {
     let mut is_method = None;
@@ -517,8 +563,13 @@ fn extract_arg_info(sig: &Signature) -> (Option<bool>, Vec<ArgInfo>) {
                     syn::Pat::Ident(ident) => ident.ident.clone(),
                     _ => unreachable!(),
                 };
+                let ty = *pat_type.ty.clone();
                 let is_borrowed = matches!(&*pat_type.ty, Type::Reference(_));
-                arg_infos.push(ArgInfo { ident, is_borrowed });
+                arg_infos.push(ArgInfo {
+                    ident,
+                    is_borrowed,
+                    ty,
+                });
             }
         }
     }
@@ -545,17 +596,21 @@ pub fn make_path(module_path: &[String], name: &str) -> syn::Path {
     syn::parse_str(&path).unwrap()
 }
 fn wit_func_name(module_path: &[String], resource: &Option<String>, func_name: &Ident) -> String {
-    assert!(module_path.len() == 4);
-    assert!(module_path[0] == "exports");
+    assert!(module_path.len() >= 3);
+    let mut module_path = module_path.to_vec();
+    if module_path[0] == "exports" {
+        module_path.remove(0);
+    }
+    assert!(module_path.len() == 3);
     let mut res = String::new();
-    let nonwrapped = module_path[1]
+    let nonwrapped = module_path[0]
         .strip_prefix("wrapped_")
-        .unwrap_or(&module_path[1]);
+        .unwrap_or(&module_path[0]);
     res.push_str(&nonwrapped.to_kebab_case());
     res.push(':');
-    res.push_str(&module_path[2].to_kebab_case());
+    res.push_str(&module_path[1].to_kebab_case());
     res.push('/');
-    res.push_str(&module_path[3].to_kebab_case());
+    res.push_str(&module_path[2].to_kebab_case());
     if let Some(name) = resource {
         res.push_str(&format!("/{}", name.to_kebab_case()));
     }
@@ -577,5 +632,15 @@ fn get_resource_from_trait_name(trait_name: &str) -> Option<String> {
     match resource {
         "" => None,
         name => Some(name.to_string()),
+    }
+}
+impl ArgInfo {
+    fn call_param(&self) -> syn::Expr {
+        let ident = &self.ident;
+        if self.is_borrowed {
+            parse_quote! { &#ident }
+        } else {
+            parse_quote! { #ident }
+        }
     }
 }

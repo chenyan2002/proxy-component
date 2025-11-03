@@ -153,7 +153,7 @@ impl Trait for WaveTrait {
                 }
             }
         });
-        if self.to_value && in_import {
+        if self.to_value {
             res.push(parse_quote! {
             impl #impl_generics ToValue for #struct_name #ty_generics #where_clause {
                 fn to_value(&self) -> Value {
@@ -207,7 +207,7 @@ impl Trait for WaveTrait {
                 }
             }
         });
-        if self.to_value && in_import {
+        if self.to_value {
             let arms = enum_item.variants.iter().map(|variant| {
                 let tag = &variant.ident;
                 let wit_name = tag.to_string().to_kebab_case();
