@@ -172,38 +172,42 @@ let main = new root:component {
                 if matches!(ty.kind, TypeDefKind::Resource) {
                     let mut resource =
                         format!("{}:{}/{}", pkg_name.namespace, pkg_name.name, iface_name);
+                    let resource_no_ver = resource.clone();
                     if let Some(ver) = &pkg_name.version {
                         resource.push_str(&format!("@{ver}"));
                     }
-                    assert!(resources.insert(*ty_id, (ty_name, resource)).is_none());
+                    assert!(
+                        resources
+                            .insert(*ty_id, (ty_name, resource, resource_no_ver))
+                            .is_none()
+                    );
                 }
             }
         }
         let mut out = Source::default();
         out.push_str("package proxy:conversion;\ninterface conversion {");
-        for (resource, iface) in resources.into_values() {
-            //use heck::ToKebabCase;
-            //let func_name = format!("{iface}-{resource}").to_kebab_case();
-            let func_name = resource.clone();
+        for (resource, iface, iface_no_ver) in resources.into_values() {
+            use heck::ToKebabCase;
+            let func_name = format!("{iface_no_ver}-{resource}").to_kebab_case();
             match self.mode {
                 Mode::Record => {
                     out.push_str(&format!(
-                        "\nuse {iface}.{{{resource} as host-{resource}}};\n",
+                        "\nuse {iface}.{{{resource} as host-{func_name}}};\n",
                     ));
                     out.push_str(&format!(
-                        "use wrapped-{iface}.{{{resource} as wrapped-{resource}}};\n",
+                        "use wrapped-{iface}.{{{resource} as wrapped-{func_name}}};\n",
                     ));
                     out.push_str(&format!(
-                        "get-wrapped-{func_name}: func(x: host-{resource}) -> wrapped-{resource};\n",
+                        "get-wrapped-{func_name}: func(x: host-{func_name}) -> wrapped-{func_name};\n",
                     ));
                     out.push_str(&format!(
-                        "get-host-{func_name}: func(x: wrapped-{resource}) -> host-{resource};\n",
+                        "get-host-{func_name}: func(x: wrapped-{func_name}) -> host-{func_name};\n",
                     ));
                 }
                 Mode::Replay => {
-                    out.push_str(&format!("\nuse {iface}.{{{resource}}};\n"));
+                    out.push_str(&format!("\nuse {iface}.{{{resource} as {func_name}}};\n"));
                     out.push_str(&format!(
-                        "get-mock-{func_name}: func(handle: u32) -> {resource};\n"
+                        "get-mock-{func_name}: func(handle: u32) -> {func_name};\n"
                     ));
                 }
             }

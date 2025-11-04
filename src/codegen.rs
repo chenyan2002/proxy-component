@@ -342,9 +342,7 @@ impl<'ast> State<'ast> {
         } else if func_name.starts_with("get_host_") {
             quote! { x.to_proxy() }
         } else if func_name.starts_with("get_mock_") {
-            let syn::ReturnType::Type(_, resource) = &sig.output else {
-                unreachable!()
-            };
+            let resource = get_return_type(&sig.output).unwrap();
             quote! {
                 let res = #resource::new(Stub);
                 let ptr = res.as_ptr::<Stub>() as u32;

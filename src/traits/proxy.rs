@@ -24,12 +24,12 @@ impl Trait for ProxyTrait<'_> {
             let is_import_only = output_path[0] != "exports";
             if is_import_only {
                 let call = if output_path[0].starts_with("wrapped_") {
-                    "get_wrapped_"
+                    "get_"
                 } else {
                     "get_host_"
                 }
                 .to_string()
-                    + &resource.ident.to_string().to_snake_case();
+                    + &format!("{}_{}", output_path.join("_"), resource.ident).to_snake_case();
                 let call: syn::Path = syn::parse_str(&call).unwrap();
                 let output_path = make_path(&output_path, &resource.ident.to_string());
                 res.push(parse_quote! {

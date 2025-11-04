@@ -48,7 +48,8 @@ impl Trait for WaveTrait {
                 });
             }
             if self.to_rust {
-                let call = format!("get_mock_{}", resource.ident.to_string().to_snake_case());
+                let call = format!("get_mock_{}_{}", module_path.join("_"), resource.ident)
+                    .to_snake_case();
                 let call: syn::Ident = syn::parse_str(&call).unwrap();
                 res.push(parse_quote! {
                 impl ToRust<#resource_path> for Value {
