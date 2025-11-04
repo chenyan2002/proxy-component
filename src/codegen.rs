@@ -401,10 +401,9 @@ impl<'ast> State<'ast> {
                             if !matches!(method.vis, Visibility::Public(_)) {
                                 continue;
                             }
-                            if BUILTIN_FUNCS.contains(&method.sig.ident.to_string().as_str()) {
+                            if has_doc_hidden(&method.attrs) {
                                 continue;
                             }
-                            println!("{current_path:?} {}", method.sig.ident);
                             funcs.push(method.sig.clone());
                         }
                     }
@@ -525,17 +524,6 @@ const BUILTIN_TYPES: &[&str] = &[
     "Self", "Result", "Option", "Vec", "Box", "Rc", "Arc", "String", "str", "u8", "u16", "u32",
     "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "f32", "f64", "bool",
     "char", "_rt",
-];
-const BUILTIN_FUNCS: &[&str] = &[
-    "as_ptr",
-    "get",
-    "get_mut",
-    "into_inner",
-    "from_handle",
-    "take_handle",
-    "handle",
-    "dtor",
-    "lift",
 ];
 struct FullTypePath<'a> {
     module_path: &'a [String],
@@ -697,4 +685,17 @@ fn get_owned_type(ty: &Type) -> Option<Type> {
         }
         _ => None,
     }
+}
+
+fn has_doc_hidden(attrs: &[syn::Attribute]) -> bool {
+    for attr in attrs {
+        if attr.path().is_ident("doc") {
+            if let syn::Meta::List(meta_list) = &attr.meta {
+                if meta_list.to_token_stream().to_string().contains("hidden") {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }

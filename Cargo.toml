@@ -25,4 +25,4 @@ proc-macro2 = "1.0.103"
 
 [features]
 run = ["wasmtime", "wasmtime-wasi"]
-
+default = ["run"]

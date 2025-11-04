@@ -102,11 +102,13 @@ impl Trait for WaveTrait {
                         }
                     }
                     });
+                    let proxy_path = crate::codegen::get_proxy_path(module_path);
+                    let proxy_path = make_path(&proxy_path, &resource.ident.to_string());
                     res.push(parse_quote! {
                     impl<'a> ToValue for #borrow_path {
                         fn to_value(&self) -> Value {
-                            type T = #resource_path;
-                            Value::make_resource(&<#borrow_path as ValueTyped>::value_type(), self.get::<T>()handle(), true).unwrap()
+                            type T = #proxy_path;
+                            Value::make_resource(&<#borrow_path as ValueTyped>::value_type(), self.get::<T>().handle(), true).unwrap()
                         }
                     }
                     });
