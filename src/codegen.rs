@@ -140,7 +140,7 @@ impl<'ast> State<'ast> {
                             if module_path.join("::") == "exports::proxy::conversion::conversion" {
                                 self.generate_conversion_func(&sig)
                             } else {
-                                self.generate_replay_func(module_path, &sig)
+                                self.generate_replay_func(module_path, &sig, &resource)
                             }
                         }
                     };
@@ -155,13 +155,18 @@ impl<'ast> State<'ast> {
             }
         }
     }
-    fn generate_replay_func(&self, module_path: &[String], sig: &Signature) -> syn::ImplItemFn {
+    fn generate_replay_func(
+        &self,
+        module_path: &[String],
+        sig: &Signature,
+        resource: &Option<String>,
+    ) -> syn::ImplItemFn {
         let func_name = &sig.ident;
-        let (is_method, args) = extract_arg_info(sig);
-        let arg_names = args.iter().map(|arg| &arg.ident);
         let is_export = module_path.join("::") == "exports::proxy::recorder::start_replay";
         if !is_export {
-            let display_name = wit_func_name(module_path, &None, func_name);
+            let (is_method, args) = extract_arg_info(sig);
+            let arg_names = args.iter().map(|arg| &arg.ident);
+            let display_name = wit_func_name(module_path, resource, func_name, is_method);
             let ret_ty = get_return_type(&sig.output);
             let replay_import = if let Some(ret_ty) = ret_ty {
                 quote! {
@@ -194,7 +199,7 @@ impl<'ast> State<'ast> {
                             if is_method.is_some() {
                                 return None;
                             }
-                            let arg_name = args.iter().map(|arg| &arg.ident);
+                            let arg_name: Vec<_> = args.iter().map(|arg| &arg.ident).collect();
                             let arg_idx = args.iter().enumerate().map(|(idx, _)| quote! { args[#idx] });
                             let call_param = args.iter().map(|arg| arg.call_param());
                             let ty = args.iter().map(|arg| {
@@ -202,7 +207,11 @@ impl<'ast> State<'ast> {
                                 FullTypePath {
                                     module_path: path,
                                 }.visit_type_mut(&mut ty);
-                                ty
+                                if let Some(owned) = get_owned_type(&ty) {
+                                    owned
+                                } else {
+                                    ty
+                                }
                             });
                             let func_name = if let Some(resource) = resource {
                                 format!("{}::{}", resource, sig.ident)
@@ -210,14 +219,26 @@ impl<'ast> State<'ast> {
                                 sig.ident.to_string()
                             };
                             let func = make_path(path, &func_name);
-                            let display_name = wit_func_name(path, resource, &sig.ident);
+                            let display_name = wit_func_name(path, resource, &sig.ident, None);
+                            let assert_ret = if get_return_type(&sig.output).is_none() {
+                                quote! {
+                                    assert!(res == ());
+                                    proxy::recorder::replay::assert_export_ret(Some(#display_name), None);
+                                }
+                            } else {
+                                quote! {
+                                    let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
+                                    proxy::recorder::replay::assert_export_ret(Some(#display_name), Some(&wave_res));
+                                }
+                            };
                             Some(quote! {
                                 #display_name => {
                                     #(
                                         let arg_value: Value = wasm_wave::from_str(&<#ty as ValueTyped>::value_type(), &#arg_idx).unwrap();
-                                        let #arg_name = arg_value.to_rust();
+                                        let #arg_name: #ty = arg_value.to_rust();
                                     )*
-                                    #func(#(#call_param),*);
+                                    let res = #func(#(#call_param),*);
+                                    #assert_ret
                                 }
                             })
                         })
@@ -284,7 +305,7 @@ impl<'ast> State<'ast> {
                 } else {
                     quote! { mut }
                 };
-                let display_name = wit_func_name(module_path, resource, func_name);
+                let display_name = wit_func_name(module_path, resource, func_name, is_method);
                 let is_export = !module_path[1].starts_with("wrapped_");
                 let record_ret = if get_return_type(&sig.output).is_none() {
                     quote! {
@@ -595,7 +616,12 @@ pub fn make_path(module_path: &[String], name: &str) -> syn::Path {
     let path = format!("{}::{}", module_path.join("::"), name);
     syn::parse_str(&path).unwrap()
 }
-fn wit_func_name(module_path: &[String], resource: &Option<String>, func_name: &Ident) -> String {
+fn wit_func_name(
+    module_path: &[String],
+    resource: &Option<String>,
+    func_name: &Ident,
+    is_method: Option<bool>,
+) -> String {
     assert!(module_path.len() >= 3);
     let mut module_path = module_path.to_vec();
     if module_path[0] == "exports" {
@@ -603,6 +629,9 @@ fn wit_func_name(module_path: &[String], resource: &Option<String>, func_name: &
     }
     assert!(module_path.len() == 3);
     let mut res = String::new();
+    if is_method.is_some() {
+        res.push_str("[method]");
+    }
     let nonwrapped = module_path[0]
         .strip_prefix("wrapped_")
         .unwrap_or(&module_path[0]);
@@ -642,5 +671,30 @@ impl ArgInfo {
         } else {
             parse_quote! { #ident }
         }
+    }
+}
+fn get_owned_type(ty: &Type) -> Option<Type> {
+    match ty {
+        Type::Reference(type_ref) => {
+            match &*type_ref.elem {
+                Type::Slice(type_slice) => {
+                    let inner_ty = &*type_slice.elem;
+                    Some(parse_quote! { Vec<#inner_ty> })
+                }
+                Type::Path(type_path) => {
+                    if type_path.qself.is_none()
+                        && type_path.path.segments.len() == 1
+                        && type_path.path.segments[0].ident == "str"
+                    {
+                        Some(parse_quote! { String })
+                    } else {
+                        // TODO: need to handle nested borrow
+                        Some(parse_quote! { #type_path })
+                    }
+                }
+                _ => None,
+            }
+        }
+        _ => None,
     }
 }

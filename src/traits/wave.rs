@@ -59,13 +59,13 @@ impl Trait for WaveTrait {
                     }
                 }
                 });
-                res.push(parse_quote! {
+                /*res.push(parse_quote! {
                 impl<'a> ToRust<&'a #resource_path> for Value {
                     fn to_rust(&self) -> &'a #resource_path {
                         unreachable!()
                     }
                 }
-                });
+                });*/
             }
         } else {
             let borrow_path = make_path(module_path, &format!("{}Borrow<'a>", resource.ident));
@@ -76,23 +76,41 @@ impl Trait for WaveTrait {
                 }
             }
             });
-            if self.to_value && self.has_replay_table {
-                res.push(parse_quote! {
-                impl ToValue for #resource_path {
-                    fn to_value(&self) -> Value {
-                        let ptr = self.as_ptr::<Stub>() as u32;
-                        let handle = TABLE.with(|map| map.borrow().get(&ptr).unwrap().clone());
-                        Value::make_resource(&#resource_path::value_type(), handle, false).unwrap()
+            if self.to_value {
+                if self.has_replay_table {
+                    res.push(parse_quote! {
+                    impl ToValue for #resource_path {
+                        fn to_value(&self) -> Value {
+                            let ptr = self.as_ptr::<Stub>() as u32;
+                            let handle = TABLE.with(|map| map.borrow().get(&ptr).unwrap().clone());
+                            Value::make_resource(&#resource_path::value_type(), handle, false).unwrap()
+                        }
+                    }});
+                    res.push(parse_quote! {
+                    impl<'a> ToValue for #borrow_path {
+                        fn to_value(&self) -> Value {
+                            let ptr = self.as_ptr::<Stub>() as u32;
+                            let handle = TABLE.with(|map| map.borrow().get(&ptr).unwrap().clone());
+                            Value::make_resource(&<#borrow_path as ValueTyped>::value_type(), handle, true).unwrap()
+                        }
+                    }});
+                } else {
+                    res.push(parse_quote! {
+                    impl ToValue for #resource_path {
+                        fn to_value(&self) -> Value {
+                            Value::make_resource(&#resource_path::value_type(), self.handle(), false).unwrap()
+                        }
                     }
-                }});
-                res.push(parse_quote! {
-                impl<'a> ToValue for #borrow_path {
-                    fn to_value(&self) -> Value {
-                        let ptr = self.as_ptr::<Stub>() as u32;
-                        let handle = TABLE.with(|map| map.borrow().get(&ptr).unwrap().clone());
-                        Value::make_resource(&#resource_path::value_type(), handle, true).unwrap()
+                    });
+                    res.push(parse_quote! {
+                    impl<'a> ToValue for #borrow_path {
+                        fn to_value(&self) -> Value {
+                            type T = #resource_path;
+                            Value::make_resource(&<#borrow_path as ValueTyped>::value_type(), self.get::<T>()handle(), true).unwrap()
+                        }
                     }
-                }});
+                    });
+                }
             }
             if self.to_rust && self.has_replay_table {
                 res.push(parse_quote! {
