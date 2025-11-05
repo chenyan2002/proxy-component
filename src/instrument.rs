@@ -121,8 +121,6 @@ fn bindgen(
             .arg("--world")
             .arg(world_name)
             .arg("--generate-all")
-            .arg("--runtime-path")
-            .arg("wit_bindgen_rt")
             .arg("--out-dir")
             .arg(&out_dir)
             .status()?;

@@ -8,6 +8,6 @@ crate-type = ["cdylib"]
 path = "lib.rs"
 
 [dependencies]
-wit-bindgen-rt.workspace = true
+wit-bindgen.workspace = true
 wasm-wave.workspace = true
 
