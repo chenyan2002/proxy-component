@@ -60,13 +60,15 @@ impl Trait for WaveTrait {
                     }
                 }
                 });
-                /*res.push(parse_quote! {
-                impl<'a> ToRust<&'a #resource_path> for Value {
-                    fn to_rust(&self) -> &'a #resource_path {
-                        unreachable!()
+                // TODO: need to think more about Box::leak
+                res.push(parse_quote! {
+                impl ToRust<&'static #resource_path> for Value {
+                    fn to_rust(&self) -> &'static #resource_path {
+                        let (handle, _is_borrowed) = self.unwrap_resource();
+                        Box::leak(Box::new(proxy::conversion::conversion::#call(handle)))
                     }
                 }
-                });*/
+                });
             }
         } else {
             let borrow_path = make_path(module_path, &format!("{}Borrow<'a>", resource.ident));
