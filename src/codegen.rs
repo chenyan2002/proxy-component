@@ -49,6 +49,12 @@ pub enum TypeInfo {
     Struct(ItemStruct),
     Enum(ItemEnum),
     Resource(ItemStruct),
+    Flag(ItemFlag),
+}
+pub struct ItemFlag {
+    pub name: Ident,
+    pub bits_ty: Type,
+    pub flags: Vec<Ident>,
 }
 
 impl GenerateArgs {
@@ -363,6 +369,7 @@ impl<'ast> State<'ast> {
     fn find_all_items(&mut self, items: &[Item], current_path: Vec<String>) {
         for item in items {
             match item {
+                // export functions
                 Item::Trait(trait_item) if matches!(trait_item.vis, Visibility::Public(_)) => {
                     let trait_item = trait_item.clone();
                     let resource = get_resource_from_trait_name(&trait_item.ident.to_string());
@@ -382,6 +389,7 @@ impl<'ast> State<'ast> {
                         .or_default()
                         .push(trait_item);
                 }
+                // import resource functions
                 Item::Impl(impl_item) if impl_item.trait_.is_none() => {
                     let resource = if let Type::Path(type_path) = &*impl_item.self_ty {
                         type_path.path.segments.last().unwrap().ident.to_string()
@@ -406,6 +414,7 @@ impl<'ast> State<'ast> {
                         }
                     }
                 }
+                // import top-level functions
                 Item::Fn(func_item)
                     if matches!(func_item.vis, Visibility::Public(_))
                         && current_path.len() >= 3 =>
@@ -417,6 +426,7 @@ impl<'ast> State<'ast> {
                         .or_default()
                         .push(func_item.sig.clone());
                 }
+                // resource and struct types
                 Item::Struct(struct_item) if matches!(struct_item.vis, Visibility::Public(_)) => {
                     let has_repr_transparent = struct_item.attrs.iter().any(|attr| {
                         attr.path().is_ident("repr")
@@ -442,6 +452,7 @@ impl<'ast> State<'ast> {
                         .or_default()
                         .push(type_info);
                 }
+                // enum types
                 Item::Enum(enum_item) if matches!(enum_item.vis, Visibility::Public(_)) => {
                     let mut enum_item = enum_item.clone();
                     let mut transformer = FullTypePath {
@@ -453,6 +464,16 @@ impl<'ast> State<'ast> {
                         .or_default()
                         .push(TypeInfo::Enum(enum_item));
                 }
+                // flags
+                Item::Macro(macro_item) => {
+                    if let Some(enum_item) = extract_bitflag(macro_item) {
+                        self.types
+                            .entry(current_path.clone())
+                            .or_default()
+                            .push(TypeInfo::Flag(enum_item));
+                    }
+                }
+                // traverse down the modules
                 Item::Mod(module) if matches!(module.vis, Visibility::Public(_)) => {
                     if let Some((_, ref mod_items)) = module.content {
                         let mut new_path = current_path.clone();
@@ -696,4 +717,38 @@ fn has_doc_hidden(attrs: &[syn::Attribute]) -> bool {
         }
     }
     false
+}
+fn extract_bitflag(macro_item: &syn::ItemMacro) -> Option<ItemFlag> {
+    use syn::{Attribute, Token, parse::Parser};
+    if macro_item.mac.path.segments.last()?.ident == "bitflags" {
+        let tokens = macro_item.mac.tokens.clone();
+        let parser = |input: syn::parse::ParseStream| {
+            input.call(Attribute::parse_outer)?;
+            input.parse::<syn::Visibility>()?;
+            input.parse::<Token![struct]>()?;
+            let ident: Ident = input.parse()?;
+            input.parse::<Token![:]>()?;
+            let ty: Type = input.parse()?;
+            let content;
+            syn::braced!(content in input);
+            let mut flags = vec![];
+            while !content.is_empty() {
+                content.parse::<Token![const]>()?;
+                let flag_ident: Ident = content.parse()?;
+                flags.push(flag_ident);
+                while !content.peek(Token![;]) && !content.is_empty() {
+                    content.parse::<proc_macro2::TokenTree>()?;
+                }
+                content.parse::<Token![;]>()?;
+            }
+            Ok((ident, ty, flags))
+        };
+        let (name, bits_ty, flags) = parser.parse2(tokens).unwrap();
+        return Some(ItemFlag {
+            name,
+            bits_ty,
+            flags,
+        });
+    }
+    None
 }

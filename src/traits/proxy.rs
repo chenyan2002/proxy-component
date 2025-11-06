@@ -141,6 +141,21 @@ impl Trait for ProxyTrait<'_> {
         });
         res
     }
+    fn flag_trait(&self, module_path: &[String], item: &crate::codegen::ItemFlag) -> Vec<Item> {
+        let mut res = Vec::new();
+        let flag_name = make_path(module_path, &item.name.to_string());
+        let output_path = self.get_proxy_path(module_path);
+        let output_path = make_path(&output_path, &item.name.to_string());
+        res.push(parse_quote! {
+            impl ToProxy for #flag_name {
+                type Output = #output_path;
+                fn to_proxy(self) -> Self::Output {
+                    Self::Output::from_bits_retain(self.bits())
+                }
+            }
+        });
+        res
+    }
     fn trait_defs(&self) -> Vec<Item> {
         let defs: File = parse_quote! {
         trait ToProxy {

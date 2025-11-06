@@ -280,6 +280,39 @@ impl Trait for WaveTrait {
         }
         res
     }
+    fn flag_trait(&self, module_path: &[String], item: &crate::codegen::ItemFlag) -> Vec<Item> {
+        let mut res = Vec::new();
+        let flag_path = make_path(module_path, &item.name.to_string());
+        let wit_flags = item.flags.iter().map(|f| f.to_string().to_kebab_case());
+        res.push(parse_quote! {
+            impl ValueTyped for #flag_path {
+                fn value_type() -> Type {
+                    Type::flags(vec![#(#wit_flags),*]).unwrap()
+                }
+            }
+        });
+        if self.to_value {
+            let check_flags = item.flags.iter().map(|f| {
+                let wit_name = f.to_string().to_kebab_case();
+                quote! {
+                    if *self & Self::#f != Self::empty() {
+                        flags.push(#wit_name);
+                    }
+                }
+            });
+            res.push(parse_quote! {
+            impl ToValue for #flag_path {
+                fn to_value(&self) -> Value {
+                    let ty = Self::value_type();
+                    let mut flags = Vec::new();
+                    #(#check_flags)*
+                    Value::make_flags(&ty, flags).unwrap()
+                }
+            }
+            });
+        }
+        res
+    }
     fn trait_defs(&self) -> Vec<Item> {
         vec![]
     }

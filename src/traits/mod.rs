@@ -1,4 +1,4 @@
-use crate::codegen::{GenerateMode, State, TypeInfo};
+use crate::codegen::{GenerateMode, ItemFlag, State, TypeInfo};
 use syn::{Item, ItemEnum, ItemStruct};
 
 mod proxy;
@@ -14,6 +14,7 @@ pub trait Trait {
     fn resource_trait(&self, module_path: &[String], item: &ItemStruct) -> Vec<Item>;
     fn struct_trait(&self, module_path: &[String], item: &ItemStruct) -> Vec<Item>;
     fn enum_trait(&self, module_path: &[String], item: &ItemEnum) -> Vec<Item>;
+    fn flag_trait(&self, module_path: &[String], item: &ItemFlag) -> Vec<Item>;
 }
 
 impl<'a> TraitGenerator<'a> {
@@ -52,6 +53,7 @@ impl<'a> TraitGenerator<'a> {
                         }
                         TypeInfo::Struct(item) => items.extend(t.struct_trait(module_path, item)),
                         TypeInfo::Enum(item) => items.extend(t.enum_trait(module_path, item)),
+                        TypeInfo::Flag(item) => items.extend(t.flag_trait(module_path, item)),
                     }
                 }
             }
