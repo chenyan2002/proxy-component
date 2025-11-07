@@ -5,10 +5,10 @@ use quote::quote;
 use syn::{File, Item, ItemEnum, ItemStruct, parse_quote};
 
 pub struct ProxyTrait<'a> {
-    state: &'a State<'a>,
+    state: &'a State,
 }
 impl<'a> ProxyTrait<'a> {
-    pub fn new(state: &'a State<'a>) -> Self {
+    pub fn new(state: &'a State) -> Self {
         ProxyTrait { state }
     }
 }

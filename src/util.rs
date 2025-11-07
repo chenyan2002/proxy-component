@@ -137,7 +137,7 @@ impl<'a> VisitMut for FullTypePath<'a> {
     }
 }
 
-impl codegen::State<'_> {
+impl codegen::State {
     pub fn find_all_items(&mut self, items: &[Item], current_path: Vec<String>) {
         for item in items {
             match item {

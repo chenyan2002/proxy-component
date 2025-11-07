@@ -5,7 +5,7 @@ mod proxy;
 mod wave;
 
 pub struct TraitGenerator<'a> {
-    state: &'a State<'a>,
+    state: &'a State,
     traits: Vec<Box<dyn Trait + 'a>>,
 }
 
@@ -18,7 +18,7 @@ pub trait Trait {
 }
 
 impl<'a> TraitGenerator<'a> {
-    pub fn new(state: &'a State<'a>) -> TraitGenerator<'a> {
+    pub fn new(state: &'a State) -> TraitGenerator<'a> {
         let mut traits: Vec<Box<dyn Trait + 'a>> = Vec::new();
         match &state.mode {
             GenerateMode::Stubs => (),

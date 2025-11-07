@@ -39,9 +39,8 @@ impl GenerateMode {
     }
 }
 
-pub struct State<'a> {
+pub struct State {
     pub mode: GenerateMode,
-    pub ast: &'a File,
     pub traits: BTreeMap<Vec<String>, Vec<ItemTrait>>,
     pub types: BTreeMap<Vec<String>, Vec<TypeInfo>>,
     pub funcs: BTreeMap<Vec<String>, BTreeMap<Option<String>, Vec<Signature>>>,
@@ -66,7 +65,6 @@ impl GenerateArgs {
 
         let mut state = State {
             mode: self.mode.clone(),
-            ast: &ast,
             traits: BTreeMap::new(),
             types: BTreeMap::new(),
             funcs: BTreeMap::new(),
@@ -86,7 +84,7 @@ impl GenerateArgs {
         Ok(())
     }
 }
-impl<'ast> State<'ast> {
+impl State {
     fn generate_stubs(&mut self) {
         for (module_path, traits) in &self.traits {
             for trait_item in traits {
