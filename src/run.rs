@@ -106,7 +106,7 @@ impl bindings::proxy::recorder::replay::Host for Logger {
         Some((method, args))
     }
     fn assert_export_ret(&mut self, assert_method: Option<String>, assert_ret: Option<String>) {
-        if let Some(FuncCall::ExportRet { .. }) = self.logger.get(0) {
+        if let Some(FuncCall::ExportRet { .. }) = self.logger.front() {
             let call = self.logger.pop_front().unwrap();
             println!("export ret: {}", call.to_string());
             let FuncCall::ExportRet { method, ret } = call else {
@@ -131,10 +131,10 @@ impl bindings::proxy::recorder::replay::Host for Logger {
             if let Some(assert_args) = assert_args {
                 // TODO: ignore method self check for now
                 let args = if args.len() == assert_args.len() + 1 {
-                    assert!(method.as_ref().map_or(false, |m| m.starts_with("[method]")));
+                    assert!(method.as_ref().is_some_and(|m| m.starts_with("[method]")));
                     &args[1..]
                 } else {
-                    &args
+                    args
                 };
                 assert_eq!(args, assert_args);
             }

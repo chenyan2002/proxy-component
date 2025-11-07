@@ -1,5 +1,5 @@
-use crate::codegen::make_path;
 use crate::traits::Trait;
+use crate::util::make_path;
 use heck::{ToKebabCase, ToSnakeCase};
 use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
