@@ -53,7 +53,6 @@ pub enum TypeInfo {
 }
 pub struct ItemFlag {
     pub name: Ident,
-    pub bits_ty: Type,
     pub flags: Vec<Ident>,
 }
 
@@ -170,11 +169,20 @@ impl<'ast> State<'ast> {
         let func_name = &sig.ident;
         let is_export = module_path.join("::") == "exports::proxy::recorder::start_replay";
         if !is_export {
-            let (is_method, args) = extract_arg_info(sig);
+            let (kind, args) = extract_arg_info(sig);
             let arg_names = args.iter().map(|arg| &arg.ident);
-            let display_name = wit_func_name(module_path, resource, func_name, is_method);
+            let display_name = wit_func_name(module_path, resource, func_name, &kind);
             let ret_ty = get_return_type(&sig.output);
             let replay_import = if let Some(ret_ty) = ret_ty {
+                if matches!(kind, Some(ResourceFuncKind::Constructor)) {
+                    // TODO
+                    return parse_quote! {
+                        #sig {
+                            let _wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&[])).unwrap();
+                            Stub
+                        }
+                    };
+                }
                 quote! {
                     let wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&args)).unwrap();
                     let ret: Value = wasm_wave::from_str(&<#ret_ty as ValueTyped>::value_type(), &wave).unwrap();
@@ -201,8 +209,8 @@ impl<'ast> State<'ast> {
                 .flat_map(|(path, resources)| {
                     resources.iter().flat_map(move |(resource, sigs)| {
                         sigs.iter().filter_map(move |sig| {
-                            let (is_method, args) = extract_arg_info(sig);
-                            if is_method.is_some() {
+                            let (kind, args) = extract_arg_info(sig);
+                            if matches!(kind, Some(ResourceFuncKind::Method(_))) {
                                 return None;
                             }
                             let arg_name: Vec<_> = args.iter().map(|arg| &arg.ident).collect();
@@ -225,7 +233,7 @@ impl<'ast> State<'ast> {
                                 sig.ident.to_string()
                             };
                             let func = make_path(path, &func_name);
-                            let display_name = wit_func_name(path, resource, &sig.ident, None);
+                            let display_name = wit_func_name(path, resource, &sig.ident, &kind);
                             let assert_ret = if get_return_type(&sig.output).is_none() {
                                 quote! {
                                     assert!(res == ());
@@ -269,7 +277,7 @@ impl<'ast> State<'ast> {
         resource: &Option<String>,
     ) -> syn::ImplItemFn {
         let func_name = &sig.ident;
-        let (is_method, args) = extract_arg_info(sig);
+        let (kind, args) = extract_arg_info(sig);
         let import_path = get_proxy_path(module_path);
         let import_sig = self
             .find_function(&import_path, resource, &func_name)
@@ -287,21 +295,28 @@ impl<'ast> State<'ast> {
                     parse_quote! { #ident }
                 }
             });
-        let func: syn::Expr = match (resource.is_some(), is_method.is_some()) {
-            (true, true) => parse_quote! { self.#func_name },
-            (true, false) => parse_quote! { Self::#func_name },
-            (false, _) => {
-                syn::parse_str(&format!("{}::{}", import_path.join("::"), func_name)).unwrap()
+        let (func, res): (syn::Expr, _) = match (resource.is_some(), &kind) {
+            (true, Some(ResourceFuncKind::Method(_))) => {
+                (parse_quote! { self.#func_name }, quote! { res.to_proxy() })
             }
+            (true, Some(ResourceFuncKind::Constructor)) => {
+                (parse_quote! { Self::#func_name }, quote! { res })
+            }
+            (true, None) => (parse_quote! { Self::#func_name }, quote! { res.to_proxy() }),
+            (false, _) => (
+                syn::parse_str(&format!("{}::{}", import_path.join("::"), func_name)).unwrap(),
+                quote! { res.to_proxy() },
+            ),
         };
         match &self.mode {
             GenerateMode::Instrument => parse_quote! {
                 #sig {
-                    #func(#(#call_args.to_proxy()),*).to_proxy()
+                    let res = #func(#(#call_args.to_proxy()),*);
+                    #res
                 }
             },
             GenerateMode::Record => {
-                let init_vec = if is_method.is_some() {
+                let init_vec = if matches!(kind, Some(ResourceFuncKind::Method(_))) {
                     quote! { vec![wasm_wave::to_string(&ToValue::to_value(&self)).unwrap()] }
                 } else {
                     quote! { Vec::new() }
@@ -311,7 +326,7 @@ impl<'ast> State<'ast> {
                 } else {
                     quote! { mut }
                 };
-                let display_name = wit_func_name(module_path, resource, func_name, is_method);
+                let display_name = wit_func_name(module_path, resource, func_name, &kind);
                 let is_export = !module_path[1].starts_with("wrapped_");
                 let record_ret = if get_return_type(&sig.output).is_none() {
                     quote! {
@@ -323,7 +338,7 @@ impl<'ast> State<'ast> {
                        let res = #func(#(#call_args),*);
                        let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
                        proxy::recorder::record::record_ret(Some(#display_name), Some(&wave_res), #is_export);
-                       res.to_proxy()
+                       #res
                     }
                 };
                 parse_quote! {
@@ -577,14 +592,25 @@ struct ArgInfo {
     is_borrowed: bool,
     ty: Type,
 }
-fn extract_arg_info(sig: &Signature) -> (Option<bool>, Vec<ArgInfo>) {
-    let mut is_method = None;
+enum ResourceFuncKind {
+    Method(bool),
+    Constructor,
+}
+fn extract_arg_info(sig: &Signature) -> (Option<ResourceFuncKind>, Vec<ArgInfo>) {
+    let mut kind = None;
     let mut arg_infos = Vec::new();
+    if sig.ident == "new" && sig.inputs.is_empty() {
+        if let Some(Type::Path(path)) = get_return_type(&sig.output) {
+            if path.path.is_ident("Self") {
+                return (Some(ResourceFuncKind::Constructor), arg_infos);
+            }
+        }
+    }
     for arg in sig.inputs.iter() {
         match arg {
             FnArg::Receiver(receiver) => {
                 let is_borrowed = receiver.reference.is_some();
-                is_method = Some(is_borrowed);
+                kind = Some(ResourceFuncKind::Method(is_borrowed));
             }
             FnArg::Typed(pat_type) => {
                 let ident = match &*pat_type.pat {
@@ -601,7 +627,7 @@ fn extract_arg_info(sig: &Signature) -> (Option<bool>, Vec<ArgInfo>) {
             }
         }
     }
-    (is_method, arg_infos)
+    (kind, arg_infos)
 }
 pub fn get_proxy_path(src_path: &[String]) -> Vec<String> {
     assert!(src_path.len() >= 3);
@@ -627,7 +653,7 @@ fn wit_func_name(
     module_path: &[String],
     resource: &Option<String>,
     func_name: &Ident,
-    is_method: Option<bool>,
+    kind: &Option<ResourceFuncKind>,
 ) -> String {
     assert!(module_path.len() >= 3);
     let mut module_path = module_path.to_vec();
@@ -636,8 +662,10 @@ fn wit_func_name(
     }
     assert!(module_path.len() == 3);
     let mut res = String::new();
-    if is_method.is_some() {
-        res.push_str("[method]");
+    match kind {
+        Some(ResourceFuncKind::Constructor) => res.push_str("[constructor]"),
+        Some(ResourceFuncKind::Method(_)) => res.push_str("[method]"),
+        _ => {}
     }
     let nonwrapped = module_path[0]
         .strip_prefix("wrapped_")
@@ -728,7 +756,7 @@ fn extract_bitflag(macro_item: &syn::ItemMacro) -> Option<ItemFlag> {
             input.parse::<Token![struct]>()?;
             let ident: Ident = input.parse()?;
             input.parse::<Token![:]>()?;
-            let ty: Type = input.parse()?;
+            input.parse::<Type>()?;
             let content;
             syn::braced!(content in input);
             let mut flags = vec![];
@@ -741,14 +769,10 @@ fn extract_bitflag(macro_item: &syn::ItemMacro) -> Option<ItemFlag> {
                 }
                 content.parse::<Token![;]>()?;
             }
-            Ok((ident, ty, flags))
+            Ok((ident, flags))
         };
-        let (name, bits_ty, flags) = parser.parse2(tokens).unwrap();
-        return Some(ItemFlag {
-            name,
-            bits_ty,
-            flags,
-        });
+        let (name, flags) = parser.parse2(tokens).unwrap();
+        return Some(ItemFlag { name, flags });
     }
     None
 }
