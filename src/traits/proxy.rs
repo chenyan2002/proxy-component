@@ -81,8 +81,13 @@ impl Trait for ProxyTrait<'_> {
                     type Output = &'a #output_owned;
                     fn to_proxy(self) -> Self::Output {
                         type T = #output_owned;
-                        let ptr = unsafe { &mut *self.as_ptr::<T>() };
-                        ptr.as_ref().unwrap()
+                        // Extend self with 'a lifetime. Borrow<'a> already ensures that the reference is valid for 'a.
+                        let self_ref: &'a Self = unsafe { &*((&self) as *const Self) };
+                        std::mem::forget(self);
+                        self_ref.get::<T>()
+                        // Either the above code, or make as_ptr public and use this:
+                        //let ptr = unsafe { &mut *self.as_ptr::<T>() };
+                        //ptr.as_ref().unwrap()
                     }
                 }
             });
