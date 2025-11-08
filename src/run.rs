@@ -128,14 +128,7 @@ impl bindings::proxy::recorder::replay::Host for Logger {
             if let (Some(method), Some(assert_method)) = (method, assert_method) {
                 assert_eq!(method, &assert_method);
             }
-            if let Some(assert_args) = assert_args {
-                // TODO: ignore method self check for now
-                let args = if args.len() == assert_args.len() + 1 {
-                    assert!(method.as_ref().is_some_and(|m| m.starts_with("[method]")));
-                    &args[1..]
-                } else {
-                    args
-                };
+            if let Some(assert_args) = &assert_args {
                 assert_eq!(args, assert_args);
             }
             println!("import call: {}", call.to_string());

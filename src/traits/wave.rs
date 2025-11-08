@@ -84,16 +84,14 @@ impl Trait for WaveTrait {
                     res.push(parse_quote! {
                     impl ToValue for #resource_path {
                         fn to_value(&self) -> Value {
-                            let ptr = self.as_ptr::<Stub>() as u32;
-                            let handle = TABLE.with(|map| map.borrow().get(&ptr).unwrap().clone());
+                            let handle = self.get::<MockedResource>().handle;
                             Value::make_resource(&#resource_path::value_type(), handle, false).unwrap()
                         }
                     }});
                     res.push(parse_quote! {
                     impl<'a> ToValue for #borrow_path {
                         fn to_value(&self) -> Value {
-                            let ptr = self.as_ptr::<Stub>() as u32;
-                            let handle = TABLE.with(|map| map.borrow().get(&ptr).unwrap().clone());
+                            let handle = self.get::<MockedResource>().handle;
                             Value::make_resource(&<#borrow_path as ValueTyped>::value_type(), handle, true).unwrap()
                         }
                     }});
@@ -123,9 +121,10 @@ impl Trait for WaveTrait {
                     fn to_rust(&self) -> #resource_path {
                         let (expect_handle, is_borrowed) = self.unwrap_resource();
                         assert!(!is_borrowed);
-                        let handle = #resource_path::new(Stub);
-                        let ptr = handle.as_ptr::<Stub>() as u32;
-                        TABLE.with(|map| { map.borrow_mut().insert(ptr, expect_handle) });
+                        let handle = #resource_path::new(MockedResource {
+                            handle: expect_handle,
+                            name: #wit_name.to_string(),
+                        });
                         // Assertion will hold after https://github.com/WebAssembly/component-model/issues/395 lands on wac
                         // assert_eq!(expect_handle, handle.handle());
                         handle
@@ -192,7 +191,7 @@ impl Trait for WaveTrait {
             res.push(parse_quote! {
             impl #impl_generics ToRust<#struct_name #ty_generics> for Value #where_clause {
                 fn to_rust(&self) -> #struct_name #ty_generics {
-                    let fields: BTreeMap<_, _> = self.unwrap_record().collect();
+                    let fields: std::collections::BTreeMap<_, _> = self.unwrap_record().collect();
                     #struct_name {
                         #(#field_names: fields[#wit_names].to_rust()),*
                     }
@@ -332,6 +331,52 @@ impl Trait for WaveTrait {
         res
     }
     fn trait_defs(&self) -> Vec<Item> {
-        vec![]
+        let mocked_resource = if self.has_replay_table {
+            quote! {
+                #[derive(Default, Debug)]
+                struct MockedResource {
+                    handle: u32,
+                    name: String,
+                }
+                impl ValueTyped for MockedResource {
+                    fn value_type() -> Type {
+                        Type::resource("mocked-resource", false)
+                    }
+                }
+                impl ToValue for MockedResource {
+                    fn to_value(&self) -> Value {
+                        Value::make_resource(&Self::value_type(), self.handle, false).unwrap()
+                    }
+                }
+                impl ValueTyped for &MockedResource {
+                    fn value_type() -> Type {
+                        Type::resource("mocked-resource", true)
+                    }
+                }
+                impl ToValue for &MockedResource {
+                    fn to_value(&self) -> Value {
+                        Value::make_resource(&Self::value_type(), self.handle, true).unwrap()
+                    }
+                }
+                // Only called by constructor
+                impl ToRust<MockedResource> for Value {
+                    fn to_rust(&self) -> MockedResource {
+                        let (handle, _is_borrowed) = self.unwrap_resource();
+                        MockedResource {
+                            handle,
+                            name: "mocked-resource".to_string(),
+                        }
+                    }
+                }
+            }
+        } else {
+            quote! {}
+        };
+        let ast: syn::File = parse_quote! {
+          #[allow(unused_imports)]
+          use wasm_wave::{wasm::WasmValue, value::{Value, Type, convert::{ToRust, ToValue, ValueTyped}}};
+          #mocked_resource
+        };
+        ast.items
     }
 }

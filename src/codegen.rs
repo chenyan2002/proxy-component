@@ -101,27 +101,6 @@ impl State {
           bindings::export!(Stub with_types_in bindings);
         };
         self.output = file.items;
-        match &self.mode {
-            GenerateMode::Record => {
-                self.output.push(parse_quote! {
-                    #[allow(unused_imports)]
-                    use wasm_wave::{wasm::WasmValue, value::{Value, Type, convert::{ToValue, ValueTyped}}};
-                });
-            }
-            GenerateMode::Replay => {
-                let code: File = parse_quote! {
-                    #[allow(unused_imports)]
-                    use wasm_wave::{wasm::WasmValue, value::{Value, Type, convert::{ToRust, ToValue, ValueTyped}}};
-                    use std::collections::BTreeMap;
-                    use std::cell::RefCell;
-                    thread_local! {
-                        static TABLE: RefCell<BTreeMap<u32, u32>> = RefCell::new(BTreeMap::new());
-                    }
-                };
-                self.output.extend(code.items);
-            }
-            _ => (),
-        }
     }
     fn generate_impl_with_methods(&self, trait_item: &ItemTrait, module_path: &[String]) -> Item {
         let trait_name = &trait_item.ident.to_string();
@@ -132,6 +111,7 @@ impl State {
                 let import_path = get_proxy_path(module_path);
                 make_path(&import_path, resource)
             }
+            (false, Some(_)) => parse_quote! { MockedResource },
             (_, _) => parse_quote! { Stub },
         };
         // Collect all method signatures from the trait
@@ -144,7 +124,7 @@ impl State {
                         let import_path = get_proxy_path(module_path);
                         make_path(&import_path, &type_name.to_string())
                     } else {
-                        parse_quote! { Stub }
+                        parse_quote! { MockedResource }
                     };
                     let impl_item = parse_quote! {
                         type #type_name = #stub;
@@ -205,15 +185,6 @@ impl State {
             let display_name = wit_func_name(module_path, resource, func_name, &kind);
             let ret_ty = get_return_type(&sig.output);
             let replay_import = if let Some(ret_ty) = ret_ty {
-                if matches!(kind, Some(ResourceFuncKind::Constructor)) {
-                    // TODO
-                    return parse_quote! {
-                        #sig {
-                            let _wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&[])).unwrap();
-                            Stub
-                        }
-                    };
-                }
                 quote! {
                     let wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&args)).unwrap();
                     let ret: Value = wasm_wave::from_str(&<#ret_ty as ValueTyped>::value_type(), &wave).unwrap();
@@ -225,9 +196,15 @@ impl State {
                     assert!(wave.is_none());
                 }
             };
+            let self_value = if matches!(kind, Some(ResourceFuncKind::Method(_))) {
+                // Use ToValue::to_value to avoid the auto-deref from self.to_value()
+                quote! { wasm_wave::to_string(&ToValue::to_value(&self)).unwrap(), }
+            } else {
+                quote! {}
+            };
             parse_quote! {
                 #sig {
-                    let args = vec![#( wasm_wave::to_string(&#arg_names.to_value()).unwrap() ),*];
+                    let args = vec![#self_value #( wasm_wave::to_string(&#arg_names.to_value()).unwrap() ),*];
                     #replay_import
                 }
             }
@@ -396,12 +373,7 @@ impl State {
         } else if func_name.starts_with("get_mock_") {
             let resource = get_return_type(&sig.output).unwrap();
             quote! {
-                let res = #resource::new(Stub);
-                let ptr = res.as_ptr::<Stub>() as u32;
-                TABLE.with(|map| {
-                    map.borrow_mut().insert(ptr, handle);
-                });
-                res
+                #resource::new(MockedResource { handle, name: #func_name.to_string() })
             }
         } else {
             unreachable!()
