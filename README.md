@@ -36,6 +36,20 @@ Another interesting use case is that we can replay the trace with a different Wa
 a different optimization strategy, to compare the performance. We have assertions in the replay phase to make sure that the trace
 is still valid with the new binary.
 
+### Generate
+
+Given a `bindings.rs` file generated from `wit-bindgen`. This command can generate code to implement
+all the requires traits, based on the following mode:
+
+* `stubs`. Fill in all impl functions with `unimplemented!()`, similar to `wit-bindgen rust --stubs`, but outside of the bindings module.
+* `instrument`. Given an instrument component which imports and exports the same interface, generate code to redirect export interface to call the coressponding import functions.
+* `record`. Given an instrument component, generate the code to redirect the calls and record the arguments and return in WAVE format. 
+* `replay`. Given a vitualized component which has no imports, generate code to replay an execution based on a recorded WAVE trace.
+
+```
+$ cargo run generate bindings.rs <mode> -o lib.rs
+```
+
 ## Prerequisite
 
 * rustup target add wasm32-unknown-unknown
