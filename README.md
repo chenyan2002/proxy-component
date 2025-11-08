@@ -39,7 +39,7 @@ is still valid with the new binary.
 ### Generate
 
 Given a `bindings.rs` file generated from `wit-bindgen`. This command can generate code to implement
-all the requires traits, based on the following mode:
+all the required traits, based on the following mode:
 
 * `stubs`. Fill in all impl functions with `unimplemented!()`, similar to `wit-bindgen rust --stubs`, but outside of the bindings module.
 * `instrument`. Given an instrument component which imports and exports the same interface, generate code to redirect export interface to call the coressponding import functions.
