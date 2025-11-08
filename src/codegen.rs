@@ -196,7 +196,7 @@ impl State {
                     assert!(wave.is_none());
                 }
             };
-            let self_value = if matches!(kind, Some(ResourceFuncKind::Method(_))) {
+            let self_value = if matches!(kind, Some(ResourceFuncKind::Method)) {
                 // Use ToValue::to_value to avoid the auto-deref from self.to_value()
                 quote! { wasm_wave::to_string(&ToValue::to_value(&self)).unwrap(), }
             } else {
@@ -218,7 +218,7 @@ impl State {
                     resources.iter().flat_map(move |(resource, sigs)| {
                         sigs.iter().filter_map(move |sig| {
                             let (kind, args) = extract_arg_info(sig);
-                            if matches!(kind, Some(ResourceFuncKind::Method(_))) {
+                            if matches!(kind, Some(ResourceFuncKind::Method)) {
                                 return None;
                             }
                             let arg_name: Vec<_> = args.iter().map(|arg| &arg.ident).collect();
@@ -304,7 +304,7 @@ impl State {
                 }
             });
         let (func, res): (syn::Expr, _) = match (resource.is_some(), &kind) {
-            (true, Some(ResourceFuncKind::Method(_))) => {
+            (true, Some(ResourceFuncKind::Method)) => {
                 (parse_quote! { self.#func_name }, quote! { res.to_proxy() })
             }
             (true, Some(ResourceFuncKind::Constructor)) => {
@@ -324,7 +324,7 @@ impl State {
                 }
             },
             GenerateMode::Record => {
-                let init_vec = if matches!(kind, Some(ResourceFuncKind::Method(_))) {
+                let init_vec = if matches!(kind, Some(ResourceFuncKind::Method)) {
                     quote! { vec![wasm_wave::to_string(&ToValue::to_value(&self)).unwrap()] }
                 } else {
                     quote! { Vec::new() }

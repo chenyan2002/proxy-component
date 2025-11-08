@@ -13,7 +13,7 @@ pub struct ArgInfo {
     pub ty: Type,
 }
 pub enum ResourceFuncKind {
-    Method(bool),
+    Method,
     Constructor,
 }
 impl ArgInfo {
@@ -45,7 +45,7 @@ pub fn wit_func_name(
     let mut res = String::new();
     match kind {
         Some(ResourceFuncKind::Constructor) => res.push_str("[constructor]"),
-        Some(ResourceFuncKind::Method(_)) => res.push_str("[method]"),
+        Some(ResourceFuncKind::Method) => res.push_str("[method]"),
         _ => {}
     }
     let nonwrapped = module_path[0]
@@ -85,9 +85,8 @@ pub fn extract_arg_info(sig: &Signature) -> (Option<ResourceFuncKind>, Vec<ArgIn
     }
     for arg in sig.inputs.iter() {
         match arg {
-            FnArg::Receiver(receiver) => {
-                let is_borrowed = receiver.reference.is_some();
-                kind = Some(ResourceFuncKind::Method(is_borrowed));
+            FnArg::Receiver(_) => {
+                kind = Some(ResourceFuncKind::Method);
             }
             FnArg::Typed(pat_type) => {
                 let ident = match &*pat_type.pat {
