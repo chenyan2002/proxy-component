@@ -60,12 +60,14 @@ impl Trait for WaveTrait {
                     }
                 }
                 });
-                // TODO: need to think more about Box::leak
                 res.push(parse_quote! {
-                impl ToRust<&'static #resource_path> for Value {
-                    fn to_rust(&self) -> &'static #resource_path {
+                impl<'a> ToRust<&'a #resource_path> for Value {
+                    fn to_rust(&self) -> &'a #resource_path {
                         let (handle, _is_borrowed) = self.unwrap_resource();
-                        Box::leak(Box::new(proxy::conversion::conversion::#call(handle)))
+                        SCOPED_ALLOC.with(|alloc| {
+                            let mut alloc = alloc.borrow_mut();
+                            alloc.alloc(proxy::conversion::conversion::#call(handle))
+                        })
                     }
                 }
                 });
@@ -333,6 +335,44 @@ impl Trait for WaveTrait {
     fn trait_defs(&self) -> Vec<Item> {
         let mocked_resource = if self.has_replay_table {
             quote! {
+                use std::{alloc::Layout, cell::RefCell};
+                // Used to store borrowed resources when calling proxy::conversion during ToRust trait
+                #[allow(dead_code)]
+                struct ScopedAlloc {
+                    ptrs: Vec<(*mut u8, Layout, fn(*mut u8))>,
+                }
+                thread_local! {
+                    static SCOPED_ALLOC: RefCell<ScopedAlloc> = RefCell::new(ScopedAlloc::new());
+                }
+                #[allow(dead_code)]
+                impl ScopedAlloc {
+                    fn new() -> Self {
+                        Self { ptrs: Vec::new() }
+                    }
+                    fn alloc<T>(&mut self, value: T) -> &'static T {
+                        let boxed = Box::new(value);
+                        let ptr = Box::into_raw(boxed);
+                        fn drop_ptr<T>(ptr: *mut u8) {
+                            drop(unsafe { Box::from_raw(ptr as *mut T) });
+                        }
+                        self.ptrs.push((
+                            ptr as *mut u8,
+                            Layout::new::<T>(),
+                            drop_ptr::<T>,
+                        ));
+                        unsafe { &*ptr }
+                    }
+                    fn clear(&mut self) {
+                        for (ptr, _layout, drop_fn) in self.ptrs.drain(..) {
+                            drop_fn(ptr);
+                        }
+                    }
+                }
+                impl Drop for ScopedAlloc {
+                    fn drop(&mut self) {
+                        self.clear();
+                    }
+                }
                 #[derive(Default, Debug)]
                 struct MockedResource {
                     handle: u32,

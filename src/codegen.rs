@@ -273,6 +273,10 @@ impl State {
                             #(#arms)*
                             _ => unreachable!(),
                         }
+                        // clean up borrowed resources from input args
+                        SCOPED_ALLOC.with(|alloc| {
+                            alloc.borrow_mut().clear();
+                        });
                     }
                 }
             }
