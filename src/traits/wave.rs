@@ -19,7 +19,7 @@ impl Trait for WaveTrait {
         res.push(parse_quote! {
             impl ValueTyped for #resource_path {
                 fn value_type() -> Type {
-                    Type::resource(#wit_name, false)
+                    Type::handle(#wit_name)
                 }
             }
         });
@@ -27,7 +27,7 @@ impl Trait for WaveTrait {
             res.push(parse_quote! {
             impl<'a> ValueTyped for &'a #resource_path {
                 fn value_type() -> Type {
-                    Type::resource(#wit_name, true)
+                    Type::handle(#wit_name)
                 }
             }
             });
@@ -35,14 +35,16 @@ impl Trait for WaveTrait {
                 res.push(parse_quote! {
                 impl ToValue for #resource_path {
                     fn to_value(&self) -> Value {
-                        Value::make_resource(&#resource_path::value_type(), self.handle(), false).unwrap()
+                        let label = format!("{}-{}", #wit_name, self.handle());
+                        Value::make_handle(label.into())
                     }
                 }
                 });
                 res.push(parse_quote! {
                 impl<'a> ToValue for &'a #resource_path {
                     fn to_value(&self) -> Value {
-                        Value::make_resource(&<&#resource_path>::value_type(), self.handle(), true).unwrap()
+                        let label = format!("borrow-{}-{}", #wit_name, self.handle());
+                        Value::make_handle(label.into())
                     }
                 }
                 });
@@ -54,8 +56,11 @@ impl Trait for WaveTrait {
                 res.push(parse_quote! {
                 impl ToRust<#resource_path> for Value {
                     fn to_rust(&self) -> #resource_path {
-                        let (handle, _is_borrowed) = self.unwrap_resource();
-                        //assert!(!is_borrowed);
+                        let label = self.unwrap_handle();
+                        let handle = label
+                            .strip_prefix(&format!("{}-", #wit_name))
+                            .and_then(|s| s.parse::<u32>().ok())
+                            .expect("invalid handle label");
                         proxy::conversion::conversion::#call(handle)
                     }
                 }
@@ -63,7 +68,11 @@ impl Trait for WaveTrait {
                 res.push(parse_quote! {
                 impl<'a> ToRust<&'a #resource_path> for Value {
                     fn to_rust(&self) -> &'a #resource_path {
-                        let (handle, _is_borrowed) = self.unwrap_resource();
+                        let label = self.unwrap_handle();
+                        let handle = label
+                            .strip_prefix(&format!("borrow-{}-", #wit_name))
+                            .and_then(|s| s.parse::<u32>().ok())
+                            .expect("invalid handle label");
                         SCOPED_ALLOC.with(|alloc| {
                             let mut alloc = alloc.borrow_mut();
                             alloc.alloc(proxy::conversion::conversion::#call(handle))
@@ -77,7 +86,7 @@ impl Trait for WaveTrait {
             res.push(parse_quote! {
             impl<'a> ValueTyped for #borrow_path {
                 fn value_type() -> Type {
-                    Type::resource(#wit_name, true)
+                    Type::handle(#wit_name)
                 }
             }
             });
@@ -87,21 +96,24 @@ impl Trait for WaveTrait {
                     impl ToValue for #resource_path {
                         fn to_value(&self) -> Value {
                             let handle = self.get::<MockedResource>().handle;
-                            Value::make_resource(&#resource_path::value_type(), handle, false).unwrap()
+                            let label = format!("{}-{}", #wit_name, handle);
+                            Value::make_handle(label.into())
                         }
                     }});
                     res.push(parse_quote! {
                     impl<'a> ToValue for #borrow_path {
                         fn to_value(&self) -> Value {
                             let handle = self.get::<MockedResource>().handle;
-                            Value::make_resource(&<#borrow_path as ValueTyped>::value_type(), handle, true).unwrap()
+                            let label = format!("borrow-{}-{}", #wit_name, handle);
+                            Value::make_handle(label.into())
                         }
                     }});
                 } else {
                     res.push(parse_quote! {
                     impl ToValue for #resource_path {
                         fn to_value(&self) -> Value {
-                            Value::make_resource(&#resource_path::value_type(), self.handle(), false).unwrap()
+                            let label = format!("{}-{}", #wit_name, self.handle());
+                            Value::make_handle(label.into())
                         }
                     }
                     });
@@ -111,7 +123,8 @@ impl Trait for WaveTrait {
                     impl<'a> ToValue for #borrow_path {
                         fn to_value(&self) -> Value {
                             type T = #proxy_path;
-                            Value::make_resource(&<#borrow_path as ValueTyped>::value_type(), self.get::<T>().handle(), true).unwrap()
+                            let label = format!("borrow-{}-{}", #wit_name, self.get::<T>().handle());
+                            Value::make_handle(label.into())
                         }
                     }
                     });
@@ -121,8 +134,11 @@ impl Trait for WaveTrait {
                 res.push(parse_quote! {
                 impl ToRust<#resource_path> for Value {
                     fn to_rust(&self) -> #resource_path {
-                        let (expect_handle, is_borrowed) = self.unwrap_resource();
-                        assert!(!is_borrowed);
+                        let label = self.unwrap_handle();
+                        let expect_handle = label
+                            .strip_prefix(&format!("{}-", #wit_name))
+                            .and_then(|s| s.parse::<u32>().ok())
+                            .expect("invalid handle label");
                         let handle = #resource_path::new(MockedResource {
                             handle: expect_handle,
                             name: #wit_name.to_string(),
@@ -380,31 +396,39 @@ impl Trait for WaveTrait {
                 }
                 impl ValueTyped for MockedResource {
                     fn value_type() -> Type {
-                        Type::resource("mocked-resource", false)
+                        Type::handle("mocked-resource")
                     }
                 }
                 impl ToValue for MockedResource {
                     fn to_value(&self) -> Value {
-                        Value::make_resource(&Self::value_type(), self.handle, false).unwrap()
+                        let label = format!("{}-{}", self.name, self.handle);
+                        Value::make_handle(label.into())
                     }
                 }
                 impl ValueTyped for &MockedResource {
                     fn value_type() -> Type {
-                        Type::resource("mocked-resource", true)
+                        Type::handle("mocked-resource")
                     }
                 }
                 impl ToValue for &MockedResource {
                     fn to_value(&self) -> Value {
-                        Value::make_resource(&Self::value_type(), self.handle, true).unwrap()
+                        let label = format!("borrow-{}-{}", self.name, self.handle);
+                        Value::make_handle(label.into())
                     }
                 }
                 // Only called by constructor
                 impl ToRust<MockedResource> for Value {
                     fn to_rust(&self) -> MockedResource {
-                        let (handle, _is_borrowed) = self.unwrap_resource();
+                        let label = self.unwrap_handle();
+                        let (name, handle) = label
+                            .rsplit_once('-')
+                            .and_then(|(name, handle_str)| {
+                                handle_str.parse::<u32>().ok().map(|h| (name.to_string(), h))
+                            })
+                            .expect("invalid handle label");
                         MockedResource {
                             handle,
-                            name: "mocked-resource".to_string(),
+                            name,
                         }
                     }
                 }
