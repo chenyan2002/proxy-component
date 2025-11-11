@@ -205,9 +205,11 @@ let main = new root:component {
                     ));
                 }
                 Mode::Replay => {
+                    // Add a magic separator so that codegen::generate_conversion_func can recover the resource name
+                    let magic_name = format!("{iface_no_ver}-magic42-{resource}").to_kebab_case();
                     out.push_str(&format!("\nuse {iface}.{{{resource} as {func_name}}};\n"));
                     out.push_str(&format!(
-                        "get-mock-{func_name}: func(handle: u32) -> {func_name};\n"
+                        "get-mock-{magic_name}: func(handle: u32) -> {func_name};\n"
                     ));
                 }
             }

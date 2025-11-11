@@ -376,8 +376,10 @@ impl State {
             quote! { x.to_proxy() }
         } else if func_name.starts_with("get_mock_") {
             let resource = get_return_type(&sig.output).unwrap();
-            // TODO: find a way to get resource name more reliably
-            let name = func_name.split('_').last().unwrap();
+            let name = func_name
+                .rfind("_magic42_")
+                .map(|idx| &func_name[idx + 9..])
+                .unwrap();
             quote! {
                 #resource::new(MockedResource { handle, name: #name.to_string() })
             }
