@@ -14,7 +14,4 @@ interface replay {
 world host {
   import %record;
   import replay;
-  import docs:adder/add@0.1.0;
-  import wasi:io/io;
-  export docs:calculator/calculate@0.1.0;
 }
