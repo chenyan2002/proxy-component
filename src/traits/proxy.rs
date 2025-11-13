@@ -85,9 +85,8 @@ impl Trait for ProxyTrait<'_> {
                         let self_ref: &'a Self = unsafe { &*((&self) as *const Self) };
                         std::mem::forget(self);
                         self_ref.get::<T>()
-                        // Either the above code, or make as_ptr public and use this:
-                        //let ptr = unsafe { &mut *self.as_ptr::<T>() };
-                        //ptr.as_ref().unwrap()
+                        // TODO: After https://github.com/bytecodealliance/wit-bindgen/pull/1406, we just use:
+                        // self.get::<T>()
                     }
                 }
             });
