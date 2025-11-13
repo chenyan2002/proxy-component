@@ -22,8 +22,7 @@ pub struct RunArgs {
 
 mod bindings {
     wasmtime::component::bindgen!({
-        // TODO: change to assets/recorder.wit
-        path: "wit",
+        path: "assets/recorder.wit",
         world: "host",
     });
 }

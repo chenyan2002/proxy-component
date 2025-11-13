@@ -15,3 +15,7 @@ interface start-replay {
   start: func();
 }
 
+world host {
+  import %record;
+  import replay;
+}

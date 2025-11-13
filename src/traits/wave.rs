@@ -147,8 +147,10 @@ impl Trait for WaveTrait {
                             handle: expect_handle,
                             name: #wit_name.to_string(),
                         });
-                        // Assertion will hold after https://github.com/WebAssembly/component-model/issues/395 lands on wac
-                        // assert_eq!(expect_handle, handle.handle());
+                        // handle.handle() is not expected to match expect_handle, because each component
+                        // has its own resource table, and the order of resource creation can be different.
+                        // However, for the user component, the handle id should match, but we don't have a
+                        // way to check that at the moment.
                         handle
                     }
                 }
