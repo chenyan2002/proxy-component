@@ -5,7 +5,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use wit_bindgen_core::{Files, wit_parser};
-//use wit_bindgen_rust::Opts;
 use wit_parser::{Resolve, WorldId};
 
 #[derive(Parser)]

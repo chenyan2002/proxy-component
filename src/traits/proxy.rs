@@ -81,12 +81,8 @@ impl Trait for ProxyTrait<'_> {
                     type Output = &'a #output_owned;
                     fn to_proxy(self) -> Self::Output {
                         type T = #output_owned;
-                        // Extend self with 'a lifetime. Borrow<'a> already ensures that the reference is valid for 'a.
-                        let self_ref: &'a Self = unsafe { &*((&self) as *const Self) };
-                        std::mem::forget(self);
-                        self_ref.get::<T>()
-                        // TODO: After https://github.com/bytecodealliance/wit-bindgen/pull/1406, we just use:
-                        // self.get::<T>()
+                        // only possible after wit-bindgen 0.48
+                        self.get::<T>()
                     }
                 }
             });
