@@ -91,10 +91,21 @@ impl Trait for ProxyTrait<'_> {
     }
     fn struct_trait(&self, module_path: &[String], struct_item: &ItemStruct) -> Vec<Item> {
         let mut res = Vec::new();
-        let struct_name = make_path(module_path, &struct_item.ident.to_string());
+        let name = struct_item.ident.to_string();
+        let struct_name = make_path(module_path, &name);
         let (impl_generics, ty_generics, where_clause) = struct_item.generics.split_for_impl();
         let output_path = self.get_proxy_path(module_path);
-        let output_path = make_path(&output_path, &struct_item.ident.to_string());
+        if !self.state.has_type_def(&output_path, &name) {
+            return vec![parse_quote! {
+                impl #impl_generics ToProxy for #struct_name #ty_generics #where_clause {
+                    type Output = #struct_name #ty_generics;
+                    fn to_proxy(self) -> Self::Output {
+                        self
+                    }
+                }
+            }];
+        }
+        let output_path = make_path(&output_path, &name);
         let fields = match &struct_item.fields {
             syn::Fields::Unit => quote! { Self::Output },
             syn::Fields::Named(fields) => {
@@ -115,10 +126,21 @@ impl Trait for ProxyTrait<'_> {
     }
     fn enum_trait(&self, module_path: &[String], enum_item: &ItemEnum) -> Vec<Item> {
         let mut res = Vec::new();
-        let enum_name = make_path(module_path, &enum_item.ident.to_string());
+        let name = enum_item.ident.to_string();
+        let enum_name = make_path(module_path, &name);
         let (impl_generics, ty_generics, where_clause) = enum_item.generics.split_for_impl();
         let output_path = self.get_proxy_path(module_path);
-        let output_path = make_path(&output_path, &enum_item.ident.to_string());
+        if !self.state.has_type_def(&output_path, &name) {
+            return vec![parse_quote! {
+                impl #impl_generics ToProxy for #enum_name #ty_generics #where_clause {
+                    type Output = #enum_name #ty_generics;
+                    fn to_proxy(self) -> Self::Output {
+                        self
+                    }
+                }
+            }];
+        }
+        let output_path = make_path(&output_path, &name);
         let match_arms = enum_item.variants.iter().map(|variant| {
             let tag = &variant.ident;
             match &variant.fields {
@@ -143,9 +165,20 @@ impl Trait for ProxyTrait<'_> {
     }
     fn flag_trait(&self, module_path: &[String], item: &crate::codegen::ItemFlag) -> Vec<Item> {
         let mut res = Vec::new();
-        let flag_name = make_path(module_path, &item.name.to_string());
+        let name = item.name.to_string();
+        let flag_name = make_path(module_path, &name);
         let output_path = self.get_proxy_path(module_path);
-        let output_path = make_path(&output_path, &item.name.to_string());
+        if !self.state.has_type_def(&output_path, &name) {
+            return vec![parse_quote! {
+                impl ToProxy for #flag_name {
+                    type Output = #flag_name;
+                    fn to_proxy(self) -> Self::Output {
+                        self
+                    }
+                }
+            }];
+        }
+        let output_path = make_path(&output_path, &name);
         res.push(parse_quote! {
             impl ToProxy for #flag_name {
                 type Output = #output_path;

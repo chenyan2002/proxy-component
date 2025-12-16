@@ -261,6 +261,42 @@ impl codegen::State {
             }
         }
     }
+    pub fn find_function(
+        &self,
+        module_path: &[String],
+        resource: &Option<String>,
+        func: &Ident,
+    ) -> Option<&Signature> {
+        let module = self.funcs.get(module_path)?;
+        let funcs = module.get(resource)?;
+        funcs.iter().find(|sig| sig.ident == *func)
+    }
+    pub fn has_type_def(&self, module_path: &[String], name: &str) -> bool {
+        let types = match self.types.get(module_path) {
+            Some(types) => types,
+            None => return false,
+        };
+        for type_info in types {
+            match type_info {
+                TypeInfo::Resource(struct_item) | TypeInfo::Struct(struct_item) => {
+                    if struct_item.ident == name {
+                        return true;
+                    }
+                }
+                TypeInfo::Enum(enum_item) => {
+                    if enum_item.ident == name {
+                        return true;
+                    }
+                }
+                TypeInfo::Flag(item_flag) => {
+                    if item_flag.name == name {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
 }
 
 pub fn get_resource_from_trait_name(trait_name: &str) -> Option<String> {
