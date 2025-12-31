@@ -15,6 +15,14 @@ interface start-replay {
   start: func();
 }
 
+interface debug {
+  print: func(x: string);
+}
+
+world crate-debug {
+  export debug;
+}
+
 world host {
   import %record;
   import replay;

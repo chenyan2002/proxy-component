@@ -69,20 +69,16 @@ impl Trait for FuzzTrait {
         let mut res = Vec::new();
         let struct_name = make_path(module_path, &struct_item.ident.to_string());
         let (impl_generics, ty_generics, where_clause) = struct_item.generics.split_for_impl();
-        let (wit_names, field_names, tys) = match &struct_item.fields {
-            syn::Fields::Unit => (Vec::new(), Vec::new(), Vec::new()),
+        let (field_names, tys) = match &struct_item.fields {
+            syn::Fields::Unit => (Vec::new(), Vec::new()),
             syn::Fields::Named(fields) => {
                 let field_names: Vec<_> = fields
                     .named
                     .iter()
                     .map(|f| f.ident.clone().unwrap())
                     .collect();
-                let wit_names = field_names
-                    .iter()
-                    .map(|f| f.to_string().to_kebab_case())
-                    .collect();
                 let field_tys = fields.named.iter().map(|f| &f.ty).collect();
-                (wit_names, field_names, field_tys)
+                (field_names, field_tys)
             }
             syn::Fields::Unnamed(_) => unreachable!(),
         };
@@ -121,9 +117,10 @@ impl Trait for FuzzTrait {
                 syn::Fields::Named(_) => unreachable!(),
             }
         });
-        let size_hint = enum_item.variants.iter().map(|variant| {
-            let ty = variant.ident.clone();
-            match &variant.fields {
+        let size_hint = enum_item
+            .variants
+            .iter()
+            .map(|variant| match &variant.fields {
                 syn::Fields::Unit => quote! {},
                 syn::Fields::Unnamed(f) => {
                     assert!(f.unnamed.len() == 1);
@@ -134,8 +131,7 @@ impl Trait for FuzzTrait {
                     }
                 }
                 syn::Fields::Named(_) => unreachable!(),
-            }
-        });
+            });
         let variant_len = enum_item.variants.len();
         res.push(parse_quote! {
         impl #impl_generics Arbitrary<'_> for #enum_name #ty_generics #where_clause {
