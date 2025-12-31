@@ -30,8 +30,10 @@ pub enum GenerateMode {
     Instrument,
     /// An instrument component which records all import calls.
     Record,
-    /// A virtualized component with no imports. Currently only used for replay.
+    /// A virtualized component with no imports, with implementation for replay.
     Replay,
+    /// A virtualized component with no imports, with implementation for fuzzing.
+    Fuzz,
 }
 impl GenerateMode {
     pub fn is_instrument(&self) -> bool {
@@ -159,6 +161,13 @@ impl State {
                                 self.generate_replay_func(module_path, &sig, &resource)
                             }
                         }
+                        GenerateMode::Fuzz => {
+                            if module_path.join("::") == "exports::proxy::conversion::conversion" {
+                                self.generate_conversion_func(&sig)
+                            } else {
+                                self.generate_fuzz_func(module_path, &sig, &resource)
+                            }
+                        }
                     };
                     methods.push(syn::ImplItem::Fn(stub_impl));
                 }
@@ -168,6 +177,97 @@ impl State {
         parse_quote! {
             impl #trait_path for #stub {
                 #(#methods)*
+            }
+        }
+    }
+    fn generate_fuzz_func(
+        &self,
+        module_path: &[String],
+        sig: &Signature,
+        resource: &Option<String>,
+    ) -> syn::ImplItemFn {
+        let func_name = &sig.ident;
+        let is_export = module_path.join("::") == "exports::proxy::recorder::start_replay";
+        if !is_export {
+            let (kind, args) = extract_arg_info(sig);
+            let arg_names = args.iter().map(|arg| &arg.ident);
+            let display_name = wit_func_name(module_path, resource, func_name, &kind);
+            let ret_ty = get_return_type(&sig.output);
+            if let Some(_) = ret_ty {
+                parse_quote! {
+                    #sig {
+                        let mut __buf = Vec::new();
+                        #( write!(&mut __buf, "{:?},", #arg_names).unwrap(); )*
+                        write!(&mut __buf, #display_name).unwrap();
+                        let mut u = Unstructured::new(&__buf);
+                        u.arbitrary().unwrap()
+                    }
+                }
+            } else {
+                parse_quote! {
+                    #sig {}
+                }
+            }
+        } else {
+            assert!(func_name == "start");
+            let arms: Vec<_> = self
+                .funcs
+                .iter()
+                .filter(|(path, _)| path[0] != "exports" && path[0] != "proxy")
+                .flat_map(|(path, resources)| {
+                    resources.iter().flat_map(move |(resource, sigs)| {
+                        sigs.iter().filter_map(move |sig| {
+                            let (kind, args) = extract_arg_info(sig);
+                            if matches!(kind, Some(ResourceFuncKind::Method)) {
+                                return None;
+                            }
+                            let arg_name: Vec<_> = args.iter().map(|arg| &arg.ident).collect();
+                            let call_param = args.iter().map(|arg| arg.call_param());
+                            let ty = args.iter().map(|arg| {
+                                let mut ty = arg.ty.clone();
+                                FullTypePath { module_path: path }.visit_type_mut(&mut ty);
+                                if let Some(owned) = get_owned_type(&ty) {
+                                    owned
+                                } else {
+                                    ty
+                                }
+                            });
+                            let func_name = if let Some(resource) = resource {
+                                format!("{}::{}", resource, sig.ident)
+                            } else {
+                                sig.ident.to_string()
+                            };
+                            let func = make_path(path, &func_name);
+                            Some(quote! {
+                                {
+                                    #(
+                                        let #arg_name: #ty = u.arbitrary().unwrap();
+                                    )*
+                                    let _ = #func(#(#call_param),*);
+                                }
+                            })
+                        })
+                    })
+                })
+                .collect();
+            let func_len = arms.iter().len();
+            let idxs = 1..=func_len;
+            parse_quote! {
+                #sig {
+                    let __buf: Vec<u8> = std::iter::repeat_n(0u8, 1024).enumerate().map(|(idx,_)| idx as u8).collect();
+                    let mut u = Unstructured::new(&__buf);
+                    for _ in 0..10 {
+                        let idx = u.int_in_range(1..=#func_len).unwrap();
+                        match idx {
+                            #(#idxs => #arms)*
+                            _ => unreachable!(),
+                        }
+                        // clean up borrowed resources from input args
+                        SCOPED_ALLOC.with(|alloc| {
+                            alloc.borrow_mut().clear();
+                        });
+                    }
+                }
             }
         }
     }

@@ -12,7 +12,7 @@ pub struct InstrumentArgs {
     /// The path to the wasm component file.
     wasm_file: PathBuf,
     /// Instrumentation mode
-    #[arg(short, long, default_value("record"))]
+    #[arg(short, long)]
     mode: Mode,
 }
 
@@ -127,6 +127,7 @@ fn bindgen(
     let codegen_mode = match mode {
         Mode::Record => codegen::GenerateMode::Record,
         Mode::Replay => codegen::GenerateMode::Replay,
+        Mode::Fuzz => codegen::GenerateMode::Fuzz,
     };
     let codegen_opt = codegen::GenerateArgs {
         bindings: binding_file.clone(),

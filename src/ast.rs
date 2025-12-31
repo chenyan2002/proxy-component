@@ -18,10 +18,15 @@ impl Opt {
         let recorder = "proxy:recorder/";
         out.push_str("package component:proxy;\n");
         out.push_str("world imports {\n");
-        out.push_str(&format!(
-            "import {recorder}{}@0.1.0;\n",
-            ident(self.mode.to_str())
-        ));
+        match self.mode {
+            Mode::Record | Mode::Replay => {
+                out.push_str(&format!(
+                    "import {recorder}{}@0.1.0;\n",
+                    ident(self.mode.to_str())
+                ));
+            }
+            Mode::Fuzz => {}
+        };
         out.push_str("export proxy:conversion/conversion;\n");
         for (name, import) in &world.imports {
             match import {
@@ -32,7 +37,7 @@ impl Opt {
                             out.push_str(&format!("import {name};\n"));
                             out.push_str(&format!("export wrapped-{name};\n"));
                         }
-                        Mode::Replay => out.push_str(&format!("export {name};\n")),
+                        Mode::Replay | Mode::Fuzz => out.push_str(&format!("export {name};\n")),
                     }
                 }
                 _ => todo!(),
@@ -49,7 +54,7 @@ impl Opt {
                             out.push_str(&format!("import wrapped-{name};\n"));
                             out.push_str(&format!("export {name};\n"));
                         }
-                        Mode::Replay => {
+                        Mode::Replay | Mode::Fuzz => {
                             out.push_str(&format!("import {name};\n"));
                         }
                     }
@@ -57,7 +62,7 @@ impl Opt {
                 _ => todo!(),
             }
         }
-        if matches!(self.mode, Mode::Replay) {
+        if matches!(self.mode, Mode::Replay | Mode::Fuzz) {
             out.push_str("export proxy:recorder/start-replay@0.1.0;\n")
         }
         out.push_str("}\n");
@@ -68,10 +73,15 @@ impl Opt {
         let world = &resolve.worlds[id];
         let recorder = "proxy:recorder/";
         out.push_str("world exports {\n");
-        out.push_str(&format!(
-            "import {recorder}{}@0.1.0;\n",
-            ident(self.mode.to_str())
-        ));
+        match self.mode {
+            Mode::Record | Mode::Replay => {
+                out.push_str(&format!(
+                    "import {recorder}{}@0.1.0;\n",
+                    ident(self.mode.to_str())
+                ));
+            }
+            Mode::Fuzz => {}
+        };
         out.push_str("import proxy:conversion/conversion;\n");
         for (name, import) in &world.imports {
             match import {
@@ -111,7 +121,7 @@ let main = new root:component {
         );
         let prefix = match self.mode {
             Mode::Record => "wrapped-",
-            Mode::Replay => "",
+            Mode::Replay | Mode::Fuzz => "",
         };
         for (name, import) in &world.imports {
             match import {
@@ -204,7 +214,7 @@ let main = new root:component {
                         "get-host-{func_name}: func(x: wrapped-{func_name}) -> host-{func_name};\n",
                     ));
                 }
-                Mode::Replay => {
+                Mode::Replay | Mode::Fuzz => {
                     // Add a magic separator so that codegen::generate_conversion_func can recover the resource name
                     let magic_name = format!("{iface_no_ver}-magic42-{resource}").to_kebab_case();
                     out.push_str(&format!("\nuse {iface}.{{{resource} as {func_name}}};\n"));
