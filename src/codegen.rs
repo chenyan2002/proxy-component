@@ -199,10 +199,10 @@ impl State {
                         let mut __buf = Vec::new();
                         #( write!(&mut __buf, "{:?},", #arg_names).unwrap(); )*
                         write!(&mut __buf, #display_name).unwrap();
-                        proxy::recorder::debug::print(&format!("import: {}", std::str::from_utf8(&__buf).unwrap()));
+                        proxy::util::debug::print(&format!("import: {}", std::str::from_utf8(&__buf).unwrap()));
                         let mut u = Unstructured::new(&__buf);
                         let res = u.arbitrary().unwrap();
-                        proxy::recorder::debug::print(&format!("ret: {:?}", res));
+                        proxy::util::debug::print(&format!("ret: {:?}", res));
                         res
                     }
                 }
@@ -244,7 +244,7 @@ impl State {
                             let display_name = wit_func_name(path, resource, &sig.ident, &kind);
                             Some(quote! {
                                 {
-                                    proxy::recorder::debug::print(#display_name);
+                                    proxy::util::debug::print(#display_name);
                                     #(
                                         let #arg_name: #ty = u.arbitrary().unwrap();
                                     )*

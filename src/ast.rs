@@ -26,7 +26,7 @@ impl Opt {
                 ));
             }
             Mode::Fuzz => {
-                out.push_str(&format!("import {recorder}debug@0.1.0;\n"));
+                out.push_str(&format!("import proxy:util/debug;\n"));
             }
         };
         out.push_str("export proxy:conversion/conversion;\n");
@@ -83,7 +83,7 @@ impl Opt {
                 ));
             }
             Mode::Fuzz => {
-                out.push_str(&format!("import {recorder}debug@0.1.0;\n"));
+                out.push_str(&format!("import proxy:util/debug;\n"));
             }
         };
         out.push_str("import proxy:conversion/conversion;\n");
@@ -173,6 +173,10 @@ impl Opt {
         files.push(
             "deps/recorder.wit",
             include_str!("../assets/recorder.wit").as_bytes(),
+        );
+        files.push(
+            "deps/util.wit",
+            include_str!("../assets/util.wit").as_bytes(),
         );
         Ok(())
     }
@@ -281,7 +285,7 @@ fn get_import_info(file: &Path) -> Result<ImportInfo> {
         match import {
             WorldItem::Interface { .. } => match resolve.name_world_key(name).as_str() {
                 "proxy:conversion/conversion" => has_conversion = true,
-                "proxy:recorder/debug@0.1.0" => has_debug = true,
+                "proxy:util/debug" => has_debug = true,
                 _ => (),
             },
             _ => (),

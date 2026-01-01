@@ -1,11 +1,11 @@
 mod bindings {
     wit_bindgen::generate!({
-        path: "../../assets/recorder.wit",
+        path: "../../assets/util.wit",
         world: "crate-debug",
     });
 }
 
-use bindings::exports::proxy::recorder::debug::Guest;
+use bindings::exports::proxy::util::debug::Guest;
 struct Component;
 impl Guest for Component {
     fn print(s: String) {

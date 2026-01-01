@@ -1,0 +1,9 @@
+package proxy:util;
+
+interface debug {
+  print: func(x: string);
+}
+
+world crate-debug {
+  export debug;
+}
