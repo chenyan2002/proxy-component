@@ -196,13 +196,17 @@ impl State {
             if let Some(_) = ret_ty {
                 parse_quote! {
                     #sig {
-                        let mut __buf = Vec::new();
-                        #( write!(&mut __buf, "{:?},", #arg_names).unwrap(); )*
-                        write!(&mut __buf, #display_name).unwrap();
-                        proxy::util::debug::print(&format!("import: {}", std::str::from_utf8(&__buf).unwrap()));
-                        let mut u = Unstructured::new(&__buf);
+                        let mut __params: Vec<String> = Vec::new();
+                        #(
+                            __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
+                        )*
+                        let mut __buf = __params.join(",");
+                        __buf += #display_name;
+                        proxy::util::debug::print(&format!("import: {}", __buf));
+                        let mut u = Unstructured::new(&__buf.as_bytes());
                         let res = u.arbitrary().unwrap();
-                        proxy::util::debug::print(&format!("ret: {:?}", res));
+                        let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
+                        proxy::util::debug::print(&format!("ret: {}", res_str));
                         res
                     }
                 }

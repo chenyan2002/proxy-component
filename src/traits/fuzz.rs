@@ -180,57 +180,9 @@ impl Trait for FuzzTrait {
         res
     }
     fn trait_defs(&self) -> Vec<Item> {
-        let mocked_resource = quote! {
-            use std::{alloc::Layout, cell::RefCell};
-            // Used to store borrowed resources when calling proxy::conversion during ToRust trait
-            #[allow(dead_code)]
-            struct ScopedAlloc {
-                ptrs: Vec<(*mut u8, Layout, fn(*mut u8))>,
-            }
-            thread_local! {
-                static SCOPED_ALLOC: RefCell<ScopedAlloc> = RefCell::new(ScopedAlloc::new());
-            }
-            #[allow(dead_code)]
-            impl ScopedAlloc {
-                fn new() -> Self {
-                    Self { ptrs: Vec::new() }
-                }
-                fn alloc<T>(&mut self, value: T) -> &'static T {
-                    let boxed = Box::new(value);
-                    let ptr = Box::into_raw(boxed);
-                    fn drop_ptr<T>(ptr: *mut u8) {
-                        drop(unsafe { Box::from_raw(ptr as *mut T) });
-                    }
-                    self.ptrs.push((
-                        ptr as *mut u8,
-                        Layout::new::<T>(),
-                        drop_ptr::<T>,
-                    ));
-                    unsafe { &*ptr }
-                }
-                fn clear(&mut self) {
-                    for (ptr, _layout, drop_fn) in self.ptrs.drain(..) {
-                        drop_fn(ptr);
-                    }
-                }
-            }
-            impl Drop for ScopedAlloc {
-                fn drop(&mut self) {
-                    self.clear();
-                }
-            }
-            #[derive(Default, Debug)]
-            struct MockedResource {
-                handle: u32,
-                name: String,
-            }
-        };
         let ast: syn::File = parse_quote! {
-          #![allow(unused_variables)]
           #[allow(unused_imports)]
           use arbitrary::{Arbitrary, Unstructured, Result};
-          use std::io::Write;
-          #mocked_resource
         };
         ast.items
     }

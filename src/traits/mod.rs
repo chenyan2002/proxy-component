@@ -40,6 +40,11 @@ impl<'a> TraitGenerator<'a> {
                 }));
             }
             GenerateMode::Fuzz => {
+                traits.push(Box::new(wave::WaveTrait {
+                    to_value: true,
+                    to_rust: false,
+                    has_replay_table: true,
+                }));
                 traits.push(Box::new(fuzz::FuzzTrait {}));
             }
         }
