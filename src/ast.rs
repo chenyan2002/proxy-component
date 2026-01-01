@@ -25,7 +25,9 @@ impl Opt {
                     ident(self.mode.to_str())
                 ));
             }
-            Mode::Fuzz => {}
+            Mode::Fuzz => {
+                out.push_str(&format!("import {recorder}debug@0.1.0;\n"));
+            }
         };
         out.push_str("export proxy:conversion/conversion;\n");
         for (name, import) in &world.imports {
@@ -80,7 +82,9 @@ impl Opt {
                     ident(self.mode.to_str())
                 ));
             }
-            Mode::Fuzz => {}
+            Mode::Fuzz => {
+                out.push_str(&format!("import {recorder}debug@0.1.0;\n"));
+            }
         };
         out.push_str("import proxy:conversion/conversion;\n");
         for (name, import) in &world.imports {
@@ -111,14 +115,17 @@ impl Opt {
         exports_wasm: &Path,
         out_dir: &Path,
     ) {
+        let has_debug = matches!(self.mode, Mode::Fuzz);
         let mut out = Source::default();
         let world = &resolve.worlds[id];
-        out.push_str(
-            r#"package component:composed;
-let imports = new import:proxy { ... };
-let main = new root:component {
-"#,
-        );
+        out.push_str("package component:composed;\n");
+        if has_debug {
+            out.push_str("let debug = new import:debug { ... };\n");
+            out.push_str("let imports = new import:proxy { ...debug, ... };\n");
+        } else {
+            out.push_str("let imports = new import:proxy { ... };\n");
+        }
+        out.push_str("let main = new root:component {\n");
         let prefix = match self.mode {
             Mode::Record => "wrapped-",
             Mode::Replay | Mode::Fuzz => "",
@@ -144,9 +151,13 @@ let main = new root:component {
             }
         }
         // proxy:conversion can be DCE'ed, so we need to look at the generated wasm to make sure.
-        let has_conversion = has_conversion_import(exports_wasm).unwrap();
-        if has_conversion {
+        let info = get_import_info(exports_wasm).unwrap();
+        assert!(info.has_debug);
+        if info.has_conversion {
             out.push_str("...imports,\n");
+        }
+        if info.has_debug {
+            out.push_str("...debug,\n");
         }
         out.push_str("...\n};\n");
         out.push_str("export final...;\n");
@@ -253,7 +264,11 @@ let main = new root:component {
     }
 }
 
-fn has_conversion_import(file: &Path) -> Result<bool> {
+struct ImportInfo {
+    has_conversion: bool,
+    has_debug: bool,
+}
+fn get_import_info(file: &Path) -> Result<ImportInfo> {
     use wit_parser::decoding::{DecodedWasm, decode};
     let bytes = std::fs::read(file)?;
     let DecodedWasm::Component(resolve, id) = decode(&bytes)? else {
@@ -261,16 +276,19 @@ fn has_conversion_import(file: &Path) -> Result<bool> {
     };
     let world = &resolve.worlds[id];
     let mut has_conversion = false;
+    let mut has_debug = false;
     for (name, import) in &world.imports {
         match import {
-            WorldItem::Interface { .. } => {
-                let name = resolve.name_world_key(name);
-                if name == "proxy:conversion/conversion" {
-                    has_conversion = true;
-                }
-            }
+            WorldItem::Interface { .. } => match resolve.name_world_key(name).as_str() {
+                "proxy:conversion/conversion" => has_conversion = true,
+                "proxy:recorder/debug@0.1.0" => has_debug = true,
+                _ => (),
+            },
             _ => (),
         }
     }
-    Ok(has_conversion)
+    Ok(ImportInfo {
+        has_conversion,
+        has_debug,
+    })
 }

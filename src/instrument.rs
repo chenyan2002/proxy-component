@@ -76,6 +76,10 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     let imports = format!("import:proxy={}", imports_wasm_path.display());
     let exports = format!("export:proxy={}", exports_wasm_path.display());
     let root = format!("root:component={}", args.wasm_file.display());
+    let debug = format!(
+        "import:debug={}/target/wasm32-wasip2/debug/debug.wasm",
+        env!("CARGO_MANIFEST_DIR")
+    );
     let wac_path = tmp_dir.join("wit/compose.wac");
     let status = Command::new("wac")
         .arg("compose")
@@ -83,6 +87,8 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         .arg(&imports)
         .arg("--dep")
         .arg(&exports)
+        .arg("--dep")
+        .arg(&debug)
         .arg("--dep")
         .arg(&root)
         .arg(&wac_path)

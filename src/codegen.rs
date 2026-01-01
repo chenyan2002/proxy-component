@@ -199,8 +199,11 @@ impl State {
                         let mut __buf = Vec::new();
                         #( write!(&mut __buf, "{:?},", #arg_names).unwrap(); )*
                         write!(&mut __buf, #display_name).unwrap();
+                        proxy::recorder::debug::print(&format!("import: {}", std::str::from_utf8(&__buf).unwrap()));
                         let mut u = Unstructured::new(&__buf);
-                        u.arbitrary().unwrap()
+                        let res = u.arbitrary().unwrap();
+                        proxy::recorder::debug::print(&format!("ret: {:?}", res));
+                        res
                     }
                 }
             } else {
@@ -238,8 +241,10 @@ impl State {
                                 sig.ident.to_string()
                             };
                             let func = make_path(path, &func_name);
+                            let display_name = wit_func_name(path, resource, &sig.ident, &kind);
                             Some(quote! {
                                 {
+                                    proxy::recorder::debug::print(#display_name);
                                     #(
                                         let #arg_name: #ty = u.arbitrary().unwrap();
                                     )*
@@ -254,7 +259,11 @@ impl State {
             let idxs = 1..=func_len;
             parse_quote! {
                 #sig {
-                    let __buf: Vec<u8> = std::iter::repeat_n(0u8, 1024).enumerate().map(|(idx,_)| idx as u8).collect();
+                    let mut s = 1u32;
+                    let __buf: Vec<u8> = (0..1024).map(|_| {
+                        s = s.wrapping_mul(1664525).wrapping_add(1013904223);
+                        (s >> 24) as u8
+                    }).collect();
                     let mut u = Unstructured::new(&__buf);
                     for _ in 0..10 {
                         let idx = u.int_in_range(1..=#func_len).unwrap();
