@@ -34,9 +34,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
 
     // 3. Parse the main wit file from tmp_dir/wit and feed into opts.generate_component
     let (resolve, world) = parse_wit(&wit_dir, None)?;
-    let opts = crate::ast::Opt {
-        mode: args.mode.clone(),
-    };
+    let mut opts = crate::ast::Opt::new(args.mode.clone());
     opts.generate_wrapped_wits(&wit_dir)?;
     let mut files = Files::default();
     opts.generate_component(&resolve, world, &mut files)?;
@@ -71,7 +69,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     let imports_wasm_path =
         component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
     // 7. run wac
-    opts.generate_wac(&resolve, world, &exports_wasm_path, &wit_dir);
+    opts.generate_wac(&imports_wasm_path, &exports_wasm_path, &wit_dir)?;
     let output_file = "composed.wasm";
     let imports = format!("import:proxy={}", imports_wasm_path.display());
     let exports = format!("export:proxy={}", exports_wasm_path.display());

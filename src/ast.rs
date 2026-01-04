@@ -1,18 +1,40 @@
 use crate::Mode;
 use crate::util::*;
 use anyhow::Result;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use wit_bindgen_core::{Files, Source, wit_parser};
 use wit_component::WitPrinter;
 use wit_parser::*;
 
 pub struct Opt {
-    pub mode: Mode,
+    mode: Mode,
+    imports: LinkInfo,
+    exports: LinkInfo,
+    main: LinkInfo,
+}
+#[derive(Default)]
+struct LinkInfo {
+    imports: BTreeMap<String, LinkType>,
+    exports: BTreeSet<String>,
+}
+enum LinkType {
+    Debug,
+    Imports,
+    Main,
+    Host,
 }
 
 impl Opt {
-    fn generate_main_wit(&self, resolve: &Resolve, id: WorldId, files: &mut Files) {
+    pub fn new(mode: Mode) -> Self {
+        Self {
+            mode,
+            imports: LinkInfo::default(),
+            exports: LinkInfo::default(),
+            main: LinkInfo::default(),
+        }
+    }
+    fn generate_main_wit(&mut self, resolve: &Resolve, id: WorldId, files: &mut Files) {
         let mut out = Source::default();
         let world = &resolve.worlds[id];
         let recorder = "proxy:recorder/";
@@ -34,6 +56,13 @@ impl Opt {
             match import {
                 WorldItem::Interface { .. } => {
                     let name = resolve.name_world_key(name);
+                    // Don't virtualize util imports
+                    if name.starts_with("proxy:util/") {
+                        self.main.imports.insert(name.clone(), LinkType::Debug);
+                        out.push_str(&format!("import {name};\n"));
+                        continue;
+                    }
+                    self.main.imports.insert(name.clone(), LinkType::Imports);
                     match self.mode {
                         Mode::Record => {
                             out.push_str(&format!("import {name};\n"));
@@ -51,6 +80,7 @@ impl Opt {
             match export {
                 WorldItem::Interface { .. } => {
                     let name = resolve.name_world_key(name);
+                    self.main.exports.insert(name.clone());
                     match self.mode {
                         Mode::Record => {
                             out.push_str(&format!("import wrapped-{name};\n"));
@@ -109,62 +139,84 @@ impl Opt {
         files.push("component.wit", out.as_bytes());
     }
     pub fn generate_wac(
-        &self,
-        resolve: &Resolve,
-        id: WorldId,
+        &mut self,
+        imports_wasm: &Path,
         exports_wasm: &Path,
         out_dir: &Path,
-    ) {
-        let has_debug = matches!(self.mode, Mode::Fuzz);
+    ) -> Result<()> {
+        // Get WIT from wasm to account for unused imports being optimized away
+        self.load_imports(imports_wasm)?;
+        self.load_exports(exports_wasm)?;
         let mut out = Source::default();
-        let world = &resolve.worlds[id];
         out.push_str("package component:composed;\n");
-        if has_debug {
-            out.push_str("let debug = new import:debug { ... };\n");
-            out.push_str("let imports = new import:proxy { ...debug, ... };\n");
-        } else {
-            out.push_str("let imports = new import:proxy { ... };\n");
-        }
-        out.push_str("let main = new root:component {\n");
-        let prefix = match self.mode {
-            Mode::Record => "wrapped-",
-            Mode::Replay | Mode::Fuzz => "",
-        };
-        for (name, import) in &world.imports {
-            match import {
-                WorldItem::Interface { .. } => {
-                    let name = resolve.name_world_key(name);
-                    out.push_str(&format!("\"{name}\": imports[\"{prefix}{name}\"],\n"));
+        out.push_str("let debug = new import:debug { ... };\n");
+        out.push_str("let imports = new import:proxy {\n");
+        let mut has_host = false;
+        for (name, link_type) in &self.imports.imports {
+            match link_type {
+                LinkType::Debug => {
+                    out.push_str(&format!("\"{name}\": debug[\"{name}\"] ,\n"));
                 }
-                _ => todo!(),
+                LinkType::Host => {
+                    has_host = true;
+                }
+                LinkType::Imports | LinkType::Main => unreachable!(),
+            }
+        }
+        if has_host {
+            out.push_str("...,\n");
+        }
+        out.push_str("};\n");
+        out.push_str("let main = new root:component {\n");
+        for (name, link_type) in &self.main.imports {
+            match link_type {
+                LinkType::Debug => {
+                    out.push_str(&format!("\"{name}\": debug[\"{name}\"] ,\n"));
+                }
+                LinkType::Imports => {
+                    let prefix = if matches!(self.mode, Mode::Record) {
+                        "wrapped-"
+                    } else {
+                        ""
+                    };
+                    out.push_str(&format!("\"{name}\": imports[\"{prefix}{name}\"] ,\n"));
+                }
+                LinkType::Host | LinkType::Main => unreachable!(),
             }
         }
         out.push_str("};\n");
         out.push_str("let final = new export:proxy {\n");
-        for (name, import) in &world.exports {
-            match import {
-                WorldItem::Interface { .. } => {
-                    let name = resolve.name_world_key(name);
-                    out.push_str(&format!("\"{prefix}{name}\": main[\"{name}\"],\n"));
+        has_host = false;
+        for (name, link_type) in &self.exports.imports {
+            match link_type {
+                LinkType::Debug => {
+                    out.push_str(&format!("\"{name}\": debug[\"{name}\"] ,\n"));
                 }
-                _ => todo!(),
+                LinkType::Host => {
+                    has_host = true;
+                }
+                LinkType::Imports => {
+                    out.push_str(&format!("\"{name}\": imports[\"{name}\"] ,\n"));
+                }
+                LinkType::Main => {
+                    if let Some(stripped) = name.strip_prefix("wrapped-") {
+                        out.push_str(&format!("\"{name}\": main[\"{stripped}\"] ,\n"));
+                    } else {
+                        out.push_str(&format!("\"{name}\": main[\"{name}\"] ,\n"));
+                    }
+                }
             }
         }
-        // proxy:conversion can be DCE'ed, so we need to look at the generated wasm to make sure.
-        let info = get_import_info(exports_wasm).unwrap();
-        assert!(info.has_debug);
-        if info.has_conversion {
-            out.push_str("...imports,\n");
+        if has_host {
+            out.push_str("...,\n");
         }
-        if info.has_debug {
-            out.push_str("...debug,\n");
-        }
-        out.push_str("...\n};\n");
+        out.push_str("};\n");
         out.push_str("export final...;\n");
-        std::fs::write(out_dir.join("compose.wac"), out.as_bytes()).unwrap();
+        std::fs::write(out_dir.join("compose.wac"), out.as_bytes())?;
+        Ok(())
     }
     pub fn generate_component(
-        &self,
+        &mut self,
         resolve: &Resolve,
         id: WorldId,
         files: &mut Files,
@@ -266,33 +318,63 @@ impl Opt {
         }
         Ok(())
     }
+    fn load_imports(&mut self, file: &Path) -> Result<()> {
+        let (resolve, id) = load_wasm(file)?;
+        let world = &resolve.worlds[id];
+        for (name, import) in &world.imports {
+            match import {
+                WorldItem::Interface { .. } => {
+                    let name = resolve.name_world_key(name);
+                    let link_type = match name.as_str() {
+                        "proxy:util/debug" => LinkType::Debug,
+                        _ => LinkType::Host,
+                    };
+                    self.imports.imports.insert(name.clone(), link_type);
+                }
+                _ => todo!(),
+            }
+        }
+        Ok(())
+    }
+    fn load_exports(&mut self, file: &Path) -> Result<()> {
+        let (resolve, id) = load_wasm(file)?;
+        let world = &resolve.worlds[id];
+        for (name, import) in &world.imports {
+            match import {
+                WorldItem::Interface { .. } => {
+                    let name = resolve.name_world_key(name);
+                    let link_type = match name.as_str() {
+                        "proxy:util/debug" => LinkType::Debug,
+                        "proxy:conversion/conversion" => LinkType::Imports,
+                        name if name.starts_with("proxy:recorder/") => LinkType::Host,
+                        name if matches!(self.mode, Mode::Record) => {
+                            if let Some(stripped) = name.strip_prefix("wrapped-") {
+                                if self.main.exports.contains(stripped) {
+                                    LinkType::Main
+                                } else {
+                                    LinkType::Imports
+                                }
+                            } else {
+                                LinkType::Host
+                            }
+                        }
+                        name if self.main.exports.contains(name) => LinkType::Main,
+                        _ => LinkType::Imports,
+                    };
+                    self.exports.imports.insert(name.to_string(), link_type);
+                }
+                _ => todo!(),
+            }
+        }
+        Ok(())
+    }
 }
 
-struct ImportInfo {
-    has_conversion: bool,
-    has_debug: bool,
-}
-fn get_import_info(file: &Path) -> Result<ImportInfo> {
+fn load_wasm(file: &Path) -> Result<(Resolve, WorldId)> {
     use wit_parser::decoding::{DecodedWasm, decode};
     let bytes = std::fs::read(file)?;
     let DecodedWasm::Component(resolve, id) = decode(&bytes)? else {
         panic!()
     };
-    let world = &resolve.worlds[id];
-    let mut has_conversion = false;
-    let mut has_debug = false;
-    for (name, import) in &world.imports {
-        match import {
-            WorldItem::Interface { .. } => match resolve.name_world_key(name).as_str() {
-                "proxy:conversion/conversion" => has_conversion = true,
-                "proxy:util/debug" => has_debug = true,
-                _ => (),
-            },
-            _ => (),
-        }
-    }
-    Ok(ImportInfo {
-        has_conversion,
-        has_debug,
-    })
+    Ok((resolve, id))
 }
