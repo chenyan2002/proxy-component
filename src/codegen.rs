@@ -263,11 +263,7 @@ impl State {
             let idxs = 1..=func_len;
             parse_quote! {
                 #sig {
-                    let mut s = 1u32;
-                    let __buf: Vec<u8> = (0..1024).map(|_| {
-                        s = s.wrapping_mul(1664525).wrapping_add(1013904223);
-                        (s >> 24) as u8
-                    }).collect();
+                    let __buf = proxy::util::debug::get_random();
                     let mut u = Unstructured::new(&__buf);
                     for _ in 0..10 {
                         let idx = u.int_in_range(1..=#func_len).unwrap();

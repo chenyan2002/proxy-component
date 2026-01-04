@@ -508,6 +508,7 @@ dependencies = [
 name = "debug"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "wit-bindgen 0.48.1",
 ]
 
