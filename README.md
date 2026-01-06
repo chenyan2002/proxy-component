@@ -36,6 +36,16 @@ Another interesting use case is that we can replay the trace with a different Wa
 a different optimization strategy, to compare the performance. We have assertions in the replay phase to make sure that the trace
 is still valid with the new binary.
 
+### Fuzzing
+
+```
+$ cargo run instrument -m fuzz <component.wasm>
+$ wasmtime --invoke 'start()' composed.wasm
+```
+
+Fuzzing the import return and export input based on the WIT type. This mode requires a [Debug component](components/debug/) to get random numbers and logging. The `composed.wasm` can be run in
+a standalone `wasmtime` without any special host functions.
+
 ### Generate
 
 Given a `bindings.rs` file generated from `wit-bindgen`. This command can generate code to implement
@@ -44,7 +54,8 @@ all the required traits, based on the following mode:
 * `stubs`. Fill in all impl functions with `unimplemented!()`, similar to `wit-bindgen rust --stubs`, but outside of the bindings module.
 * `instrument`. Given an instrument component which imports and exports the same interface, generate code to redirect export interface to call the coressponding import functions.
 * `record`. Given an instrument component, generate the code to redirect the calls and record the arguments and return in WAVE format. 
-* `replay`. Given a vitualized component which has no imports, generate code to replay an execution based on a recorded WAVE trace.
+* `replay`. Given a vitualized component, generate code to replay an execution based on a recorded WAVE trace.
+* `fuzz`. Given a virtualized component, generate random import values and export values using the `arbitrary` crate.
 
 ```
 $ cargo run generate bindings.rs <mode> -o lib.rs

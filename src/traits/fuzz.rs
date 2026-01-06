@@ -173,7 +173,7 @@ impl Trait for FuzzTrait {
                 Ok(res)
             }
             fn size_hint(_: usize) -> (usize, Option<usize>) {
-                (0, Some(#flag_num))
+                (1, Some(1 + #flag_num))
             }
         }
         });
