@@ -3,9 +3,10 @@ members = ["record_imports", "record_exports"]
 resolver = "2"
 
 [workspace.dependencies]
-wit-bindgen = { version = "0.48.0", default-features = false, features = ["bitflags", "std"] }
+wit-bindgen = { version = "0.50.0", default-features = false, features = ["bitflags", "std"] }
 wasm-wave = { git = "https://github.com/chenyan2002/wasm-tools.git", branch = "extend-wave", version = "0.239.0", default-features = false }
 #wasm-wave = { path = "/Users/chenyan/src/bytecodealliance/wasm-tools/crates/wasm-wave", default-features = false }
+arbitrary = "1.4.2"
 
 [profile.release]
 codegen-units = 1
