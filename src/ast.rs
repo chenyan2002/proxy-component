@@ -265,7 +265,7 @@ impl Opt {
         out.push_str("package proxy:conversion;\ninterface conversion {");
         for (resource, iface, iface_no_ver) in resources.into_values() {
             use heck::ToKebabCase;
-            let func_name = format!("{iface_no_ver}-{resource}").to_kebab_case();
+            let func_name = format!("{iface}-{resource}").to_kebab_case();
             match self.mode {
                 Mode::Record => {
                     out.push_str(&format!(
@@ -283,7 +283,7 @@ impl Opt {
                 }
                 Mode::Replay | Mode::Fuzz => {
                     // Add a magic separator so that codegen::generate_conversion_func can recover the resource name
-                    let magic_name = format!("{iface_no_ver}-magic42-{resource}").to_kebab_case();
+                    let magic_name = format!("{iface}-magic42-{resource}").to_kebab_case();
                     out.push_str(&format!("\nuse {iface}.{{{resource} as {func_name}}};\n"));
                     out.push_str(&format!(
                         "get-mock-{magic_name}: func(handle: u32) -> {func_name};\n"
@@ -309,9 +309,18 @@ impl Opt {
             for (id, pkg) in resolve.packages.iter().filter(|(id, _)| *id != main_id) {
                 let mut printer = WitPrinter::default();
                 printer.print_package(&resolve, id, true)?;
+                let filename = if let Some(ver) = &pkg.name.version {
+                    format!(
+                        "wrapped-{}@{}.wit",
+                        pkg.name.name,
+                        ver
+                    )
+                } else {
+                    format!("wrapped-{}.wit", pkg.name.name)
+                };
                 std::fs::write(
                     dir.join("deps")
-                        .join(format!("wrapped-{}.wit", pkg.name.name)),
+                        .join(&filename),
                     printer.output.to_string(),
                 )?;
             }
