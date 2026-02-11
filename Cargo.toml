@@ -16,11 +16,11 @@ syn = { version = "2.0.108", features = ["visit-mut"] }
 tempfile = "3.20.0"
 #wit-bindgen-core = { git = "https://github.com/chenyan2002/wit-bindgen.git", branch = "proxy" }
 #wit-bindgen-rust = { git = "https://github.com/chenyan2002/wit-bindgen.git", branch = "proxy" }
-wit-bindgen-core = "0.48.0"
-wit-component = "0.241.0"
+wit-bindgen-core = "0.52.0"
+wit-component = "0.244.0"
 
-wasmtime = { version = "38.0.0", features = ["wave"], optional = true }
-wasmtime-wasi = { version = "38.0.0", optional = true }
+wasmtime = { version = "41.0.0", features = ["wave"], optional = true }
+wasmtime-wasi = { version = "41.0.0", optional = true }
 
 [features]
 run = ["wasmtime", "wasmtime-wasi"]
