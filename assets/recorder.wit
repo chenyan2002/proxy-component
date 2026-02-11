@@ -19,3 +19,8 @@ world host {
   import %record;
   import replay;
 }
+
+world guest {
+  export %record;
+  export replay;
+}
