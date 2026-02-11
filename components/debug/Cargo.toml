@@ -1,13 +1,11 @@
 [package]
-name = "{proj_name}"
+name = "debug"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
 crate-type = ["cdylib"]
-path = "lib.rs"
 
 [dependencies]
 wit-bindgen.workspace = true
-wasm-wave.workspace = true
-arbitrary.workspace = true
+getrandom = "0.3"

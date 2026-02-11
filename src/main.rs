@@ -19,6 +19,7 @@ struct Cli {
 pub enum Mode {
     Record,
     Replay,
+    Fuzz,
 }
 
 #[derive(Parser)]
@@ -47,6 +48,7 @@ impl Mode {
         match self {
             Mode::Record => "record",
             Mode::Replay => "replay",
+            Mode::Fuzz => "fuzz",
         }
     }
 }

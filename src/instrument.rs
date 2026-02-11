@@ -12,7 +12,7 @@ pub struct InstrumentArgs {
     /// The path to the wasm component file.
     wasm_file: PathBuf,
     /// Instrumentation mode
-    #[arg(short, long, default_value("record"))]
+    #[arg(short, long)]
     mode: Mode,
 }
 
@@ -34,9 +34,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
 
     // 3. Parse the main wit file from tmp_dir/wit and feed into opts.generate_component
     let (resolve, world) = parse_wit(&wit_dir, None)?;
-    let opts = crate::ast::Opt {
-        mode: args.mode.clone(),
-    };
+    let mut opts = crate::ast::Opt::new(args.mode.clone());
     opts.generate_wrapped_wits(&wit_dir)?;
     let mut files = Files::default();
     opts.generate_component(&resolve, world, &mut files)?;
@@ -71,11 +69,15 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     let imports_wasm_path =
         component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
     // 7. run wac
-    opts.generate_wac(&resolve, world, &exports_wasm_path, &wit_dir);
+    opts.generate_wac(&imports_wasm_path, &exports_wasm_path, &wit_dir)?;
     let output_file = "composed.wasm";
     let imports = format!("import:proxy={}", imports_wasm_path.display());
     let exports = format!("export:proxy={}", exports_wasm_path.display());
     let root = format!("root:component={}", args.wasm_file.display());
+    let debug = format!(
+        "import:debug={}/target/wasm32-wasip2/debug/debug.wasm",
+        env!("CARGO_MANIFEST_DIR")
+    );
     let wac_path = tmp_dir.join("wit/compose.wac");
     let status = Command::new("wac")
         .arg("compose")
@@ -83,6 +85,8 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         .arg(&imports)
         .arg("--dep")
         .arg(&exports)
+        .arg("--dep")
+        .arg(&debug)
         .arg("--dep")
         .arg(&root)
         .arg(&wac_path)
@@ -128,6 +132,7 @@ fn bindgen(
     let codegen_mode = match mode {
         Mode::Record => codegen::GenerateMode::Record,
         Mode::Replay => codegen::GenerateMode::Replay,
+        Mode::Fuzz => codegen::GenerateMode::Fuzz,
     };
     let codegen_opt = codegen::GenerateArgs {
         bindings: binding_file.clone(),
