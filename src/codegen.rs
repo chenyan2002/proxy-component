@@ -193,7 +193,7 @@ impl State {
             let arg_names = args.iter().map(|arg| &arg.ident);
             let display_name = wit_func_name(module_path, resource, func_name, &kind);
             let ret_ty = get_return_type(&sig.output);
-            if let Some(_) = ret_ty {
+            if ret_ty.is_some() {
                 parse_quote! {
                     #sig {
                         let mut __params: Vec<String> = Vec::new();
