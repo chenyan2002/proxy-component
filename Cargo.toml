@@ -1,9 +1,10 @@
 [workspace]
 members = [
-  "components/debug"
+  "components/debug",
+  "components/recorder"
 ]
 [workspace.dependencies]
-wit-bindgen = { version = "0.48.0", default-features = false, features = ["bitflags", "std", "macros"] }
+wit-bindgen = { version = "0.52.0", default-features = false, features = ["bitflags", "std", "macros"] }
 
 [package]
 name = "proxy-component"

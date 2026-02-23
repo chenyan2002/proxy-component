@@ -1,4 +1,5 @@
 use crate::Mode;
+use crate::instrument::InstrumentArgs;
 use crate::util::*;
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
@@ -7,7 +8,8 @@ use wit_bindgen_core::{Files, Source, wit_parser};
 use wit_component::WitPrinter;
 use wit_parser::*;
 
-pub struct Opt {
+pub struct Opt<'a> {
+    args: &'a InstrumentArgs,
     mode: Mode,
     imports: LinkInfo,
     exports: LinkInfo,
@@ -20,14 +22,17 @@ struct LinkInfo {
 }
 enum LinkType {
     Debug,
+    Recorder,
     Imports,
     Main,
     Host,
 }
 
-impl Opt {
-    pub fn new(mode: Mode) -> Self {
+impl<'a> Opt<'a> {
+    pub fn new(args: &'a InstrumentArgs) -> Self {
+        let mode = args.mode.clone();
         Self {
+            args,
             mode,
             imports: LinkInfo::default(),
             exports: LinkInfo::default(),
@@ -150,12 +155,22 @@ impl Opt {
         let mut out = Source::default();
         out.push_str("package component:composed;\n");
         out.push_str("let debug = new import:debug { ... };\n");
+        if !self.args.use_host_recorder {
+            out.push_str("let recorder = new import:recorder { ... };\n");
+        }
         out.push_str("let imports = new import:proxy {\n");
         let mut has_host = false;
         for (name, link_type) in &self.imports.imports {
             match link_type {
                 LinkType::Debug => {
                     out.push_str(&format!("\"{name}\": debug[\"{name}\"] ,\n"));
+                }
+                LinkType::Recorder => {
+                    if self.args.use_host_recorder {
+                        has_host = true;
+                    } else {
+                        out.push_str(&format!("\"{name}\": recorder[\"{name}\"] ,\n"));
+                    }
                 }
                 LinkType::Host => {
                     has_host = true;
@@ -181,7 +196,7 @@ impl Opt {
                     };
                     out.push_str(&format!("\"{name}\": imports[\"{prefix}{name}\"] ,\n"));
                 }
-                LinkType::Host | LinkType::Main => unreachable!(),
+                LinkType::Host | LinkType::Main | LinkType::Recorder => unreachable!(),
             }
         }
         out.push_str("};\n");
@@ -191,6 +206,13 @@ impl Opt {
             match link_type {
                 LinkType::Debug => {
                     out.push_str(&format!("\"{name}\": debug[\"{name}\"] ,\n"));
+                }
+                LinkType::Recorder => {
+                    if self.args.use_host_recorder {
+                        has_host = true;
+                    } else {
+                        out.push_str(&format!("\"{name}\": recorder[\"{name}\"] ,\n"));
+                    }
                 }
                 LinkType::Host => {
                     has_host = true;
@@ -327,6 +349,7 @@ impl Opt {
                     let name = resolve.name_world_key(name);
                     let link_type = match name.as_str() {
                         "proxy:util/debug" => LinkType::Debug,
+                        name if name.starts_with("proxy:recorder/") => LinkType::Recorder,
                         _ => LinkType::Host,
                     };
                     self.imports.imports.insert(name.clone(), link_type);
@@ -346,7 +369,7 @@ impl Opt {
                     let link_type = match name.as_str() {
                         "proxy:util/debug" => LinkType::Debug,
                         "proxy:conversion/conversion" => LinkType::Imports,
-                        name if name.starts_with("proxy:recorder/") => LinkType::Host,
+                        name if name.starts_with("proxy:recorder/") => LinkType::Recorder,
                         name if matches!(self.mode, Mode::Record) => {
                             if let Some(stripped) = name.strip_prefix("wrapped-") {
                                 if self.main.exports.contains(stripped) {

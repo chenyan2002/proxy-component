@@ -10,10 +10,13 @@ use wit_parser::{Resolve, WorldId};
 #[derive(Parser)]
 pub struct InstrumentArgs {
     /// The path to the wasm component file.
-    wasm_file: PathBuf,
+    pub wasm_file: PathBuf,
     /// Instrumentation mode
     #[arg(short, long)]
-    mode: Mode,
+    pub mode: Mode,
+    /// Whether to use the host recorder implementation or link the recorder component
+    #[arg(short, long)]
+    pub use_host_recorder: bool,
 }
 
 pub fn run(args: InstrumentArgs) -> Result<()> {
@@ -34,7 +37,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
 
     // 3. Parse the main wit file from tmp_dir/wit and feed into opts.generate_component
     let (resolve, world) = parse_wit(&wit_dir, None)?;
-    let mut opts = crate::ast::Opt::new(args.mode.clone());
+    let mut opts = crate::ast::Opt::new(&args);
     opts.generate_wrapped_wits(&wit_dir)?;
     let mut files = Files::default();
     opts.generate_component(&resolve, world, &mut files)?;
@@ -79,8 +82,8 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         env!("CARGO_MANIFEST_DIR")
     );
     let wac_path = tmp_dir.join("wit/compose.wac");
-    let status = Command::new("wac")
-        .arg("compose")
+    let mut cmd = Command::new("wac");
+    cmd.arg("compose")
         .arg("--dep")
         .arg(&imports)
         .arg("--dep")
@@ -91,8 +94,15 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         .arg(&root)
         .arg(&wac_path)
         .arg("-o")
-        .arg(output_file)
-        .status()?;
+        .arg(output_file);
+    if !args.use_host_recorder {
+        let recorder = format!(
+            "import:recorder={}/target/wasm32-wasip2/debug/recorder.wasm",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        cmd.arg("--dep").arg(&recorder);
+    }
+    let status = cmd.status()?;
     assert!(status.success());
     eprintln!("Generated component: {output_file}");
     Ok(())
@@ -117,16 +127,18 @@ fn bindgen(
     dest_name: &str,
 ) -> Result<()> {
     let out_dir = tmp_dir.join(dest_name);
-    let status = Command::new("wit-bindgen")
-        .arg("rust")
-        .arg(wit_dir)
-        .arg("--world")
-        .arg(world_name)
-        .arg("--generate-all")
-        //.arg("--merge-structurally-equal-types=true")
-        .arg("--out-dir")
-        .arg(&out_dir)
-        .status()?;
+    //let status = Command::new("wit-bindgen")
+    let status =
+        Command::new("/Users/chenyan/src/bytecodealliance/wit-bindgen/target/debug/wit-bindgen")
+            .arg("rust")
+            .arg(wit_dir)
+            .arg("--world")
+            .arg(world_name)
+            .arg("--generate-all")
+            .arg("--merge-structurally-equal-types=true")
+            .arg("--out-dir")
+            .arg(&out_dir)
+            .status()?;
     assert!(status.success());
     let binding_file = out_dir.join(world_name.to_owned() + ".rs");
     let codegen_mode = match mode {
