@@ -9,8 +9,9 @@ build-components:
 
 test:
 	target/release/proxy-component instrument -m record tests/rust.wasm
-	viceroy composed.wasm > trace.out &
+	viceroy composed.wasm > trace.out & echo $$! > viceroy.pid
 	until nc -z localhost 7676; do sleep 1; done
 	curl localhost:7676
-	pkill -f viceroy || true
+	kill $$(cat viceroy.pid) || true
+	rm viceroy.pid
 	cat trace.out
