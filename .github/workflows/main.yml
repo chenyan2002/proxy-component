@@ -13,6 +13,8 @@ jobs:
       WASM_TOOLS_VERSION: 1.245.1
       WIT_BINDGEN_VERSION: 0.53.1
       WAC_VERSION: 0.9.0
+      WASMTIME_VERSION: 41.0.3
+      VICEROY_VERSION: 0.16.4
     steps:
       - uses: actions/checkout@v5
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -31,5 +33,17 @@ jobs:
           wget -qO "$tmp/wac-cli" https://github.com/bytecodealliance/wac/releases/download/v${{ env.WAC_VERSION }}/wac-cli-x86_64-unknown-linux-musl
           chmod a+x "$tmp/wac-cli"
           mv "$tmp/wac-cli" /usr/local/bin/wac
+      - name: Install Viceroy and wasmtime
+        run: |
+          tmp=$(mktemp -d)
+          wget -qO "$tmp/viceroy.tar.gz" https://github.com/fastly/Viceroy/releases/download/v${{ env.VICEROY_VERSION }}/viceroy_v${{ env.VICEROY_VERSION }}_x86_64_linux-amd64.tar.gz
+          tar -xz -f "$tmp/viceroy.tar.gz" -C "$tmp"
+          chmod a+x "$tmp/viceroy"
+          mv "$tmp/viceroy" /usr/local/bin/viceroy
+          wget -qO "$tmp/wasmtime.tar.gz" https://github.com/bytecodealliance/wasmtime/releases/download/v${{ env.WASMTIME_VERSION }}/wasmtime-v${{ env.WASMTIME_VERSION }}-x86_64-musl.tar.xz
+          tar -xJ -f "$tmp/wasmtime.tar.gz" -C "$tmp"
+          mv "$tmp/wasmtime-v${{ env.WASMTIME_VERSION }}-x86_64-musl" /usr/local/bin/wasmtime
       - name: Build
-        run: cargo build --workspace --release
+        run: make
+      - name: Test
+        run: make test

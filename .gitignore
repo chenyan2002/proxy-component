@@ -1,1 +1,5 @@
 /target
+trace.out
+composed.wasm
+# cannot viceroy yet
+/tests/js.wasm
