@@ -1,4 +1,4 @@
-.PHONY: all build-components build-cli test
+.PHONY: all build-components build-cli test run-viceroy
 
 all: build-components build-cli
 build-cli:
@@ -8,9 +8,14 @@ build-components:
 	cargo build -p recorder --target wasm32-wasip2
 
 test:
-	target/release/proxy-component instrument -m record tests/rust.wasm
+	$(MAKE) test-record WASM=test/rust.wasm
+	$(MAKE) test-record WASM=test/go.wasm
+	$(MAKE) test-record WASM=test/python.wasm
+
+test-record:
+	target/release/proxy-component instrument -m record $(WASM)
 	$(MAKE) run-viceroy URL=localhost:7676
-	target/release/proxy-component instrument -m replay tests/rust.wasm
+	target/release/proxy-component instrument -m replay $(WASM)
 	wasmtime --invoke 'start()' composed.wasm < trace.out
 
 run-viceroy:
