@@ -9,4 +9,7 @@ build-components:
 
 test:
 	target/release/proxy-component instrument -m record tests/rust.wasm
-	target/release/proxy-component instrument -m replay tests/rust.wasm
+	viceroy composed.wasm > trace.out &
+	curl localhost:7676
+	pkill -f viceroy || true
+	cat trace.out
