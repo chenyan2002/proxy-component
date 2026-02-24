@@ -10,7 +10,7 @@ build-components:
 test: test-fuzz test-record
 
 test-fuzz:
-	$(MAKE) run-fuzz WASM=tests/calculator.wasm
+	RUSTFLAGS="" $(MAKE) run-fuzz WASM=tests/calculator.wasm
 
 test-record:
 	$(MAKE) run-record WASM=tests/rust.wasm
