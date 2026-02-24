@@ -24,9 +24,9 @@ jobs:
       - name: Install wasm-tools, wit-bindgen and wac
         run: |
           tmp=$(mktemp -d)
-          wget -O "$tmp/wasm-tools.tar.gz" https://github.com/bytecodealliance/wasm-tools/releases/download/v${{ env.WASM_TOOLS_VERSION }}/wasm-tools-${{ env.WASM_TOOLS_VERSION }}-x86_64-musl.tar.gz
+          wget -O "$tmp/wasm-tools.tar.gz" https://github.com/bytecodealliance/wasm-tools/releases/download/v${{ env.WASM_TOOLS_VERSION }}/wasm-tools-${{ env.WASM_TOOLS_VERSION }}-x86_64-linux.tar.gz
           tar -xz -f "$tmp/wasm-tools.tar.gz" -C "$tmp"
-          sudo mv "$tmp/wasm-tools-${{ env.WASM_TOOLS_VERSION }}-x86_64-musl/wasm-tools" /usr/local/bin/wasm-tools
+          sudo mv "$tmp/wasm-tools-${{ env.WASM_TOOLS_VERSION }}-x86_64-linux/wasm-tools" /usr/local/bin/wasm-tools
           ls -al /usr/local/bin/wasm-tools
           file /usr/local/bin/wasm-tools
           /usr/local/bin/wasm-tools --version
