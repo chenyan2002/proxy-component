@@ -32,4 +32,4 @@ wasmtime-wasi = { version = "41.0.0", optional = true }
 
 [features]
 run = ["wasmtime", "wasmtime-wasi"]
-default = ["run"]
+#default = ["run"]
