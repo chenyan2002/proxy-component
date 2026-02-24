@@ -43,8 +43,6 @@ jobs:
           curl -sLo "$tmp/wasmtime.tar.xz" https://github.com/bytecodealliance/wasmtime/releases/download/v${{ env.WASMTIME_VERSION }}/wasmtime-v${{ env.WASMTIME_VERSION }}-x86_64-linux.tar.xz
           tar -xJ -f "$tmp/wasmtime.tar.xz" -C "$tmp"
           mv "$tmp/wasmtime-v${{ env.WASMTIME_VERSION }}-x86_64-linux/wasmtime" /usr/local/bin/
-          file /usr/local/bin/wasmtime
-          wasmtime --version
       - uses: actions/cache@v5
         with:
           path: |
