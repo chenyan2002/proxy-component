@@ -48,11 +48,10 @@ fn load_trace() {
             let reader = std::io::BufReader::new(f);
             for line in reader.lines() {
                 let line = line.unwrap();
-                if line.trim().is_empty() {
-                    break;
+                match serde_json::from_str::<FuncCall>(&line) {
+                    Ok(item) => res.push_back(item),
+                    Err(_) => continue,
                 }
-                let item: FuncCall = serde_json::from_str(&line).unwrap();
-                res.push_back(item);
             }
             *v = Some(res);
         });
