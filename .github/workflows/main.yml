@@ -24,23 +24,23 @@ jobs:
       - name: Install wasm-tools, wit-bindgen and wac
         run: |
           tmp=$(mktemp -d)
-          wget -qO "$tmp/wasm-tools.tar.gz" https://github.com/bytecodealliance/wasm-tools/releases/download/v${{ env.WASM_TOOLS_VERSION }}/wasm-tools-${{ env.WASM_TOOLS_VERSION }}-x86_64-musl.tar.gz
+          wget -O "$tmp/wasm-tools.tar.gz" https://github.com/bytecodealliance/wasm-tools/releases/download/v${{ env.WASM_TOOLS_VERSION }}/wasm-tools-${{ env.WASM_TOOLS_VERSION }}-x86_64-musl.tar.gz
           tar -xz -f "$tmp/wasm-tools.tar.gz" -C "$tmp"
           mv "$tmp/wasm-tools-${{ env.WASM_TOOLS_VERSION }}-x86_64-musl" /usr/local/bin/wasm-tools
-          wget -qO "$tmp/wit-bindgen.tar.gz" https://github.com/bytecodealliance/wit-bindgen/releases/download/v${{ env.WIT_BINDGEN_VERSION }}/wit-bindgen-${{ env.WIT_BINDGEN_VERSION }}-x86_64-linux.tar.gz
+          wget -O "$tmp/wit-bindgen.tar.gz" https://github.com/bytecodealliance/wit-bindgen/releases/download/v${{ env.WIT_BINDGEN_VERSION }}/wit-bindgen-${{ env.WIT_BINDGEN_VERSION }}-x86_64-linux.tar.gz
           tar -xz -f "$tmp/wit-bindgen.tar.gz" -C "$tmp"
           mv "$tmp/wit-bindgen-${{ env.WIT_BINDGEN_VERSION }}-x86_64-linux" /usr/local/bin/wit-bindgen
-          wget -qO "$tmp/wac-cli" https://github.com/bytecodealliance/wac/releases/download/v${{ env.WAC_VERSION }}/wac-cli-x86_64-unknown-linux-musl
+          wget -O "$tmp/wac-cli" https://github.com/bytecodealliance/wac/releases/download/v${{ env.WAC_VERSION }}/wac-cli-x86_64-unknown-linux-musl
           chmod a+x "$tmp/wac-cli"
           mv "$tmp/wac-cli" /usr/local/bin/wac
       - name: Install Viceroy and wasmtime
         run: |
           tmp=$(mktemp -d)
-          wget -qO "$tmp/viceroy.tar.gz" https://github.com/fastly/Viceroy/releases/download/v${{ env.VICEROY_VERSION }}/viceroy_v${{ env.VICEROY_VERSION }}_x86_64_linux-amd64.tar.gz
+          wget -O "$tmp/viceroy.tar.gz" https://github.com/fastly/Viceroy/releases/download/v${{ env.VICEROY_VERSION }}/viceroy_v${{ env.VICEROY_VERSION }}_linux-amd64.tar.gz
           tar -xz -f "$tmp/viceroy.tar.gz" -C "$tmp"
           chmod a+x "$tmp/viceroy"
           mv "$tmp/viceroy" /usr/local/bin/viceroy
-          wget -qO "$tmp/wasmtime.tar.gz" https://github.com/bytecodealliance/wasmtime/releases/download/v${{ env.WASMTIME_VERSION }}/wasmtime-v${{ env.WASMTIME_VERSION }}-x86_64-musl.tar.xz
+          wget -O "$tmp/wasmtime.tar.gz" https://github.com/bytecodealliance/wasmtime/releases/download/v${{ env.WASMTIME_VERSION }}/wasmtime-v${{ env.WASMTIME_VERSION }}-x86_64-musl.tar.xz
           tar -xJ -f "$tmp/wasmtime.tar.gz" -C "$tmp"
           mv "$tmp/wasmtime-v${{ env.WASMTIME_VERSION }}-x86_64-musl" /usr/local/bin/wasmtime
       - name: Build
