@@ -103,8 +103,14 @@ impl bindings::exports::proxy::recorder::replay::Guest for Component {
                     .as_ref()
                     .is_some_and(|m| m.starts_with("wasi:cli/exit"))
                 {
-                    //self.exit_called = true;
-                    return Some("Something that can crash".to_string());
+                    let code = if assert_args
+                        .is_some_and(|args| args.get(0).is_some_and(|arg| arg.starts_with("err")))
+                    {
+                        1
+                    } else {
+                        0
+                    };
+                    std::process::exit(code);
                 }
                 call = v.as_mut().unwrap().pop_front().unwrap();
             }
