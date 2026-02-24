@@ -19,6 +19,9 @@ pub struct InstrumentArgs {
     pub use_host_recorder: bool,
 }
 
+const DEBUG_WASM: &[u8] = include_bytes!("../assets/debug.wasm");
+const RECORDER_WASM: &[u8] = include_bytes!("../assets/recorder.wasm");
+
 pub fn run(args: InstrumentArgs) -> Result<()> {
     // 1. Create a tmp directory and initialize a new Rust project in it.
     let tmp_dir = init_rust_project()?;
@@ -77,10 +80,8 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     let imports = format!("import:proxy={}", imports_wasm_path.display());
     let exports = format!("export:proxy={}", exports_wasm_path.display());
     let root = format!("root:component={}", args.wasm_file.display());
-    let debug = format!(
-        "import:debug={}/target/wasm32-wasip2/debug/debug.wasm",
-        env!("CARGO_MANIFEST_DIR")
-    );
+    fs::write(tmp_dir.join("debug.wasm"), DEBUG_WASM)?;
+    let debug = format!("import:debug={}/debug.wasm", tmp_dir.display());
     let wac_path = tmp_dir.join("wit/compose.wac");
     let mut cmd = Command::new("wac");
     cmd.arg("compose")
@@ -96,10 +97,9 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         .arg("-o")
         .arg(output_file);
     if !args.use_host_recorder {
-        let recorder = format!(
-            "import:recorder={}/target/wasm32-wasip2/debug/recorder.wasm",
-            env!("CARGO_MANIFEST_DIR")
-        );
+        let wasm_path = tmp_dir.join("recorder.wasm");
+        fs::write(&wasm_path, RECORDER_WASM)?;
+        let recorder = format!("import:recorder={}", wasm_path.display());
         cmd.arg("--dep").arg(&recorder);
     }
     let status = cmd.status()?;

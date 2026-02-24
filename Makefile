@@ -4,8 +4,10 @@ all: build-components build-cli
 build-cli:
 	cargo build --release
 build-components:
-	cargo build -p debug --target wasm32-wasip2
-	cargo build -p recorder --target wasm32-wasip2
+	cargo build -p debug --target wasm32-wasip2 --release
+	cargo build -p recorder --target wasm32-wasip2 --release
+	cp target/wasm32-wasip2/release/debug.wasm assets/debug.wasm
+	cp target/wasm32-wasip2/release/recorder.wasm assets/recorder.wasm
 
 test: test-fuzz test-record
 
