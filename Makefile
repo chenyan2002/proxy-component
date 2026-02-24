@@ -8,9 +8,9 @@ build-components:
 	cargo build -p recorder --target wasm32-wasip2
 
 test:
-	$(MAKE) test-record WASM=test/rust.wasm
-	$(MAKE) test-record WASM=test/go.wasm
-	$(MAKE) test-record WASM=test/python.wasm
+	$(MAKE) test-record WASM=tests/rust.wasm
+	$(MAKE) test-record WASM=tests/go.wasm
+	$(MAKE) test-record WASM=tests/python.wasm
 
 test-record:
 	target/release/proxy-component instrument -m record $(WASM)
