@@ -1,0 +1,32 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    env:
+      WASM_TOOLS_VERSION: 1.245.1
+      WIT_BINDGEN_VERSION: 0.53.1
+      WAC_VERSION: 0.9.0
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: wasm32-unknown-unknown, wasm32-wasip2
+          components: rustfmt, clippy
+      - name: Install wasm-tools, wit-bindgen and wac
+        run: |
+          curl -sL https://github.com/bytecodealliance/wasm-tools/releases/download/v${{ env.WASM_TOOLS_VERSION }}/wasm-tools-${{ env.WASM_TOOLS_VERSION }}-x86_64-musl.tar.gz \
+          | tar -xz --strip-components=1 -C /usr/local/bin wasm-tools-${{ env.WASM_TOOLS_VERSION }}-x86_64-musl/wasm-tools
+          curl -sL https://github.com/bytecodealliance/wit-bindgen/releases/download/v${{ env.WIT_BINDGEN_VERSION }}/wit-bindgen-${{ env.WIT_BINDGEN_VERSION }}-x86_64-linux.tar.gz \
+          | tar -xz --strip-components=1 -C /usr/local/bin wit-bindgen-${{ env.WIT_BINDGEN_VERSION }}-x86_64-linux/wit-bindgen
+          curl -sL https://github.com/bytecodealliance/wac/releases/download/v${{ env.WAC_VERSION }}/wac-cli-x86_64-unknown-linux-musl
+          chmod a+x wac-cli-x86_64-unknown-linux-musl
+          mv wac-cli-x86_64-unknown-linux-musl /usr/local/bin/wac
+      - name: Build
+        run: cargo build --workspace --release
