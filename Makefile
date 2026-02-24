@@ -1,4 +1,4 @@
-.PHONY: all build-components build-cli test test-record
+.PHONY: all build-components build-cli test test-record test-fuzz run-fuzz run-record run-viceroy
 
 all: build-components build-cli
 build-cli:
@@ -7,12 +7,19 @@ build-components:
 	cargo build -p debug --target wasm32-wasip2
 	cargo build -p recorder --target wasm32-wasip2
 
-test: test-record
+test: test-fuzz test-record
+
+test-fuzz:
+	$(MAKE) run-fuzz WASM=tests/calculator.wasm
 
 test-record:
-	$(MAKE) test-record WASM=tests/rust.wasm
-	$(MAKE) test-record WASM=tests/go.wasm
-	$(MAKE) test-record WASM=tests/python.wasm
+	$(MAKE) run-record WASM=tests/rust.wasm
+	$(MAKE) run-record WASM=tests/go.wasm
+	$(MAKE) run-record WASM=tests/python.wasm
+
+run-fuzz:
+	target/release/proxy-component instrument -m fuzz $(WASM)
+	wasmtime --invoke 'start()' composed.wasm
 
 run-record:
 	target/release/proxy-component instrument -m record $(WASM)
