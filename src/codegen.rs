@@ -201,8 +201,8 @@ impl State {
                             __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*
                         let mut __buf = __params.join(",");
+                        proxy::util::debug::print(&format!("import: {}({})", #display_name, __buf));
                         __buf += #display_name;
-                        proxy::util::debug::print(&format!("import: {}", __buf));
                         let mut u = Unstructured::new(&__buf.as_bytes());
                         let res = u.arbitrary().unwrap();
                         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
