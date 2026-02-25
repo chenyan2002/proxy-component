@@ -15,9 +15,12 @@ test-fuzz:
 	RUSTFLAGS="" $(MAKE) run-fuzz WASM=tests/calculator.wasm
 
 test-record:
-	$(MAKE) run-record WASM=tests/rust.wasm
 	$(MAKE) run-record WASM=tests/go.wasm
 	$(MAKE) run-record WASM=tests/python.wasm
+	$(MAKE) run-record WASM=tests/rust.wasm
+	# test the same trace with a different wasm replay
+	target/release/proxy-component instrument -m replay tests/rust.debug.wasm
+	wasmtime --invoke 'start()' composed.wasm < trace.out
 
 run-fuzz:
 	target/release/proxy-component instrument -m fuzz $(WASM)
