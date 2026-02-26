@@ -2,6 +2,7 @@ package proxy:util;
 
 interface debug {
   print: func(x: string);
+  eprint: func(x: string);
   get-random: func() -> list<u8>;
 }
 

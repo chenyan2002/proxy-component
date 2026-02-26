@@ -3,7 +3,7 @@
 This repository explores the concept of virtualizing and/or instrumenting WIT components. Given a Wasm component, 
 we synthesize a new component that virtualizes the host interface and can optionally call the original host when necessary. 
 This synthesized component can be linked, via `wac`, to produce a resulting component with the exact same WIT interface as the original, 
-but with the added side effects from the virtualized component. This allows us to instrument or virtualize the Wasm component without modifying the user code.
+but with the added side effects from the virtualized component. This allows us to instrument or virtualize the Wasm component without modifying the user code, nor the host runtime.
 
 Currently, the tool focuses on using this technique to perform fuzzing, and record & replay for Wasm components.
 In the future, we can apply the same technique to other use cases, such as generating adapters.
@@ -20,8 +20,9 @@ To test record and fuzzing, run `make test`.
 
 ```
 $ proxy-component instrument -m record <component.wasm>
+$ <your_wasm_runtime> composed.wasm > trace.out  # store the stdout trace to trace.out
 ```
-Run `composed.wasm` in the host runtime which the original wasm is supposed to run. The tool provides a guest implementation for record and replay APIs, which outputs the trace to stdout while recording, and reads the trace from stdin while replay.
+Run `composed.wasm` in the host runtime which the original wasm is supposed to run. The tool provides a [guest implementation](components/recorder/) for record and replay APIs, which outputs the trace to stdout while recording, and reads the trace from stdin while replay.
 
 The host runtime can also choose to implement the [`record` interface](https://github.com/chenyan2002/proxy-component/blob/main/assets/recorder.wit#L3). Then we can use the `--use-host-recorder` flag to skip composing the guest-side record implementation.
 
@@ -34,16 +35,18 @@ $ proxy-component instrument -m replay <component.wasm>
 $ wasmtime --invoke 'start()' composed.wasm < trace.out
 ```
 
-Note that the trace is self-contained, and `composed.wasm` doesn't have any imports. This means that we can run `composed.wasm` in a regular `wasmtime` without the host interface.
+Note that the trace is self-contained, and `composed.wasm` doesn't have any imports. This means that we can run `composed.wasm` in a regular `wasmtime`.
 
 Another interesting use case is that we can replay the trace with a different Wasm binary, likely with a different compiler flag, or
-a different optimization strategy, to compare the performance. We have assertions in the replay phase to make sure that the trace
+a different optimization strategy, to compare the performance. 
+
+We provide a [Debug component](components/debug/) that does not go through instrumentation. You can use the Debug component in your code to perform I/O operations while in the replay mode. We have assertions in the replay phase to make sure that the trace
 is still valid with the new binary.
 
 ### Fuzzing
 
 ```
-$ cargo run instrument -m fuzz <component.wasm>
+$ proxy-component instrument -m fuzz <component.wasm>
 $ wasmtime --invoke 'start()' composed.wasm
 ```
 

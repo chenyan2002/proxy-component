@@ -11,6 +11,9 @@ impl Guest for Component {
     fn print(s: String) {
         println!("{}", s);
     }
+    fn eprint(s: String) {
+        eprintln!("{}", s);
+    }
     fn get_random() -> Vec<u8> {
         let mut data = vec![0u8; 1024];
         getrandom::fill(&mut data).unwrap();
