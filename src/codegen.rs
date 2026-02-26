@@ -248,10 +248,12 @@ impl State {
                             let display_name = wit_func_name(path, resource, &sig.ident, &kind);
                             Some(quote! {
                                 {
-                                    proxy::util::debug::print(#display_name);
+                                    let mut __params: Vec<String> = Vec::new();
                                     #(
                                         let #arg_name: #ty = u.arbitrary().unwrap();
+                                        __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_name)).unwrap());
                                     )*
+                                    proxy::util::debug::print(&format!("export: {}({})", #display_name, __params.join(", ")));
                                     let _ = #func(#(#call_param),*);
                                 }
                             })
