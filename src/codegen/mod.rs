@@ -141,6 +141,12 @@ impl State {
                     let mut sig = method.sig.clone();
                     let mut transformer = FullTypePath { module_path };
                     transformer.visit_signature_mut(&mut sig);
+                    let module_full_name = module_path.join("::");
+                    if module_full_name == "exports::proxy::conversion::conversion" {
+                        let stub_impl = self.generate_conversion_func(&sig);
+                        methods.push(syn::ImplItem::Fn(stub_impl));
+                        continue;
+                    }
                     let stub_impl = match self.mode {
                         GenerateMode::Stubs => parse_quote! {
                             #[allow(unused_variables)]
@@ -149,26 +155,12 @@ impl State {
                             }
                         },
                         GenerateMode::Instrument | GenerateMode::Record => {
-                            if module_path.join("::") == "exports::proxy::conversion::conversion" {
-                                self.generate_conversion_func(&sig)
-                            } else {
-                                self.generate_instrument_func(module_path, &sig, &resource)
-                            }
+                            self.generate_instrument_func(module_path, &sig, &resource)
                         }
                         GenerateMode::Replay => {
-                            if module_path.join("::") == "exports::proxy::conversion::conversion" {
-                                self.generate_conversion_func(&sig)
-                            } else {
-                                self.generate_replay_func(module_path, &sig, &resource)
-                            }
+                            self.generate_replay_func(module_path, &sig, &resource)
                         }
-                        GenerateMode::Fuzz => {
-                            if module_path.join("::") == "exports::proxy::conversion::conversion" {
-                                self.generate_conversion_func(&sig)
-                            } else {
-                                self.generate_fuzz_func(module_path, &sig, &resource)
-                            }
-                        }
+                        GenerateMode::Fuzz => self.generate_fuzz_func(module_path, &sig, &resource),
                     };
                     methods.push(syn::ImplItem::Fn(stub_impl));
                 }
