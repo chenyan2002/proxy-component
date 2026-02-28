@@ -2,7 +2,7 @@
 
 all: build-components build-cli
 build-cli:
-	cargo build --release
+	cargo build --all-features --release
 build-components:
 	cargo build -p debug --target wasm32-wasip2 --release
 	cargo build -p recorder --target wasm32-wasip2 --release
@@ -31,6 +31,9 @@ run-record:
 	$(MAKE) run-viceroy URL=localhost:7676
 	target/release/proxy-component instrument -m replay $(WASM)
 	wasmtime --invoke 'start()' composed.wasm < trace.out
+	# test host replay
+	target/release/proxy-component instrument -m replay --use-host-recorder $(WASM)
+	target/release/proxy-component run composed.wasm --invoke 'start()' --trace trace.out
 
 run-viceroy:
 	viceroy composed.wasm > trace.out & echo $$! > viceroy.pid

@@ -2,9 +2,11 @@
 members = [
   "components/debug",
   "components/recorder"
-]
+, "crates/trace"]
 [workspace.dependencies]
 wit-bindgen = { version = "0.52.0", default-features = false, features = ["bitflags", "std", "macros"] }
+serde = { version = "1.0.226", features = ["derive"] }
+serde_json = "1.0.145"
 
 [package]
 name = "proxy-component"
@@ -12,23 +14,20 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+trace = { path = "crates/trace" }
 anyhow = "1.0.98"
 clap = { version = "4.5.40", features = ["derive"] }
 heck = "0.5.0"
 prettyplease = "0.2.37"
 quote = "1.0.41"
 proc-macro2 = "1.0.103"
-serde = "1.0.226"
-serde_json = "1.0.145"
 syn = { version = "2.0.108", features = ["visit-mut"] }
 tempfile = "3.20.0"
-#wit-bindgen-core = { git = "https://github.com/chenyan2002/wit-bindgen.git", branch = "proxy" }
-#wit-bindgen-rust = { git = "https://github.com/chenyan2002/wit-bindgen.git", branch = "proxy" }
-wit-bindgen-core = "0.52.0"
-wit-component = "0.244.0"
+wit-bindgen-core = "0.53.1"
+wit-component = "0.245.0"
 
-wasmtime = { version = "41.0.0", features = ["wave"], optional = true }
-wasmtime-wasi = { version = "41.0.0", optional = true }
+wasmtime = { version = "42.0.0", features = ["wave"], optional = true }
+wasmtime-wasi = { version = "42.0.0", optional = true }
 
 [features]
 run = ["wasmtime", "wasmtime-wasi"]

@@ -1,7 +1,6 @@
 use clap::Parser;
-use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
 use std::path::PathBuf;
+use trace::Logger;
 use wasmtime::component::types::{ComponentFunc, ComponentItem as CItem};
 use wasmtime::component::wasm_wave::{untyped::UntypedFuncCall, wasm::WasmFunc};
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable, Val};
@@ -27,119 +26,39 @@ mod bindings {
     });
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-enum FuncCall {
-    ExportArgs {
-        method: String,
-        args: Vec<String>,
-    },
-    ExportRet {
-        method: Option<String>,
-        ret: Option<String>,
-    },
-    ImportArgs {
-        method: Option<String>,
-        args: Vec<String>,
-    },
-    ImportRet {
-        method: Option<String>,
-        ret: Option<String>,
-    },
-}
-impl FuncCall {
-    fn to_string(&self) -> String {
-        match self {
-            FuncCall::ExportArgs { method, args } => format!("{method}({})", args.join(", ")),
-            FuncCall::ImportArgs { method, args } => format!(
-                "{}({})",
-                method.as_deref().unwrap_or("<unknown>"),
-                args.join(", ")
-            ),
-            FuncCall::ExportRet { ret, .. } | FuncCall::ImportRet { ret, .. } => {
-                ret.as_deref().unwrap_or("()").to_owned()
-            }
-        }
-    }
-}
-
-struct Logger {
+struct State {
     wasi_ctx: WasiCtx,
     resource_table: ResourceTable,
-    logger: VecDeque<FuncCall>,
+    logger: Logger,
     exit_called: bool,
 }
-impl bindings::proxy::recorder::record::Host for Logger {
+impl bindings::proxy::recorder::record::Host for State {
     fn record_args(&mut self, method: Option<String>, args: Vec<String>, is_export: bool) {
-        let call = if is_export {
-            FuncCall::ExportArgs {
-                method: method.unwrap(),
-                args,
-            }
-        } else {
-            FuncCall::ImportArgs { method, args }
-        };
+        let call = self.logger.record_args(method, args, is_export);
         println!("call: {}", call.to_string());
-        self.logger.push_back(call);
     }
     fn record_ret(&mut self, method: Option<String>, ret: Option<String>, is_export: bool) {
-        let call = if is_export {
-            FuncCall::ExportRet { method, ret }
-        } else {
-            FuncCall::ImportRet { method, ret }
-        };
+        let call = self.logger.record_ret(method, ret, is_export);
         println!("ret: {}", call.to_string());
-        self.logger.push_back(call);
     }
 }
-impl bindings::proxy::recorder::replay::Host for Logger {
+impl bindings::proxy::recorder::replay::Host for State {
     fn replay_export(&mut self) -> Option<(String, Vec<String>)> {
-        let call = self.logger.pop_front()?;
-        println!("export call: {}", call.to_string());
-        let FuncCall::ExportArgs { method, args } = call else {
-            panic!()
-        };
-        Some((method, args))
+        self.logger.replay_export()
     }
     fn assert_export_ret(&mut self, assert_method: Option<String>, assert_ret: Option<String>) {
-        if let Some(FuncCall::ExportRet { .. }) = self.logger.front() {
-            let call = self.logger.pop_front().unwrap();
-            println!("export ret: {}", call.to_string());
-            let FuncCall::ExportRet { method, ret } = call else {
-                panic!()
-            };
-            if let (Some(method), Some(assert_method)) = (method, assert_method) {
-                assert_eq!(method, assert_method);
-            }
-            assert_eq!(ret, assert_ret);
-        }
+        self.logger.assert_export_ret(assert_method, assert_ret);
     }
     fn replay_import(
         &mut self,
         assert_method: Option<String>,
         assert_args: Option<Vec<String>>,
     ) -> Option<String> {
-        let mut call = self.logger.pop_front().unwrap();
-        if let FuncCall::ImportArgs { method, args } = &call {
-            if let (Some(method), Some(assert_method)) = (method, assert_method) {
-                assert_eq!(method, &assert_method);
-            }
-            if let Some(assert_args) = &assert_args {
-                assert_eq!(args, assert_args);
-            }
-            println!("import call: {}", call.to_string());
-            if method
-                .as_ref()
-                .is_some_and(|m| m.starts_with("wasi:cli/exit"))
-            {
-                self.exit_called = true;
-                return Some("Something that can crash".to_string());
-            }
-            call = self.logger.pop_front().unwrap();
+        let (exit_called, ret) = self.logger.replay_import(assert_method, assert_args, false);
+        if exit_called {
+            self.exit_called = exit_called;
+            return Some("Something that can crash".to_string());
         }
-        println!("import ret: {}", call.to_string());
-        let FuncCall::ImportRet { ret, .. } = call else {
-            panic!()
-        };
         ret
     }
 }
@@ -154,25 +73,25 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         .wasm_backtrace_details(WasmBacktraceDetails::Enable);
     let engine = Engine::new(&config)?;
 
-    let mut linker = Linker::<Logger>::new(&engine);
+    let mut linker = Linker::<State>::new(&engine);
     add_to_linker_sync(&mut linker)?;
     let wasi = WasiCtxBuilder::new().inherit_stdio().inherit_args().build();
-    let mut state = Logger {
+    let mut state = State {
         wasi_ctx: wasi,
         resource_table: ResourceTable::new(),
-        logger: VecDeque::new(),
+        logger: Logger::new(),
         exit_called: false,
     };
     if let Some(path) = &args.trace {
-        bindings::proxy::recorder::replay::add_to_linker::<_, HasSelf<_>>(&mut linker, |logger| {
-            logger
+        bindings::proxy::recorder::replay::add_to_linker::<_, HasSelf<_>>(&mut linker, |state| {
+            state
         })?;
         let trace = std::fs::read_to_string(path)?;
-        state.logger = serde_json::from_str(&trace)?;
+        state.logger.load_trace(&trace);
     } else {
-        bindings::proxy::recorder::record::add_to_linker::<Logger, HasSelf<Logger>>(
+        bindings::proxy::recorder::record::add_to_linker::<State, HasSelf<State>>(
             &mut linker,
-            |logger| logger,
+            |state| state,
         )?;
     }
 
@@ -211,7 +130,7 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
             }
         }?;
         if args.trace.is_none() {
-            let trace = serde_json::to_string(&store.data().logger)?;
+            let trace = store.data().logger.dump_trace();
             std::fs::write("trace.out", &trace)?;
         }
     }
@@ -264,7 +183,7 @@ fn collect_export_funcs(
     .collect()
 }
 
-impl WasiView for Logger {
+impl WasiView for State {
     fn ctx(&mut self) -> WasiCtxView<'_> {
         WasiCtxView {
             ctx: &mut self.wasi_ctx,
