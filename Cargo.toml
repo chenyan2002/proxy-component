@@ -23,11 +23,11 @@ quote = "1.0.41"
 proc-macro2 = "1.0.103"
 syn = { version = "2.0.108", features = ["visit-mut"] }
 tempfile = "3.20.0"
-wit-bindgen-core = "0.52.0"
-wit-component = "0.244.0"
+wit-bindgen-core = "0.53.1"
+wit-component = "0.245.0"
 
-wasmtime = { version = "41.0.0", features = ["wave"], optional = true }
-wasmtime-wasi = { version = "41.0.0", optional = true }
+wasmtime = { version = "42.0.0", features = ["wave"], optional = true }
+wasmtime-wasi = { version = "42.0.0", optional = true }
 
 [features]
 run = ["wasmtime", "wasmtime-wasi"]
