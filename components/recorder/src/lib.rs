@@ -4,29 +4,17 @@ mod bindings {
         world: "guest",
     });
 }
-mod trace;
 
 use trace::FuncCall;
 struct Component;
 impl bindings::exports::proxy::recorder::record::Guest for Component {
     fn record_args(method: Option<String>, args: Vec<String>, is_export: bool) {
-        let call = if is_export {
-            FuncCall::ExportArgs {
-                method: method.unwrap(),
-                args,
-            }
-        } else {
-            FuncCall::ImportArgs { method, args }
-        };
+        let call = trace::record_args(method, args, is_export);
         let json = serde_json::to_string(&call).unwrap();
         println!("{json}");
     }
     fn record_ret(method: Option<String>, ret: Option<String>, is_export: bool) {
-        let call = if is_export {
-            FuncCall::ExportRet { method, ret }
-        } else {
-            FuncCall::ImportRet { method, ret }
-        };
+        let call = trace::record_ret(method, ret, is_export);
         let json = serde_json::to_string(&call).unwrap();
         println!("{json}");
     }
@@ -42,18 +30,10 @@ fn load_trace() {
     let load = TRACE.with_borrow(|v| v.is_none());
     if load {
         TRACE.with_borrow_mut(|v| {
-            use std::io::BufRead;
-            let mut res = VecDeque::new();
             let f = std::io::stdin();
             let reader = std::io::BufReader::new(f);
-            for line in reader.lines() {
-                let line = line.unwrap();
-                match serde_json::from_str::<FuncCall>(&line) {
-                    Ok(item) => res.push_back(item),
-                    Err(_) => continue,
-                }
-            }
-            *v = Some(res);
+            let res = trace::load_trace(reader);
+            *v = Some(res.into_iter().collect());
         });
     }
 }

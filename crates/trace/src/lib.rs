@@ -19,6 +19,40 @@ pub enum FuncCall {
         ret: Option<String>,
     },
 }
+
+pub fn load_trace(reader: impl std::io::BufRead) -> Vec<FuncCall> {
+    let mut res = Vec::new();
+    for line in reader.lines() {
+        let line = line.unwrap();
+        match serde_json::from_str::<FuncCall>(&line) {
+            Ok(item) => res.push(item),
+            // Ignore non-JSON lines.
+            Err(_) => continue,
+        }
+    }
+    res
+}
+
+pub fn record_args(method: Option<String>, args: Vec<String>, is_export: bool) -> FuncCall {
+    let call = if is_export {
+        FuncCall::ExportArgs {
+            method: method.unwrap(),
+            args,
+        }
+    } else {
+        FuncCall::ImportArgs { method, args }
+    };
+    call
+}
+pub fn record_ret(method: Option<String>, ret: Option<String>, is_export: bool) -> FuncCall {
+    let call = if is_export {
+        FuncCall::ExportRet { method, ret }
+    } else {
+        FuncCall::ImportRet { method, ret }
+    };
+    call
+}
+
 impl FuncCall {
     pub fn to_string(&self) -> String {
         match self {

@@ -1,7 +1,7 @@
 use clap::Parser;
-use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use trace::FuncCall;
 use wasmtime::component::types::{ComponentFunc, ComponentItem as CItem};
 use wasmtime::component::wasm_wave::{untyped::UntypedFuncCall, wasm::WasmFunc};
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable, Val};
@@ -27,41 +27,6 @@ mod bindings {
     });
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-enum FuncCall {
-    ExportArgs {
-        method: String,
-        args: Vec<String>,
-    },
-    ExportRet {
-        method: Option<String>,
-        ret: Option<String>,
-    },
-    ImportArgs {
-        method: Option<String>,
-        args: Vec<String>,
-    },
-    ImportRet {
-        method: Option<String>,
-        ret: Option<String>,
-    },
-}
-impl FuncCall {
-    fn to_string(&self) -> String {
-        match self {
-            FuncCall::ExportArgs { method, args } => format!("{method}({})", args.join(", ")),
-            FuncCall::ImportArgs { method, args } => format!(
-                "{}({})",
-                method.as_deref().unwrap_or("<unknown>"),
-                args.join(", ")
-            ),
-            FuncCall::ExportRet { ret, .. } | FuncCall::ImportRet { ret, .. } => {
-                ret.as_deref().unwrap_or("()").to_owned()
-            }
-        }
-    }
-}
-
 struct Logger {
     wasi_ctx: WasiCtx,
     resource_table: ResourceTable,
@@ -70,23 +35,12 @@ struct Logger {
 }
 impl bindings::proxy::recorder::record::Host for Logger {
     fn record_args(&mut self, method: Option<String>, args: Vec<String>, is_export: bool) {
-        let call = if is_export {
-            FuncCall::ExportArgs {
-                method: method.unwrap(),
-                args,
-            }
-        } else {
-            FuncCall::ImportArgs { method, args }
-        };
+        let call = trace::record_args(method, args, is_export);
         println!("call: {}", call.to_string());
         self.logger.push_back(call);
     }
     fn record_ret(&mut self, method: Option<String>, ret: Option<String>, is_export: bool) {
-        let call = if is_export {
-            FuncCall::ExportRet { method, ret }
-        } else {
-            FuncCall::ImportRet { method, ret }
-        };
+        let call = trace::record_ret(method, ret, is_export);
         println!("ret: {}", call.to_string());
         self.logger.push_back(call);
     }

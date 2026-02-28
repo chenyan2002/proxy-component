@@ -1323,10 +1323,10 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
- "serde",
  "serde_json",
  "syn",
  "tempfile",
+ "trace",
  "wasmtime",
  "wasmtime-wasi",
  "wit-bindgen-core",
@@ -1434,8 +1434,8 @@ dependencies = [
 name = "recorder"
 version = "0.1.0"
 dependencies = [
- "serde",
  "serde_json",
+ "trace",
  "wit-bindgen 0.52.0",
 ]
 
@@ -1837,6 +1837,14 @@ name = "toml_writer"
 version = "1.0.6+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab16f14aed21ee8bfd8ec22513f7287cd4a91aa92e44edfe2c17ddd004e92607"
+
+[[package]]
+name = "trace"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "tracing"
