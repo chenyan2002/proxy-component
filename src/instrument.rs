@@ -15,7 +15,7 @@ pub struct InstrumentArgs {
     #[arg(short, long)]
     pub mode: Mode,
     /// Whether to use the host recorder implementation or link the recorder component
-    #[arg(short, long)]
+    #[arg(long)]
     pub use_host_recorder: bool,
 }
 
@@ -23,6 +23,9 @@ const DEBUG_WASM: &[u8] = include_bytes!("../assets/debug.wasm");
 const RECORDER_WASM: &[u8] = include_bytes!("../assets/recorder.wasm");
 
 pub fn run(args: InstrumentArgs) -> Result<()> {
+    if args.use_host_recorder && !matches!(args.mode, Mode::Record | Mode::Replay) {
+        anyhow::bail!("--use-host-recorder only works in record or replay mode");
+    }
     // 1. Create a tmp directory and initialize a new Rust project in it.
     let tmp_dir = init_rust_project()?;
     let wit_dir = tmp_dir.join("wit");
@@ -145,6 +148,7 @@ fn bindgen(
         Mode::Record => codegen::GenerateMode::Record,
         Mode::Replay => codegen::GenerateMode::Replay,
         Mode::Fuzz => codegen::GenerateMode::Fuzz,
+        Mode::Dialog => codegen::GenerateMode::Dialog,
     };
     let codegen_opt = codegen::GenerateArgs {
         bindings: binding_file.clone(),

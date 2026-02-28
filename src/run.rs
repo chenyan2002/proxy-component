@@ -26,7 +26,7 @@ mod bindings {
     });
 }
 
-struct State {
+pub struct State {
     wasi_ctx: WasiCtx,
     resource_table: ResourceTable,
     logger: Logger,
@@ -82,6 +82,9 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         logger: Logger::new(),
         exit_called: false,
     };
+    dialog::proxy::util::dialog::add_to_linker::<State, HasSelf<State>>(&mut linker, |state| {
+        state
+    })?;
     if let Some(path) = &args.trace {
         bindings::proxy::recorder::replay::add_to_linker::<_, HasSelf<_>>(&mut linker, |state| {
             state
@@ -189,5 +192,21 @@ impl WasiView for State {
             ctx: &mut self.wasi_ctx,
             table: &mut self.resource_table,
         }
+    }
+}
+
+mod dialog {
+    wasmtime::component::bindgen!({
+        path: "assets/util.wit",
+        world: "host-dialog",
+    });
+}
+
+impl dialog::proxy::util::dialog::Host for crate::run::State {
+    fn input(&mut self, message: String) -> String {
+        message
+    }
+    fn prompt(&mut self, message: String) {
+        println!("{message}");
     }
 }

@@ -47,6 +47,14 @@ impl<'a> TraitGenerator<'a> {
                 }));
                 traits.push(Box::new(fuzz::FuzzTrait {}));
             }
+            GenerateMode::Dialog => {
+                traits.push(Box::new(wave::WaveTrait {
+                    to_value: true,
+                    to_rust: true,
+                    has_replay_table: true,
+                }));
+                traits.push(Box::new(fuzz::FuzzTrait {}));
+            }
         }
         TraitGenerator { state, traits }
     }

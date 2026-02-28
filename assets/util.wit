@@ -6,6 +6,15 @@ interface debug {
   get-random: func() -> list<u8>;
 }
 
+interface dialog {
+  prompt: func(x: string);
+  input: func(x: string) -> string;
+}
+
 world crate-debug {
   export debug;
+}
+
+world host-dialog {
+  import dialog;
 }
