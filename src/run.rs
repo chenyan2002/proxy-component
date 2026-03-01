@@ -205,10 +205,13 @@ mod dialog_bindings {
 
 impl dialog_bindings::proxy::util::dialog::Host for crate::run::State {
     fn print(&mut self, message: String) {
-        println!("{}", message);
+        dialog::print(&message);
     }
     fn read_string(&mut self, dep: u32) -> String {
         dialog::read_string(dep)
+    }
+    fn read_u32(&mut self, dep: u32) -> String {
+        dialog::read_u32(dep)
     }
     fn read_bool(&mut self, dep: u32) -> String {
         todo!()

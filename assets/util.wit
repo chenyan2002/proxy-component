@@ -9,6 +9,7 @@ interface debug {
 interface dialog {
   print: func(x:string);
   read-string: func(dep: u32) -> string;
+  read-u32: func(dep: u32) -> string;
   read-bool: func(dep: u32) -> string;
 }
 

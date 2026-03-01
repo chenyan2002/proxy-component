@@ -160,6 +160,13 @@ impl Trait for DialogTrait {
                 ret.to_rust()
             }
           }
+          impl Dialog for u32 {
+            fn read_value(dep: u32) -> Self {
+                let wave = proxy::util::dialog::read_u32(dep);
+                let ret: Value = wasm_wave::from_str(&<Self as ValueTyped>::value_type(), &wave).unwrap();
+                ret.to_rust()
+            }
+          }
           impl Dialog for bool {
             fn read_value(dep: u32) -> Self {
                 let wave = proxy::util::dialog::read_bool(dep);

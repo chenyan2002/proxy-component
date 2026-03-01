@@ -20,7 +20,7 @@ impl State {
             let arg_names = args.iter().map(|arg| &arg.ident);
             let display_name = wit_func_name(module_path, resource, func_name, &kind);
             let ret_ty = get_return_type(&sig.output);
-            if ret_ty.is_some() {
+            if let Some(ty) = ret_ty {
                 parse_quote! {
                     #sig {
                         let mut __params: Vec<String> = Vec::new();
@@ -29,12 +29,16 @@ impl State {
                         )*
                         let mut __buf = __params.join(",");
                         proxy::util::dialog::print(&format!("import: {}({})", #display_name, __buf));
+                        proxy::util::dialog::print(&format!("return type: {}", stringify!(#ty)));
+                        #ty::read_value(0).to_value().to_rust()
+                        /*
                         __buf += #display_name;
                         let mut u = Unstructured::new(&__buf.as_bytes());
                         let res = u.arbitrary().unwrap();
                         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
                         proxy::util::dialog::print(&format!("ret: {}", res_str));
                         res
+                        */
                     }
                 }
             } else {

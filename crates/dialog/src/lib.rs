@@ -3,6 +3,11 @@ use dialoguer::{Input, theme::Theme};
 use std::fmt;
 use wasm_wave::value::convert::ToValue;
 
+pub fn print(message: &str) {
+    let theme = IndentTheme::new(0);
+    theme.println(message);
+}
+
 pub fn read_string(dep: u32) -> String {
     let theme = IndentTheme::new(dep as usize);
     let text = Input::<String>::with_theme(&theme)
@@ -11,6 +16,14 @@ pub fn read_string(dep: u32) -> String {
         .interact()
         .unwrap();
     wasm_wave::to_string(&text.to_value()).unwrap()
+}
+pub fn read_u32(dep: u32) -> String {
+    let theme = IndentTheme::new(dep as usize);
+    let num = Input::<u32>::with_theme(&theme)
+        .with_prompt("Enter a u32")
+        .interact_text()
+        .unwrap();
+    wasm_wave::to_string(&num.to_value()).unwrap()
 }
 
 pub struct IndentTheme {
@@ -54,11 +67,11 @@ impl IndentTheme {
         let spaces = " ".repeat(self.indent * 2);
         write!(f, "{spaces}")
     }
-    pub fn println(&self, prompt: String) {
+    pub fn println(&self, prompt: &str) {
         let spaces = " ".repeat(self.indent * 2);
         println!("{spaces}{prompt}");
     }
-    pub fn hint(&self, prompt: String) {
+    pub fn hint(&self, prompt: &str) {
         let spaces = " ".repeat(self.indent * 2);
         println!("{spaces}{}", self.hint_style.apply_to(prompt));
     }
