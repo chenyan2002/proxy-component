@@ -28,12 +28,12 @@ impl State {
                             __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*
                         let mut __buf = __params.join(",");
-                        proxy::util::dialog::prompt(&format!("import: {}({})", #display_name, __buf));
+                        proxy::util::dialog::print(&format!("import: {}({})", #display_name, __buf));
                         __buf += #display_name;
                         let mut u = Unstructured::new(&__buf.as_bytes());
                         let res = u.arbitrary().unwrap();
                         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
-                        proxy::util::dialog::prompt(&format!("ret: {}", res_str));
+                        proxy::util::dialog::print(&format!("ret: {}", res_str));
                         res
                     }
                 }
@@ -80,7 +80,7 @@ impl State {
                                         let #arg_name: #ty = u.arbitrary().unwrap();
                                         __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_name)).unwrap());
                                     )*
-                                    proxy::util::dialog::prompt(&format!("export: {}({})", #display_name, __params.join(", ")));
+                                    proxy::util::dialog::print(&format!("export: {}({})", #display_name, __params.join(", ")));
                                     let _ = #func(#(#call_param),*);
                                 }
                             })

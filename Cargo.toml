@@ -2,11 +2,12 @@
 members = [
   "components/debug",
   "components/recorder"
-, "crates/trace"]
+, "crates/dialog", "crates/trace"]
 [workspace.dependencies]
 wit-bindgen = { version = "0.52.0", default-features = false, features = ["bitflags", "std", "macros"] }
 serde = { version = "1.0.226", features = ["derive"] }
 serde_json = "1.0.145"
+wasm-wave = { git = "https://github.com/chenyan2002/wasm-tools.git", branch = "extend-wave", version = "0.239.0", default-features = false }
 
 [package]
 name = "proxy-component"
@@ -28,7 +29,8 @@ wit-component = "0.245.0"
 
 wasmtime = { version = "42.0.0", features = ["wave"], optional = true }
 wasmtime-wasi = { version = "42.0.0", optional = true }
+dialog = { path = "crates/dialog", optional = true }
 
 [features]
-run = ["wasmtime", "wasmtime-wasi"]
+run = ["wasmtime", "wasmtime-wasi", "dialog"]
 default = ["run"]

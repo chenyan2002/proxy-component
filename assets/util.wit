@@ -7,8 +7,9 @@ interface debug {
 }
 
 interface dialog {
-  prompt: func(x: string);
-  input: func(x: string) -> string;
+  print: func(x:string);
+  read-string: func(dep: u32) -> string;
+  read-bool: func(dep: u32) -> string;
 }
 
 world crate-debug {

@@ -1,6 +1,7 @@
 use crate::codegen::{GenerateMode, ItemFlag, State, TypeInfo};
 use syn::{Item, ItemEnum, ItemStruct};
 
+mod dialog;
 mod fuzz;
 mod proxy;
 mod wave;
@@ -53,6 +54,7 @@ impl<'a> TraitGenerator<'a> {
                     to_rust: true,
                     has_replay_table: true,
                 }));
+                traits.push(Box::new(dialog::DialogTrait {}));
                 traits.push(Box::new(fuzz::FuzzTrait {}));
             }
         }

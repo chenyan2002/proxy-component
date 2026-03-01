@@ -82,9 +82,10 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         logger: Logger::new(),
         exit_called: false,
     };
-    dialog::proxy::util::dialog::add_to_linker::<State, HasSelf<State>>(&mut linker, |state| {
-        state
-    })?;
+    dialog_bindings::proxy::util::dialog::add_to_linker::<State, HasSelf<State>>(
+        &mut linker,
+        |state| state,
+    )?;
     if let Some(path) = &args.trace {
         bindings::proxy::recorder::replay::add_to_linker::<_, HasSelf<_>>(&mut linker, |state| {
             state
@@ -195,18 +196,21 @@ impl WasiView for State {
     }
 }
 
-mod dialog {
+mod dialog_bindings {
     wasmtime::component::bindgen!({
         path: "assets/util.wit",
         world: "host-dialog",
     });
 }
 
-impl dialog::proxy::util::dialog::Host for crate::run::State {
-    fn input(&mut self, message: String) -> String {
-        message
+impl dialog_bindings::proxy::util::dialog::Host for crate::run::State {
+    fn print(&mut self, message: String) {
+        println!("{}", message);
     }
-    fn prompt(&mut self, message: String) {
-        println!("{message}");
+    fn read_string(&mut self, dep: u32) -> String {
+        dialog::read_string(dep)
+    }
+    fn read_bool(&mut self, dep: u32) -> String {
+        todo!()
     }
 }
