@@ -210,10 +210,40 @@ impl dialog_bindings::proxy::util::dialog::Host for crate::run::State {
     fn read_string(&mut self, dep: u32) -> String {
         dialog::read_string(dep)
     }
+    fn read_u8(&mut self, dep: u32) -> String {
+        dialog::read_u8(dep)
+    }
+    fn read_u16(&mut self, dep: u32) -> String {
+        dialog::read_u16(dep)
+    }
     fn read_u32(&mut self, dep: u32) -> String {
         dialog::read_u32(dep)
     }
+    fn read_u64(&mut self, dep: u32) -> String {
+        dialog::read_u64(dep)
+    }
+    fn read_s8(&mut self, dep: u32) -> String {
+        dialog::read_s8(dep)
+    }
+    fn read_s16(&mut self, dep: u32) -> String {
+        dialog::read_s16(dep)
+    }
+    fn read_s32(&mut self, dep: u32) -> String {
+        dialog::read_s32(dep)
+    }
+    fn read_s64(&mut self, dep: u32) -> String {
+        dialog::read_s64(dep)
+    }
+    fn read_f32(&mut self, dep: u32) -> String {
+        dialog::read_f32(dep)
+    }
+    fn read_f64(&mut self, dep: u32) -> String {
+        dialog::read_f64(dep)
+    }
     fn read_bool(&mut self, dep: u32) -> String {
-        todo!()
+        dialog::read_bool(dep)
+    }
+    fn read_char(&mut self, dep: u32) -> String {
+        dialog::read_char(dep)
     }
 }

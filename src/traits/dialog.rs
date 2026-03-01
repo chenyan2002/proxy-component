@@ -78,10 +78,10 @@ impl Trait for DialogTrait {
         };
         res.push(parse_quote! {
         impl #impl_generics Dialog for #struct_name #ty_generics #where_clause {
-            fn read_value(_dep: u32) -> Self {
+            fn read_value(dep: u32) -> Self {
                 Self {
                     #(
-                        #field_names: Dialog::read_value(0),
+                        #field_names: Dialog::read_value(dep + 1),
                     )*
                 }
             }
@@ -93,7 +93,7 @@ impl Trait for DialogTrait {
         let mut res = Vec::new();
         let enum_name = make_path(module_path, &enum_item.ident.to_string());
         let (impl_generics, ty_generics, where_clause) = enum_item.generics.split_for_impl();
-        let arms = enum_item.variants.iter().enumerate().map(|(idx, variant)| {
+        let _arms = enum_item.variants.iter().enumerate().map(|(idx, variant)| {
             let tag = &variant.ident;
             match &variant.fields {
                 syn::Fields::Unit => quote! {
@@ -105,7 +105,7 @@ impl Trait for DialogTrait {
                 syn::Fields::Named(_) => unreachable!(),
             }
         });
-        let size_hint = enum_item
+        let _size_hint = enum_item
             .variants
             .iter()
             .map(|variant| match &variant.fields {
@@ -120,7 +120,7 @@ impl Trait for DialogTrait {
                 }
                 syn::Fields::Named(_) => unreachable!(),
             });
-        let variant_len = enum_item.variants.len();
+        let _variant_len = enum_item.variants.len();
         res.push(parse_quote! {
         impl #impl_generics Dialog for #enum_name #ty_generics #where_clause {
             fn read_value(dep: u32) -> Self {
@@ -133,16 +133,23 @@ impl Trait for DialogTrait {
     fn flag_trait(&self, module_path: &[String], item: &crate::codegen::ItemFlag) -> Vec<Item> {
         let mut res = Vec::new();
         let flag_path = make_path(module_path, &item.name.to_string());
-        let flag_num = item.flags.len() - 1;
-        let flags = item.flags.iter().map(|f| {
-            quote! { #flag_path::#f }
-        });
+        let _flag_num = item.flags.len() - 1;
+        let flags: Vec<_> = item
+            .flags
+            .iter()
+            .map(|f| {
+                quote! { #flag_path::#f }
+            })
+            .collect();
+        let flags_expr = if flags.is_empty() {
+            quote! { #flag_path::empty() }
+        } else {
+            quote! { #( #flags )|* }
+        };
         res.push(parse_quote! {
         impl Dialog for #flag_path {
             fn read_value(_dep: u32) -> Self {
-                #(
-                    #flags |
-                )* 0
+                #flags_expr
             }
         }
         });
@@ -153,26 +160,33 @@ impl Trait for DialogTrait {
           trait Dialog {
             fn read_value(dep: u32) -> Self;
           }
-          impl Dialog for String {
-            fn read_value(dep: u32) -> Self {
-                let wave = proxy::util::dialog::read_string(dep);
-                let ret: Value = wasm_wave::from_str(&<Self as ValueTyped>::value_type(), &wave).unwrap();
-                ret.to_rust()
-            }
+          macro_rules! impl_dialog_primitive {
+              ($($ty:ty => $read_fn:ident),* $(,)?) => {
+                  $(
+                      impl Dialog for $ty {
+                          fn read_value(dep: u32) -> Self {
+                              let wave = proxy::util::dialog::$read_fn(dep);
+                              let ret: Value = wasm_wave::from_str(&<Self as ValueTyped>::value_type(), &wave).unwrap();
+                              ret.to_rust()
+                          }
+                      }
+                  )*
+              };
           }
-          impl Dialog for u32 {
-            fn read_value(dep: u32) -> Self {
-                let wave = proxy::util::dialog::read_u32(dep);
-                let ret: Value = wasm_wave::from_str(&<Self as ValueTyped>::value_type(), &wave).unwrap();
-                ret.to_rust()
-            }
-          }
-          impl Dialog for bool {
-            fn read_value(dep: u32) -> Self {
-                let wave = proxy::util::dialog::read_bool(dep);
-                let ret: Value = wasm_wave::from_str(&<Self as ValueTyped>::value_type(), &wave).unwrap();
-                ret.to_rust()
-            }
+          impl_dialog_primitive! {
+              bool => read_bool,
+              u8 => read_u8,
+              u16 => read_u16,
+              u32 => read_u32,
+              u64 => read_u64,
+              i8 => read_s8,
+              i16 => read_s16,
+              i32 => read_s32,
+              i64 => read_s64,
+              f32 => read_f32,
+              f64 => read_f64,
+              char => read_char,
+              String => read_string,
           }
         };
         ast.items

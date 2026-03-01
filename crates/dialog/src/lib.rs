@@ -1,5 +1,5 @@
 use console::{Style, StyledObject, style};
-use dialoguer::{Input, theme::Theme};
+use dialoguer::{Input, Select, theme::Theme};
 use std::fmt;
 use wasm_wave::value::convert::ToValue;
 
@@ -17,14 +17,40 @@ pub fn read_string(dep: u32) -> String {
         .unwrap();
     wasm_wave::to_string(&text.to_value()).unwrap()
 }
-pub fn read_u32(dep: u32) -> String {
+pub fn read_bool(dep: u32) -> String {
     let theme = IndentTheme::new(dep as usize);
-    let num = Input::<u32>::with_theme(&theme)
-        .with_prompt("Enter a u32")
-        .interact_text()
+    let selection = Select::with_theme(&theme)
+        .with_prompt("Select a bool")
+        .items(&["true", "false"])
+        .interact()
         .unwrap();
-    wasm_wave::to_string(&num.to_value()).unwrap()
+    let value = if selection == 0 { true } else { false };
+    wasm_wave::to_string(&value.to_value()).unwrap()
 }
+macro_rules! read_primitive {
+    ($fn_name:ident, $ty:ty, $prompt:expr) => {
+        pub fn $fn_name(dep: u32) -> String {
+            let theme = IndentTheme::new(dep as usize);
+            let num = Input::<$ty>::with_theme(&theme)
+                .with_prompt($prompt)
+                .interact_text()
+                .unwrap();
+            wasm_wave::to_string(&num.to_value()).unwrap()
+        }
+    };
+}
+
+read_primitive!(read_u8, u8, "Enter a u8");
+read_primitive!(read_u16, u16, "Enter a u16");
+read_primitive!(read_u32, u32, "Enter a u32");
+read_primitive!(read_u64, u64, "Enter a u64");
+read_primitive!(read_s8, i8, "Enter a s8");
+read_primitive!(read_s16, i16, "Enter a s16");
+read_primitive!(read_s32, i32, "Enter a s32");
+read_primitive!(read_s64, i64, "Enter a s64");
+read_primitive!(read_f32, f32, "Enter a f32");
+read_primitive!(read_f64, f64, "Enter a f64");
+read_primitive!(read_char, char, "Enter a char");
 
 pub struct IndentTheme {
     indent: usize,

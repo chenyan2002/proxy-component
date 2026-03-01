@@ -9,8 +9,18 @@ interface debug {
 interface dialog {
   print: func(x:string);
   read-string: func(dep: u32) -> string;
-  read-u32: func(dep: u32) -> string;
   read-bool: func(dep: u32) -> string;
+  read-u8: func(dep: u32) -> string;
+  read-u16: func(dep: u32) -> string;
+  read-u32: func(dep: u32) -> string;
+  read-u64: func(dep: u32) -> string;
+  read-s8: func(dep: u32) -> string;
+  read-s16: func(dep: u32) -> string;
+  read-s32: func(dep: u32) -> string;
+  read-s64: func(dep: u32) -> string;
+  read-f32: func(dep: u32) -> string;
+  read-f64: func(dep: u32) -> string;
+  read-char: func(dep: u32) -> string;
 }
 
 world crate-debug {
