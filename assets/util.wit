@@ -8,8 +8,9 @@ interface debug {
 
 interface dialog {
   print: func(x:string);
-  read-string: func(dep: u32) -> string;
+  read-selection: func(dep: u32, prompt: string, items: list<string>) -> u32;
   read-bool: func(dep: u32) -> string;
+  read-string: func(dep: u32) -> string;
   read-u8: func(dep: u32) -> string;
   read-u16: func(dep: u32) -> string;
   read-u32: func(dep: u32) -> string;

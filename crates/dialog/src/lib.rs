@@ -3,6 +3,8 @@ use dialoguer::{Input, Select, theme::Theme};
 use std::fmt;
 use wasm_wave::value::convert::ToValue;
 
+pub use console;
+
 pub fn print(message: &str) {
     let theme = IndentTheme::new(0);
     theme.println(message);
@@ -26,6 +28,15 @@ pub fn read_bool(dep: u32) -> String {
         .unwrap();
     let value = if selection == 0 { true } else { false };
     wasm_wave::to_string(&value.to_value()).unwrap()
+}
+pub fn read_selection(dep: u32, prompt: String, items: Vec<String>) -> u32 {
+    let theme = IndentTheme::new(dep as usize);
+    let selection = Select::with_theme(&theme)
+        .with_prompt(prompt)
+        .items(&items)
+        .interact()
+        .unwrap();
+    selection as u32
 }
 macro_rules! read_primitive {
     ($fn_name:ident, $ty:ty, $prompt:expr) => {

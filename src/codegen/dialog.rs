@@ -79,9 +79,11 @@ impl State {
                             let display_name = wit_func_name(path, resource, &sig.ident, &kind);
                             Some(quote! {
                                 {
+                                    proxy::util::dialog::print(&format!("call export func {}", #display_name));
                                     let mut __params: Vec<String> = Vec::new();
                                     #(
-                                        let #arg_name: #ty = u.arbitrary().unwrap();
+                                        proxy::util::dialog::print(&format!("provide argument for {}", stringify!(#arg_name)));
+                                        let #arg_name = #ty::read_value(0);
                                         __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_name)).unwrap());
                                     )*
                                     proxy::util::dialog::print(&format!("export: {}({})", #display_name, __params.join(", ")));

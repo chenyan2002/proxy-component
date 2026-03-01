@@ -66,6 +66,11 @@ impl bindings::proxy::recorder::replay::Host for State {
 const MAX_FUEL: u64 = u64::MAX;
 
 pub fn run(args: RunArgs) -> anyhow::Result<()> {
+    // Patch ctrlc untill https://github.com/console-rs/dialoguer/issues/77 is fixed
+    let _ = ctrlc::try_set_handler(move || {
+        let term = dialog::console::Term::stdout();
+        let _ = term.show_cursor();
+    });
     let mut config = Config::new();
     config
         .consume_fuel(true)
@@ -245,5 +250,8 @@ impl dialog_bindings::proxy::util::dialog::Host for crate::run::State {
     }
     fn read_char(&mut self, dep: u32) -> String {
         dialog::read_char(dep)
+    }
+    fn read_selection(&mut self, dep: u32, prompt: String, items: Vec<String>) -> u32 {
+        dialog::read_selection(dep, prompt, items)
     }
 }

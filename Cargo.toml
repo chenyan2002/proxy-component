@@ -30,6 +30,7 @@ wit-component = "0.245.0"
 wasmtime = { version = "42.0.0", features = ["wave"], optional = true }
 wasmtime-wasi = { version = "42.0.0", optional = true }
 dialog = { path = "crates/dialog", optional = true }
+ctrlc = "3.5.2"
 
 [features]
 run = ["wasmtime", "wasmtime-wasi", "dialog"]

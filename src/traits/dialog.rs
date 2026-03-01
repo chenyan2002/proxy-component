@@ -93,38 +93,33 @@ impl Trait for DialogTrait {
         let mut res = Vec::new();
         let enum_name = make_path(module_path, &enum_item.ident.to_string());
         let (impl_generics, ty_generics, where_clause) = enum_item.generics.split_for_impl();
-        let _arms = enum_item.variants.iter().enumerate().map(|(idx, variant)| {
+        let tags = enum_item.variants.iter().map(|variant| {
+            let tag = &variant.ident;
+            quote! { stringify!(#tag) }
+        });
+        let tags = quote! { [#( #tags.to_string() ),*] };
+        let arms = enum_item.variants.iter().enumerate().map(|(idx, variant)| {
             let tag = &variant.ident;
             match &variant.fields {
                 syn::Fields::Unit => quote! {
-                    #idx => Ok(#enum_name::#tag)
+                    #idx => #enum_name::#tag
                 },
                 syn::Fields::Unnamed(_) => quote! {
-                    #idx => Ok(#enum_name::#tag(u.arbitrary()?))
+                    #idx => #enum_name::#tag(Dialog::read_value(dep + 1))
                 },
                 syn::Fields::Named(_) => unreachable!(),
             }
         });
-        let _size_hint = enum_item
-            .variants
-            .iter()
-            .map(|variant| match &variant.fields {
-                syn::Fields::Unit => quote! {},
-                syn::Fields::Unnamed(f) => {
-                    assert!(f.unnamed.len() == 1);
-                    let ty = &f.unnamed.first().unwrap().ty;
-                    quote! {
-                        let size = <#ty as Arbitrary>::size_hint(depth + 1);
-                        res = arbitrary::size_hint::or(res, size);
-                    }
-                }
-                syn::Fields::Named(_) => unreachable!(),
-            });
-        let _variant_len = enum_item.variants.len();
         res.push(parse_quote! {
         impl #impl_generics Dialog for #enum_name #ty_generics #where_clause {
             fn read_value(dep: u32) -> Self {
-                todo!()
+                let idx = proxy::util::dialog::read_selection(dep, &format!("Select a variant for {}", stringify!(#enum_name)), &#tags) as usize;
+                match idx {
+                    #(
+                        #arms,
+                    )*
+                    _ => unreachable!(),
+                }
             }
         }
         });
