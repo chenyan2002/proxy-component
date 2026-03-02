@@ -142,6 +142,7 @@ impl Trait for FuzzTrait {
                     _ => unreachable!(),
                 }
             }
+            #[allow(unused_variables, unused_mut)]
             fn size_hint(depth: usize) -> (usize, Option<usize>) {
                 let mut res = (1, Some(1));
                 #(
@@ -168,7 +169,7 @@ impl Trait for FuzzTrait {
                 let choices = [#(#flags),*];
                 for _ in 0..flag_count {
                     let flag = u.choose(&choices)?;
-                    res |= flag;
+                    res |= *flag;
                 }
                 Ok(res)
             }
@@ -183,6 +184,17 @@ impl Trait for FuzzTrait {
         let ast: syn::File = parse_quote! {
           #[allow(unused_imports)]
           use arbitrary::{Arbitrary, Unstructured, Result};
+          impl Arbitrary<'_> for MockedResource {
+              fn arbitrary(_u: &mut Unstructured<'_>) -> Result<Self> {
+                  Ok(Self {
+                      handle: 42,
+                      name: "mocked-resource".to_string(),
+                  })
+              }
+              fn size_hint(_: usize) -> (usize, Option<usize>) {
+                  (0, Some(0))
+              }
+          }
         };
         ast.items
     }

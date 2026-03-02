@@ -1,0 +1,9 @@
+[package]
+name = "dialog"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+console = "0.16.2"
+dialoguer = { version = "0.12.0", default-features = false }
+wasm-wave.workspace = true

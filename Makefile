@@ -1,4 +1,4 @@
-.PHONY: all build-components build-cli test test-record test-fuzz run-fuzz run-record run-viceroy
+.PHONY: all build-components build-cli test test-record test-fuzz test-dialog run-fuzz run-record run-dialog run-viceroy
 
 all: build-components build-cli
 build-cli:
@@ -9,10 +9,14 @@ build-components:
 	cp target/wasm32-wasip2/release/debug.wasm assets/debug.wasm
 	cp target/wasm32-wasip2/release/recorder.wasm assets/recorder.wasm
 
-test: test-fuzz test-record
+test: test-fuzz test-record test-dialog
 
 test-fuzz:
-	RUSTFLAGS="" $(MAKE) run-fuzz WASM=tests/calculator.wasm
+	$(MAKE) run-fuzz WASM=tests/calculator.wasm
+	# build-only test
+	target/release/proxy-component instrument -m fuzz tests/rust.wasm
+	target/release/proxy-component instrument -m fuzz tests/go.wasm
+	target/release/proxy-component instrument -m fuzz tests/python.wasm
 
 test-record:
 	$(MAKE) run-record WASM=tests/go.wasm
@@ -21,6 +25,15 @@ test-record:
 	# test the same trace with a different wasm replay
 	target/release/proxy-component instrument -m replay tests/rust.debug.wasm
 	wasmtime --invoke 'start()' composed.wasm < trace.out
+	# build-only test
+	target/release/proxy-component instrument -m record tests/calculator.wasm
+	target/release/proxy-component instrument -m replay tests/calculator.wasm
+
+test-dialog:
+	rm tests/composed.wasm || true
+	for wasm in tests/*.wasm; do \
+		$(MAKE) run-dialog WASM=$$wasm; \
+	done
 
 run-fuzz:
 	target/release/proxy-component instrument -m fuzz $(WASM)
@@ -34,6 +47,11 @@ run-record:
 	# test host replay
 	target/release/proxy-component instrument -m replay --use-host-recorder $(WASM)
 	target/release/proxy-component run composed.wasm --invoke 'start()' --trace trace.out
+
+run-dialog:
+	target/release/proxy-component instrument -m dialog $(WASM)
+	# build-only
+	# target/release/proxy-component run composed.wasm --invoke 'start()'
 
 run-viceroy:
 	viceroy composed.wasm > trace.out & echo $$! > viceroy.pid

@@ -55,6 +55,9 @@ impl<'a> Opt<'a> {
             Mode::Fuzz => {
                 out.push_str(&format!("import proxy:util/debug;\n"));
             }
+            Mode::Dialog => {
+                out.push_str(&format!("import proxy:util/dialog;\n"));
+            }
         };
         out.push_str("export proxy:conversion/conversion;\n");
         for (name, import) in &world.imports {
@@ -73,7 +76,9 @@ impl<'a> Opt<'a> {
                             out.push_str(&format!("import {name};\n"));
                             out.push_str(&format!("export wrapped-{name};\n"));
                         }
-                        Mode::Replay | Mode::Fuzz => out.push_str(&format!("export {name};\n")),
+                        Mode::Replay | Mode::Fuzz | Mode::Dialog => {
+                            out.push_str(&format!("export {name};\n"))
+                        }
                     }
                 }
                 _ => todo!(),
@@ -91,7 +96,7 @@ impl<'a> Opt<'a> {
                             out.push_str(&format!("import wrapped-{name};\n"));
                             out.push_str(&format!("export {name};\n"));
                         }
-                        Mode::Replay | Mode::Fuzz => {
+                        Mode::Replay | Mode::Fuzz | Mode::Dialog => {
                             out.push_str(&format!("import {name};\n"));
                         }
                     }
@@ -99,7 +104,7 @@ impl<'a> Opt<'a> {
                 _ => todo!(),
             }
         }
-        if matches!(self.mode, Mode::Replay | Mode::Fuzz) {
+        if matches!(self.mode, Mode::Replay | Mode::Fuzz | Mode::Dialog) {
             out.push_str("export proxy:recorder/start-replay@0.1.0;\n")
         }
         out.push_str("}\n");
@@ -119,6 +124,9 @@ impl<'a> Opt<'a> {
             }
             Mode::Fuzz => {
                 out.push_str(&format!("import proxy:util/debug;\n"));
+            }
+            Mode::Dialog => {
+                out.push_str(&format!("import proxy:util/dialog;\n"));
             }
         };
         out.push_str("import proxy:conversion/conversion;\n");
@@ -303,7 +311,7 @@ impl<'a> Opt<'a> {
                         "get-host-{func_name}: func(x: wrapped-{func_name}) -> host-{func_name};\n",
                     ));
                 }
-                Mode::Replay | Mode::Fuzz => {
+                Mode::Replay | Mode::Fuzz | Mode::Dialog => {
                     // Add a magic separator so that codegen::generate_conversion_func can recover the resource name
                     let magic_name = format!("{iface_no_ver}-magic42-{resource}").to_kebab_case();
                     out.push_str(&format!("\nuse {iface}.{{{resource} as {func_name}}};\n"));
@@ -349,6 +357,7 @@ impl<'a> Opt<'a> {
                     let name = resolve.name_world_key(name);
                     let link_type = match name.as_str() {
                         "proxy:util/debug" => LinkType::Debug,
+                        "proxy:util/dialog" => LinkType::Host,
                         name if name.starts_with("proxy:recorder/") => LinkType::Recorder,
                         _ => LinkType::Host,
                     };
@@ -369,6 +378,7 @@ impl<'a> Opt<'a> {
                     let link_type = match name.as_str() {
                         "proxy:util/debug" => LinkType::Debug,
                         "proxy:conversion/conversion" => LinkType::Imports,
+                        "proxy:util/dialog" => LinkType::Host,
                         name if name.starts_with("proxy:recorder/") => LinkType::Recorder,
                         name if matches!(self.mode, Mode::Record) => {
                             if let Some(stripped) = name.strip_prefix("wrapped-") {

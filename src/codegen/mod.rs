@@ -8,6 +8,7 @@ use syn::{
     visit_mut::VisitMut,
 };
 
+mod dialog;
 mod fuzz;
 mod record;
 mod replay;
@@ -35,6 +36,8 @@ pub enum GenerateMode {
     Replay,
     /// A virtualized component with no imports, with implementation for fuzzing.
     Fuzz,
+    /// A virtualized component with no imports, with implementation for dialog.
+    Dialog,
 }
 impl GenerateMode {
     pub fn is_instrument(&self) -> bool {
@@ -161,6 +164,9 @@ impl State {
                             self.generate_replay_func(module_path, &sig, &resource)
                         }
                         GenerateMode::Fuzz => self.generate_fuzz_func(module_path, &sig, &resource),
+                        GenerateMode::Dialog => {
+                            self.generate_dialog_func(module_path, &sig, &resource)
+                        }
                     };
                     methods.push(syn::ImplItem::Fn(stub_impl));
                 }

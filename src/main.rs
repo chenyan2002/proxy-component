@@ -20,6 +20,7 @@ pub enum Mode {
     Record,
     Replay,
     Fuzz,
+    Dialog,
 }
 
 #[derive(Parser)]
@@ -49,6 +50,7 @@ impl Mode {
             Mode::Record => "record",
             Mode::Replay => "replay",
             Mode::Fuzz => "fuzz",
+            Mode::Dialog => "dialog",
         }
     }
 }

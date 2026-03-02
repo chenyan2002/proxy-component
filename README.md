@@ -53,6 +53,19 @@ $ wasmtime --invoke 'start()' composed.wasm
 Fuzzing the import return and export input based on the WIT type. This mode requires a [Debug component](components/debug/) to get random numbers and logging. The `composed.wasm` can be run in
 a standalone `wasmtime` without any special host functions.
 
+### Dialog
+
+```
+$ proxy-component instrument -m dialog <component.wasm>
+$ proxy-component run composed.wasm --invoke 'start()'
+```
+
+Provide an interactive terminal for users to mock import and export calls.
+[![asciicast](https://asciinema.org/a/BeVtK4cwsTsqmDo6.svg)](https://asciinema.org/a/BeVtK4cwsTsqmDo6)
+
+This mode requires raw access to terminal, which can only be implemented on the host side for now.
+So the composed binary can only be run with `proxy-component run`, instead of a regular `wasmtime`.
+
 ### Generate
 
 Given a `bindings.rs` file generated from `wit-bindgen`. This command can generate code to implement

@@ -26,7 +26,7 @@ mod bindings {
     });
 }
 
-struct State {
+pub struct State {
     wasi_ctx: WasiCtx,
     resource_table: ResourceTable,
     logger: Logger,
@@ -66,6 +66,11 @@ impl bindings::proxy::recorder::replay::Host for State {
 const MAX_FUEL: u64 = u64::MAX;
 
 pub fn run(args: RunArgs) -> anyhow::Result<()> {
+    // Patch ctrlc until https://github.com/console-rs/dialoguer/issues/77 is fixed
+    let _ = ctrlc::try_set_handler(move || {
+        let term = dialog::console::Term::stdout();
+        let _ = term.show_cursor();
+    });
     let mut config = Config::new();
     config
         .consume_fuel(true)
@@ -82,6 +87,10 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         logger: Logger::new(),
         exit_called: false,
     };
+    dialog_bindings::proxy::util::dialog::add_to_linker::<State, HasSelf<State>>(
+        &mut linker,
+        |state| state,
+    )?;
     if let Some(path) = &args.trace {
         bindings::proxy::recorder::replay::add_to_linker::<_, HasSelf<_>>(&mut linker, |state| {
             state
@@ -189,5 +198,69 @@ impl WasiView for State {
             ctx: &mut self.wasi_ctx,
             table: &mut self.resource_table,
         }
+    }
+}
+
+mod dialog_bindings {
+    wasmtime::component::bindgen!({
+        path: "assets/util.wit",
+        world: "host-dialog",
+    });
+}
+
+impl dialog_bindings::proxy::util::dialog::Host for crate::run::State {
+    fn print(&mut self, dep: u32, message: String) {
+        dialog::print(dep, &message);
+    }
+    fn read_string(&mut self, dep: u32) -> String {
+        dialog::read_string(dep)
+    }
+    fn read_u8(&mut self, dep: u32) -> String {
+        dialog::read_u8(dep)
+    }
+    fn read_u16(&mut self, dep: u32) -> String {
+        dialog::read_u16(dep)
+    }
+    fn read_u32(&mut self, dep: u32) -> String {
+        dialog::read_u32(dep)
+    }
+    fn read_u64(&mut self, dep: u32) -> String {
+        dialog::read_u64(dep)
+    }
+    fn read_s8(&mut self, dep: u32) -> String {
+        dialog::read_s8(dep)
+    }
+    fn read_s16(&mut self, dep: u32) -> String {
+        dialog::read_s16(dep)
+    }
+    fn read_s32(&mut self, dep: u32) -> String {
+        dialog::read_s32(dep)
+    }
+    fn read_s64(&mut self, dep: u32) -> String {
+        dialog::read_s64(dep)
+    }
+    fn read_f32(&mut self, dep: u32) -> String {
+        dialog::read_f32(dep)
+    }
+    fn read_f64(&mut self, dep: u32) -> String {
+        dialog::read_f64(dep)
+    }
+    fn read_bool(&mut self, dep: u32) -> String {
+        dialog::read_bool(dep)
+    }
+    fn read_char(&mut self, dep: u32) -> String {
+        dialog::read_char(dep)
+    }
+    fn read_select(&mut self, dep: u32, prompt: String, items: Vec<String>) -> u32 {
+        dialog::read_select(dep, prompt, items)
+    }
+    fn read_multi_select(&mut self, dep: u32, prompt: String, items: Vec<String>) -> Vec<u32> {
+        dialog::read_multi_select(dep, prompt, items)
+    }
+    fn read_num(&mut self, dep: u32, prompt: String) -> u32 {
+        dialog::read_num(dep, prompt)
+    }
+    fn read_raw_string(&mut self, dep: u32, prompt: String) -> String {
+        dialog::read_raw_string(dep, prompt)
     }
 }
