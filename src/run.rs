@@ -260,4 +260,7 @@ impl dialog_bindings::proxy::util::dialog::Host for crate::run::State {
     fn read_num(&mut self, dep: u32, prompt: String) -> u32 {
         dialog::read_num(dep, prompt)
     }
+    fn read_raw_string(&mut self, dep: u32, prompt: String) -> String {
+        dialog::read_raw_string(dep, prompt)
+    }
 }

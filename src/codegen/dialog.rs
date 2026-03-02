@@ -33,7 +33,7 @@ impl State {
                             __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*
                         proxy::util::dialog::print(&format!("import: {}({})", #display_name, __params.join(", ")));
-                        proxy::util::dialog::print(&format!("return type: {}", stringify!(#ty)));
+                        proxy::util::dialog::print(&format!("return type: {:.60}", <#ty as ValueTyped>::value_type().to_string()));
                         let ret = Dialog::read_value(0);
                         proxy::util::dialog::print(&format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&ret)).unwrap()));
                         ret

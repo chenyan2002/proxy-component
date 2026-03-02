@@ -23,16 +23,28 @@ impl Trait for DialogTrait {
             res.push(parse_quote! {
             impl Dialog for #resource_path {
                 fn read_value(_dep: u32) -> Self {
-                    proxy::conversion::conversion::#call(42)
+                    let handle = HANDLE_ID.with(|id| {
+                        let mut id = id.borrow_mut();
+                        let current_id = *id;
+                        *id += 1;
+                        current_id
+                    });
+                    proxy::conversion::conversion::#call(handle)
                 }
             }
             });
             res.push(parse_quote! {
             impl<'a> Dialog for &'a #resource_path {
                 fn read_value(_dep: u32) -> Self {
+                    let handle = HANDLE_ID.with(|id| {
+                        let mut id = id.borrow_mut();
+                        let current_id = *id;
+                        *id += 1;
+                        current_id
+                    });
                     SCOPED_ALLOC.with(|alloc| {
                         let mut alloc = alloc.borrow_mut();
-                        alloc.alloc(proxy::conversion::conversion::#call(42))
+                        alloc.alloc(proxy::conversion::conversion::#call(handle))
                     })
                 }
             }
@@ -42,8 +54,14 @@ impl Trait for DialogTrait {
             res.push(parse_quote! {
             impl Dialog for #resource_path {
                 fn read_value(_dep: u32) -> Self {
+                    let handle = HANDLE_ID.with(|id| {
+                        let mut id = id.borrow_mut();
+                        let current_id = *id;
+                        *id += 1;
+                        current_id
+                    });
                     #resource_path::new(MockedResource {
-                        handle: 42,
+                        handle,
                         name: #wit_name.to_string(),
                     })
                 }
@@ -156,6 +174,9 @@ impl Trait for DialogTrait {
           trait Dialog {
             fn read_value(dep: u32) -> Self;
           }
+          thread_local! {
+            static HANDLE_ID: std::cell::RefCell<u32> = std::cell::RefCell::new(1);
+          }
           impl Dialog for () {
               fn read_value(_dep: u32) -> Self {
                   ()
@@ -175,7 +196,7 @@ impl Trait for DialogTrait {
               fn read_value(dep: u32) -> Self {
                 use std::any::TypeId;
                 if TypeId::of::<T>() == TypeId::of::<u8>() {
-                    let hex = proxy::util::dialog::read_string(dep);
+                    let hex = proxy::util::dialog::read_raw_string(dep, "Enter a string as list<u8>");
                     let bytes = hex.into_bytes();
                     unsafe {
                         std::mem::transmute::<Vec<u8>, Vec<T>>(bytes)
