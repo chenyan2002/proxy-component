@@ -32,10 +32,10 @@ impl State {
                         #(
                             __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*
-                        proxy::util::dialog::print(&format!("import: {}({})", #display_name, __params.join(", ")));
-                        proxy::util::dialog::print(&format!("return type: {:.60}", <#ty as ValueTyped>::value_type().to_string()));
+                        proxy::util::dialog::print(0, &format!("import: {}({})", #display_name, __params.join(", ")));
+                        proxy::util::dialog::print(0, &format!("return type: {:.60}", <#ty as ValueTyped>::value_type().to_string()));
                         let ret = Dialog::read_value(0);
-                        proxy::util::dialog::print(&format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&ret)).unwrap()));
+                        proxy::util::dialog::print(0, &format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&ret)).unwrap()));
                         ret
                     }
                 }
@@ -78,14 +78,14 @@ impl State {
                             let display_name = wit_func_name(path, resource, &sig.ident, &kind);
                             Some((quote! {
                                 {
-                                    proxy::util::dialog::print(&format!("call export func {}", #display_name));
+                                    proxy::util::dialog::print(0, &format!("call export func {}", #display_name));
                                     let mut __params: Vec<String> = Vec::new();
                                     #(
-                                        proxy::util::dialog::print(&format!("provide argument for {}", stringify!(#arg_name)));
+                                        proxy::util::dialog::print(0, &format!("provide argument for {}: {:60}", stringify!(#arg_name), <#ty as ValueTyped>::value_type().to_string()));
                                         let #arg_name: #ty = Dialog::read_value(0);
                                         __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_name)).unwrap());
                                     )*
-                                    proxy::util::dialog::print(&format!("export: {}({})", #display_name, __params.join(", ")));
+                                    proxy::util::dialog::print(0, &format!("export: {}({})", #display_name, __params.join(", ")));
                                     let _ = #func(#(#call_param),*);
                                 }
                             }, display_name))

@@ -7,7 +7,7 @@ interface debug {
 }
 
 interface dialog {
-  print: func(x:string);
+  print: func(dep:u32, x:string);
   read-raw-string: func(dep: u32, prompt: string) -> string;
   read-num: func(dep: u32, prompt: string) -> u32;
   read-select: func(dep: u32, prompt: string, items: list<string>) -> u32;

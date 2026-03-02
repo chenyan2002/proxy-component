@@ -209,8 +209,8 @@ mod dialog_bindings {
 }
 
 impl dialog_bindings::proxy::util::dialog::Host for crate::run::State {
-    fn print(&mut self, message: String) {
-        dialog::print(&message);
+    fn print(&mut self, dep: u32, message: String) {
+        dialog::print(dep, &message);
     }
     fn read_string(&mut self, dep: u32) -> String {
         dialog::read_string(dep)

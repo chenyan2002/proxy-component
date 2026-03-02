@@ -5,8 +5,8 @@ use wasm_wave::value::convert::ToValue;
 
 pub use console;
 
-pub fn print(message: &str) {
-    let theme = IndentTheme::new(0);
+pub fn print(dep: u32, message: &str) {
+    let theme = IndentTheme::new(dep as usize);
     theme.println(message);
 }
 

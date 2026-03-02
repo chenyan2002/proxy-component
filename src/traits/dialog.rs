@@ -81,20 +81,24 @@ impl Trait for DialogTrait {
         let mut res = Vec::new();
         let struct_name = make_path(module_path, &struct_item.ident.to_string());
         let (impl_generics, ty_generics, where_clause) = struct_item.generics.split_for_impl();
-        let field_names = match &struct_item.fields {
-            syn::Fields::Unit => Vec::new(),
-            syn::Fields::Named(fields) => fields
-                .named
-                .iter()
-                .map(|f| f.ident.clone().unwrap())
-                .collect(),
+        let (field_names, tys) = match &struct_item.fields {
+            syn::Fields::Unit => (Vec::new(), Vec::new()),
+            syn::Fields::Named(fields) => {
+                let field_names: Vec<_> = fields
+                    .named
+                    .iter()
+                    .map(|f| f.ident.clone().unwrap())
+                    .collect();
+                let field_tys = fields.named.iter().map(|f| &f.ty).collect();
+                (field_names, field_tys)
+            }
             syn::Fields::Unnamed(_) => unreachable!(),
         };
         res.push(parse_quote! {
         impl #impl_generics Dialog for #struct_name #ty_generics #where_clause {
             fn read_value(dep: u32) -> Self {
                 #(
-                    proxy::util::dialog::print(&format!("provide value for field {}", stringify!(#field_names)));
+                    proxy::util::dialog::print(dep + 1, &format!("provide value for field {}: {:60}", stringify!(#field_names), <#tys as ValueTyped>::value_type().to_string()));
                     let #field_names = Dialog::read_value(dep + 1);
                 )*
                 Self {
