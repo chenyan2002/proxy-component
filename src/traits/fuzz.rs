@@ -142,6 +142,7 @@ impl Trait for FuzzTrait {
                     _ => unreachable!(),
                 }
             }
+            #[allow(unused_variables, unused_mut)]
             fn size_hint(depth: usize) -> (usize, Option<usize>) {
                 let mut res = (1, Some(1));
                 #(

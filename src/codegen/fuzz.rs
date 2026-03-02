@@ -21,9 +21,14 @@ impl State {
             let display_name = wit_func_name(module_path, resource, func_name, &kind);
             let ret_ty = get_return_type(&sig.output);
             if ret_ty.is_some() {
+                let init_vec = if matches!(kind, Some(ResourceFuncKind::Method)) {
+                    quote! { vec![wasm_wave::to_string(&ToValue::to_value(&self)).unwrap()] }
+                } else {
+                    quote! { Vec::new() }
+                };
                 parse_quote! {
                     #sig {
-                        let mut __params: Vec<String> = Vec::new();
+                        let mut __params: Vec<String> = #init_vec;
                         #(
                             __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*
@@ -39,6 +44,7 @@ impl State {
                 }
             } else {
                 parse_quote! {
+                    #[allow(unused_variables)]
                     #sig {}
                 }
             }

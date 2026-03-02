@@ -63,17 +63,13 @@ impl Trait for DialogTrait {
         let mut res = Vec::new();
         let struct_name = make_path(module_path, &struct_item.ident.to_string());
         let (impl_generics, ty_generics, where_clause) = struct_item.generics.split_for_impl();
-        let (field_names, tys) = match &struct_item.fields {
-            syn::Fields::Unit => (Vec::new(), Vec::new()),
-            syn::Fields::Named(fields) => {
-                let field_names: Vec<_> = fields
-                    .named
-                    .iter()
-                    .map(|f| f.ident.clone().unwrap())
-                    .collect();
-                let field_tys = fields.named.iter().map(|f| &f.ty).collect();
-                (field_names, field_tys)
-            }
+        let field_names = match &struct_item.fields {
+            syn::Fields::Unit => Vec::new(),
+            syn::Fields::Named(fields) => fields
+                .named
+                .iter()
+                .map(|f| f.ident.clone().unwrap())
+                .collect(),
             syn::Fields::Unnamed(_) => unreachable!(),
         };
         res.push(parse_quote! {
@@ -113,7 +109,7 @@ impl Trait for DialogTrait {
         res.push(parse_quote! {
         impl #impl_generics Dialog for #enum_name #ty_generics #where_clause {
             fn read_value(dep: u32) -> Self {
-                let idx = proxy::util::dialog::read_selection(dep, &format!("Select a variant for {}", stringify!(#enum_name)), &#tags) as usize;
+                let idx = proxy::util::dialog::read_select(dep, &format!("Select a variant for {}", stringify!(#enum_name)), &#tags) as usize;
                 match idx {
                     #(
                         #arms,
@@ -161,7 +157,7 @@ impl Trait for DialogTrait {
           }
           impl<T: Dialog> Dialog for Option<T> {
               fn read_value(dep: u32) -> Self {
-                  let selection = proxy::util::dialog::read_selection(dep, "Select None or Some", &["None".to_string(), "Some".to_string()]);
+                  let selection = proxy::util::dialog::read_select(dep, "Select None or Some", &["None".to_string(), "Some".to_string()]);
                   if selection == 0 {
                       None
                   } else {
@@ -186,7 +182,7 @@ impl Trait for DialogTrait {
           }
           impl <O: Dialog, E: Dialog> Dialog for Result<O, E> {
               fn read_value(dep: u32) -> Self {
-                  let selection = proxy::util::dialog::read_selection(dep, "Select result", &["ok".to_string(), "err".to_string()]);
+                  let selection = proxy::util::dialog::read_select(dep, "Select result", &["ok".to_string(), "err".to_string()]);
                   if selection == 0 {
                       Ok(Dialog::read_value(dep + 1))
                   } else {

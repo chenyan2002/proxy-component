@@ -21,19 +21,27 @@ impl State {
             let display_name = wit_func_name(module_path, resource, func_name, &kind);
             let ret_ty = get_return_type(&sig.output);
             if let Some(ty) = ret_ty {
+                let init_vec = if matches!(kind, Some(ResourceFuncKind::Method)) {
+                    quote! { vec![wasm_wave::to_string(&ToValue::to_value(&self)).unwrap()] }
+                } else {
+                    quote! { Vec::new() }
+                };
                 parse_quote! {
                     #sig {
-                        let mut __params: Vec<String> = Vec::new();
+                        let mut __params: Vec<String> = #init_vec;
                         #(
                             __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*
                         proxy::util::dialog::print(&format!("import: {}({})", #display_name, __params.join(", ")));
                         proxy::util::dialog::print(&format!("return type: {}", stringify!(#ty)));
-                        Dialog::read_value(0)
+                        let ret = Dialog::read_value(0);
+                        proxy::util::dialog::print(&format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&ret)).unwrap()));
+                        ret
                     }
                 }
             } else {
                 parse_quote! {
+                    #[allow(unused_variables)]
                     #sig {}
                 }
             }
@@ -68,7 +76,7 @@ impl State {
                             };
                             let func = make_path(path, &func_name);
                             let display_name = wit_func_name(path, resource, &sig.ident, &kind);
-                            Some(quote! {
+                            Some((quote! {
                                 {
                                     proxy::util::dialog::print(&format!("call export func {}", #display_name));
                                     let mut __params: Vec<String> = Vec::new();
@@ -80,29 +88,31 @@ impl State {
                                     proxy::util::dialog::print(&format!("export: {}({})", #display_name, __params.join(", ")));
                                     let _ = #func(#(#call_param),*);
                                 }
-                            })
+                            }, display_name))
                         })
                     })
                 })
                 .collect();
+            let (arms, display_names): (Vec<_>, Vec<_>) = arms.into_iter().unzip();
+            let display_names =
+                quote! { ["All done".to_string(), #(#display_names.to_string()),*] };
             let func_len = arms.iter().len();
             let idxs = 1..=func_len;
             parse_quote! {
-                #sig {
-                    let __buf = (0..4096).map(|i| i.to_string()).collect::<Vec<_>>().join("").as_bytes().to_vec();
-                    let mut u = Unstructured::new(&__buf);
-                    for _ in 0..10 {
-                        let idx = u.int_in_range(1..=#func_len).unwrap();
-                        match idx {
-                            #(#idxs => #arms)*
-                            _ => unreachable!(),
-                        }
-                        // clean up borrowed resources from input args
-                        SCOPED_ALLOC.with(|alloc| {
-                            alloc.borrow_mut().clear();
-                        });
-                    }
+              #sig {
+                loop {
+                  let idx = proxy::util::dialog::read_select(0, "Select an export function to call", &#display_names) as usize;
+                  match idx {
+                          0 => break,
+                          #(#idxs => #arms)*
+                          _ => unreachable!(),
+                  }
+                  // clean up borrowed resources from input args
+                  SCOPED_ALLOC.with(|alloc| {
+                          alloc.borrow_mut().clear();
+                  });
                 }
+              }
             }
         }
     }

@@ -37,7 +37,7 @@ pub fn read_num(dep: u32, prompt: String) -> u32 {
         .unwrap();
     num
 }
-pub fn read_selection(dep: u32, prompt: String, items: Vec<String>) -> u32 {
+pub fn read_select(dep: u32, prompt: String, items: Vec<String>) -> u32 {
     let theme = IndentTheme::new(dep as usize);
     let selection = Select::with_theme(&theme)
         .with_prompt(prompt)
