@@ -75,9 +75,13 @@ impl Trait for DialogTrait {
         res.push(parse_quote! {
         impl #impl_generics Dialog for #struct_name #ty_generics #where_clause {
             fn read_value(dep: u32) -> Self {
+                #(
+                    proxy::util::dialog::print(&format!("provide value for field {}", stringify!(#field_names)));
+                    let #field_names = Dialog::read_value(dep + 1);
+                )*
                 Self {
                     #(
-                        #field_names: Dialog::read_value(dep + 1),
+                        #field_names,
                     )*
                 }
             }
@@ -124,22 +128,24 @@ impl Trait for DialogTrait {
     fn flag_trait(&self, module_path: &[String], item: &crate::codegen::ItemFlag) -> Vec<Item> {
         let mut res = Vec::new();
         let flag_path = make_path(module_path, &item.name.to_string());
-        let flags: Vec<_> = item
-            .flags
-            .iter()
-            .map(|f| {
-                quote! { #flag_path::#f }
-            })
-            .collect();
-        let flags_expr = if flags.is_empty() {
-            quote! { #flag_path::empty() }
-        } else {
-            quote! { #( #flags )|* }
-        };
+        let flags = &item.flags;
+        let flag_names = quote! { [#( stringify!(#flags).to_string() ),*] };
+        let flags = flags.iter().map(|flag| quote! { #flag_path::#flag });
+        let idxs = 0..flags.len();
         res.push(parse_quote! {
         impl Dialog for #flag_path {
-            fn read_value(_dep: u32) -> Self {
-                #flags_expr
+            fn read_value(dep: u32) -> Self {
+                let selections = proxy::util::dialog::read_multi_select(dep, &format!("Select flags for {}", stringify!(#flag_path)), &#flag_names);
+                let mut res = #flag_path::empty();
+                for idx in selections {
+                    match idx as usize {
+                        #(
+                            #idxs => res |= #flags,
+                        )*
+                        _ => unreachable!(),
+                    }
+                }
+                res
             }
         }
         });
@@ -187,6 +193,14 @@ impl Trait for DialogTrait {
                       Ok(Dialog::read_value(dep + 1))
                   } else {
                       Err(Dialog::read_value(dep + 1))
+                  }
+              }
+          }
+          impl Dialog for MockedResource {
+              fn read_value(_dep: u32) -> Self {
+                  Self {
+                      handle: 42,
+                      name: "mocked-resource".to_string(),
                   }
               }
           }

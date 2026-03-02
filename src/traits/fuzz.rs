@@ -169,7 +169,7 @@ impl Trait for FuzzTrait {
                 let choices = [#(#flags),*];
                 for _ in 0..flag_count {
                     let flag = u.choose(&choices)?;
-                    res |= flag;
+                    res |= *flag;
                 }
                 Ok(res)
             }

@@ -10,6 +10,7 @@ interface dialog {
   print: func(x:string);
   read-num: func(dep: u32, prompt: string) -> u32;
   read-select: func(dep: u32, prompt: string, items: list<string>) -> u32;
+  read-multi-select: func(dep: u32, prompt: string, items: list<string>) -> list<u32>;
   read-bool: func(dep: u32) -> string;
   read-string: func(dep: u32) -> string;
   read-u8: func(dep: u32) -> string;

@@ -47,6 +47,15 @@ pub fn read_select(dep: u32, prompt: String, items: Vec<String>) -> u32 {
         .unwrap();
     selection as u32
 }
+pub fn read_multi_select(dep: u32, prompt: String, items: Vec<String>) -> Vec<u32> {
+    let theme = IndentTheme::new(dep as usize);
+    let selections = dialoguer::MultiSelect::with_theme(&theme)
+        .with_prompt(prompt)
+        .items(&items)
+        .interact()
+        .unwrap();
+    selections.into_iter().map(|s| s as u32).collect()
+}
 macro_rules! read_primitive {
     ($fn_name:ident, $ty:ty, $prompt:expr) => {
         pub fn $fn_name(dep: u32) -> String {

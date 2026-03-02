@@ -254,6 +254,9 @@ impl dialog_bindings::proxy::util::dialog::Host for crate::run::State {
     fn read_select(&mut self, dep: u32, prompt: String, items: Vec<String>) -> u32 {
         dialog::read_select(dep, prompt, items)
     }
+    fn read_multi_select(&mut self, dep: u32, prompt: String, items: Vec<String>) -> Vec<u32> {
+        dialog::read_multi_select(dep, prompt, items)
+    }
     fn read_num(&mut self, dep: u32, prompt: String) -> u32 {
         dialog::read_num(dep, prompt)
     }
