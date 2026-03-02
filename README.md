@@ -61,7 +61,7 @@ $ proxy-component run composed.wasm --invoke 'start()'
 ```
 
 Provide an interactive terminal for users to mock import and export calls.
-[![asciicast](https://asciinema.org/a/BeVtK4cwsTsqmDo6.svg)](https://asciinema.org/a/BeVtK4cwsTsqmDo6)
+[![asciicast](https://asciinema.org/a/BeVtK4cwsTsqmDo6.svg?render=1)](https://asciinema.org/a/BeVtK4cwsTsqmDo6)
 
 This mode requires raw access to terminal, which can only be implemented on the host side for now.
 So the composed binary can only be run with `proxy-component run`, instead of a regular `wasmtime`.
