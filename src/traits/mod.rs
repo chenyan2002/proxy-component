@@ -55,7 +55,6 @@ impl<'a> TraitGenerator<'a> {
                     has_replay_table: true,
                 }));
                 traits.push(Box::new(dialog::DialogTrait {}));
-                traits.push(Box::new(fuzz::FuzzTrait {}));
             }
         }
         TraitGenerator { state, traits }

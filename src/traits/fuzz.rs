@@ -184,6 +184,17 @@ impl Trait for FuzzTrait {
         let ast: syn::File = parse_quote! {
           #[allow(unused_imports)]
           use arbitrary::{Arbitrary, Unstructured, Result};
+          impl Arbitrary<'_> for MockedResource {
+              fn arbitrary(_u: &mut Unstructured<'_>) -> Result<Self> {
+                  Ok(Self {
+                      handle: 42,
+                      name: "mocked-resource".to_string(),
+                  })
+              }
+              fn size_hint(_: usize) -> (usize, Option<usize>) {
+                  (0, Some(0))
+              }
+          }
         };
         ast.items
     }
