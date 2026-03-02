@@ -27,18 +27,9 @@ impl State {
                         #(
                             __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*
-                        let mut __buf = __params.join(",");
-                        proxy::util::dialog::print(&format!("import: {}({})", #display_name, __buf));
+                        proxy::util::dialog::print(&format!("import: {}({})", #display_name, __params.join(", ")));
                         proxy::util::dialog::print(&format!("return type: {}", stringify!(#ty)));
-                        #ty::read_value(0).to_value().to_rust()
-                        /*
-                        __buf += #display_name;
-                        let mut u = Unstructured::new(&__buf.as_bytes());
-                        let res = u.arbitrary().unwrap();
-                        let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
-                        proxy::util::dialog::print(&format!("ret: {}", res_str));
-                        res
-                        */
+                        Dialog::read_value(0)
                     }
                 }
             } else {
@@ -83,7 +74,7 @@ impl State {
                                     let mut __params: Vec<String> = Vec::new();
                                     #(
                                         proxy::util::dialog::print(&format!("provide argument for {}", stringify!(#arg_name)));
-                                        let #arg_name = #ty::read_value(0);
+                                        let #arg_name: #ty = Dialog::read_value(0);
                                         __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_name)).unwrap());
                                     )*
                                     proxy::util::dialog::print(&format!("export: {}({})", #display_name, __params.join(", ")));

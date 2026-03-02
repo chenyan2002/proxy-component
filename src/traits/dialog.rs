@@ -42,10 +42,10 @@ impl Trait for DialogTrait {
             res.push(parse_quote! {
             impl Dialog for #resource_path {
                 fn read_value(_dep: u32) -> Self {
-                    Ok(#resource_path::new(MockedResource {
+                    #resource_path::new(MockedResource {
                         handle: 42,
                         name: #wit_name.to_string(),
-                    }))
+                    })
                 }
             }
             });
@@ -128,7 +128,6 @@ impl Trait for DialogTrait {
     fn flag_trait(&self, module_path: &[String], item: &crate::codegen::ItemFlag) -> Vec<Item> {
         let mut res = Vec::new();
         let flag_path = make_path(module_path, &item.name.to_string());
-        let _flag_num = item.flags.len() - 1;
         let flags: Vec<_> = item
             .flags
             .iter()
@@ -154,6 +153,46 @@ impl Trait for DialogTrait {
         let ast: syn::File = parse_quote! {
           trait Dialog {
             fn read_value(dep: u32) -> Self;
+          }
+          impl Dialog for () {
+              fn read_value(_dep: u32) -> Self {
+                  ()
+              }
+          }
+          impl<T: Dialog> Dialog for Option<T> {
+              fn read_value(dep: u32) -> Self {
+                  let selection = proxy::util::dialog::read_selection(dep, "Select None or Some", &["None".to_string(), "Some".to_string()]);
+                  if selection == 0 {
+                      None
+                  } else {
+                      Some(Dialog::read_value(dep + 1))
+                  }
+              }
+          }
+          impl<T: Dialog + 'static> Dialog for Vec<T> {
+              fn read_value(dep: u32) -> Self {
+                use std::any::TypeId;
+                if TypeId::of::<T>() == TypeId::of::<u8>() {
+                    let hex = proxy::util::dialog::read_string(dep);
+                    let bytes = hex.into_bytes();
+                    unsafe {
+                        std::mem::transmute::<Vec<u8>, Vec<T>>(bytes)
+                    }
+                } else {
+                  let len = proxy::util::dialog::read_num(dep, "Enter the length of the list");
+                  (0..len).map(|_| Dialog::read_value(dep + 1)).collect()
+                }
+              }
+          }
+          impl <O: Dialog, E: Dialog> Dialog for Result<O, E> {
+              fn read_value(dep: u32) -> Self {
+                  let selection = proxy::util::dialog::read_selection(dep, "Select result", &["ok".to_string(), "err".to_string()]);
+                  if selection == 0 {
+                      Ok(Dialog::read_value(dep + 1))
+                  } else {
+                      Err(Dialog::read_value(dep + 1))
+                  }
+              }
           }
           macro_rules! impl_dialog_primitive {
               ($($ty:ty => $read_fn:ident),* $(,)?) => {
@@ -183,6 +222,23 @@ impl Trait for DialogTrait {
               char => read_char,
               String => read_string,
           }
+          macro_rules! impl_dialog_tuple {
+              ($($T:ident),+) => {
+                  impl<$($T: Dialog),+> Dialog for ($($T,)+) {
+                      fn read_value(dep: u32) -> Self {
+                          ($($T::read_value(dep + 1),)+)
+                      }
+                  }
+              };
+          }
+          impl_dialog_tuple!(T1);
+          impl_dialog_tuple!(T1, T2);
+          impl_dialog_tuple!(T1, T2, T3);
+          impl_dialog_tuple!(T1, T2, T3, T4);
+          impl_dialog_tuple!(T1, T2, T3, T4, T5);
+          impl_dialog_tuple!(T1, T2, T3, T4, T5, T6);
+          impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7);
+          impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
         };
         ast.items
     }

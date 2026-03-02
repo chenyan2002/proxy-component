@@ -29,11 +29,20 @@ pub fn read_bool(dep: u32) -> String {
     let value = if selection == 0 { true } else { false };
     wasm_wave::to_string(&value.to_value()).unwrap()
 }
+pub fn read_num(dep: u32, prompt: String) -> u32 {
+    let theme = IndentTheme::new(dep as usize);
+    let num = Input::<u32>::with_theme(&theme)
+        .with_prompt(prompt)
+        .interact_text()
+        .unwrap();
+    num
+}
 pub fn read_selection(dep: u32, prompt: String, items: Vec<String>) -> u32 {
     let theme = IndentTheme::new(dep as usize);
     let selection = Select::with_theme(&theme)
         .with_prompt(prompt)
         .items(&items)
+        .default(0)
         .interact()
         .unwrap();
     selection as u32
