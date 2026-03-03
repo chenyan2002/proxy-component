@@ -105,7 +105,7 @@ impl Trait for DialogTrait {
             fn read_value(dep: u32) -> Self {
                 proxy::util::dialog::print(dep, &format!("provide value for struct {}", #struct_wit_name));
                 #(
-                    proxy::util::dialog::print(dep + 1, &format!("provide value for field {}: {:.60}", #field_wit_names, <#tys as ValueTyped>::value_type().to_string()));
+                    proxy::util::dialog::print(dep + 1, &format!("provide value for field {}: {}", #field_wit_names, <#tys as WitName>::name()));
                     let #field_names = Dialog::read_value(dep + 1);
                 )*
                 Self {

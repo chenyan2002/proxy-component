@@ -33,7 +33,7 @@ impl State {
                             __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*
                         proxy::util::dialog::print(0, &format!("import: {}({})", #display_name, __params.join(", ")));
-                        proxy::util::dialog::print(0, &format!("return type: {:.60}", <#ty as ValueTyped>::value_type().to_string()));
+                        proxy::util::dialog::print(0, &format!("return type: {}", <#ty as WitName>::name()));
                         let ret = Dialog::read_value(0);
                         proxy::util::dialog::print(0, &format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&ret)).unwrap()));
                         ret
@@ -81,7 +81,7 @@ impl State {
                                     proxy::util::dialog::print(0, &format!("call export func {}", #display_name));
                                     let mut __params: Vec<String> = Vec::new();
                                     #(
-                                        proxy::util::dialog::print(0, &format!("provide argument for {}: {:60}", stringify!(#arg_name), <#ty as ValueTyped>::value_type().to_string()));
+                                        proxy::util::dialog::print(0, &format!("provide argument for {}: {}", stringify!(#arg_name), <#ty as WitName>::name()));
                                         let #arg_name: #ty = Dialog::read_value(0);
                                         __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_name)).unwrap());
                                     )*

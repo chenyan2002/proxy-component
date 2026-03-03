@@ -5,6 +5,7 @@ mod dialog;
 mod fuzz;
 mod proxy;
 mod wave;
+mod wit;
 
 pub struct TraitGenerator<'a> {
     state: &'a State,
@@ -54,6 +55,7 @@ impl<'a> TraitGenerator<'a> {
                     to_rust: true,
                     has_replay_table: true,
                 }));
+                traits.push(Box::new(wit::WitTrait {}));
                 traits.push(Box::new(dialog::DialogTrait {}));
             }
         }
