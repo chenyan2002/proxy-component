@@ -1,5 +1,5 @@
 use crate::traits::Trait;
-use crate::util::make_path;
+use crate::util::{make_path, wit_func_name};
 use heck::{ToKebabCase, ToSnakeCase};
 use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
@@ -80,9 +80,10 @@ impl Trait for DialogTrait {
     fn struct_trait(&self, module_path: &[String], struct_item: &ItemStruct) -> Vec<Item> {
         let mut res = Vec::new();
         let struct_name = make_path(module_path, &struct_item.ident.to_string());
+        let struct_wit_name = wit_func_name(module_path, &None, &struct_item.ident, &None);
         let (impl_generics, ty_generics, where_clause) = struct_item.generics.split_for_impl();
-        let (field_names, tys) = match &struct_item.fields {
-            syn::Fields::Unit => (Vec::new(), Vec::new()),
+        let (field_names, tys, field_wit_names) = match &struct_item.fields {
+            syn::Fields::Unit => (Vec::new(), Vec::new(), Vec::new()),
             syn::Fields::Named(fields) => {
                 let field_names: Vec<_> = fields
                     .named
@@ -90,15 +91,21 @@ impl Trait for DialogTrait {
                     .map(|f| f.ident.clone().unwrap())
                     .collect();
                 let field_tys = fields.named.iter().map(|f| &f.ty).collect();
-                (field_names, field_tys)
+                let field_wit_names = fields
+                    .named
+                    .iter()
+                    .map(|f| f.ident.clone().unwrap().to_string().to_kebab_case())
+                    .collect();
+                (field_names, field_tys, field_wit_names)
             }
             syn::Fields::Unnamed(_) => unreachable!(),
         };
         res.push(parse_quote! {
         impl #impl_generics Dialog for #struct_name #ty_generics #where_clause {
             fn read_value(dep: u32) -> Self {
+                proxy::util::dialog::print(dep, &format!("provide value for struct {}", #struct_wit_name));
                 #(
-                    proxy::util::dialog::print(dep + 1, &format!("provide value for field {}: {:60}", stringify!(#field_names), <#tys as ValueTyped>::value_type().to_string()));
+                    proxy::util::dialog::print(dep + 1, &format!("provide value for field {}: {:.60}", #field_wit_names, <#tys as ValueTyped>::value_type().to_string()));
                     let #field_names = Dialog::read_value(dep + 1);
                 )*
                 Self {
@@ -117,7 +124,7 @@ impl Trait for DialogTrait {
         let (impl_generics, ty_generics, where_clause) = enum_item.generics.split_for_impl();
         let tags = enum_item.variants.iter().map(|variant| {
             let tag = &variant.ident;
-            quote! { stringify!(#tag) }
+            tag.to_string().to_kebab_case()
         });
         let tags = quote! { [#( #tags.to_string() ),*] };
         let arms = enum_item.variants.iter().enumerate().map(|(idx, variant)| {
@@ -132,10 +139,11 @@ impl Trait for DialogTrait {
                 syn::Fields::Named(_) => unreachable!(),
             }
         });
+        let enum_wit_name = wit_func_name(module_path, &None, &enum_item.ident, &None);
         res.push(parse_quote! {
         impl #impl_generics Dialog for #enum_name #ty_generics #where_clause {
             fn read_value(dep: u32) -> Self {
-                let idx = proxy::util::dialog::read_select(dep, &format!("Select a variant for {}", stringify!(#enum_name)), &#tags) as usize;
+                let idx = proxy::util::dialog::read_select(dep, &format!("Select a variant for {}", #enum_wit_name), &#tags) as usize;
                 match idx {
                     #(
                         #arms,
@@ -150,14 +158,19 @@ impl Trait for DialogTrait {
     fn flag_trait(&self, module_path: &[String], item: &crate::codegen::ItemFlag) -> Vec<Item> {
         let mut res = Vec::new();
         let flag_path = make_path(module_path, &item.name.to_string());
+        let flag_wit_name = wit_func_name(module_path, &None, &item.name, &None);
         let flags = &item.flags;
-        let flag_names = quote! { [#( stringify!(#flags).to_string() ),*] };
+        let flag_names: Vec<_> = flags
+            .iter()
+            .map(|flag| flag.to_string().to_kebab_case())
+            .collect();
+        let flag_names = quote! { [#( #flag_names.to_string() ),*] };
         let flags = flags.iter().map(|flag| quote! { #flag_path::#flag });
         let idxs = 0..flags.len();
         res.push(parse_quote! {
         impl Dialog for #flag_path {
             fn read_value(dep: u32) -> Self {
-                let selections = proxy::util::dialog::read_multi_select(dep, &format!("Select flags for {}", stringify!(#flag_path)), &#flag_names);
+                let selections = proxy::util::dialog::read_multi_select(dep, &format!("Select flags for {}", #flag_wit_name), &#flag_names);
                 let mut res = #flag_path::empty();
                 for idx in selections {
                     match idx as usize {
@@ -188,7 +201,7 @@ impl Trait for DialogTrait {
           }
           impl<T: Dialog> Dialog for Option<T> {
               fn read_value(dep: u32) -> Self {
-                  let selection = proxy::util::dialog::read_select(dep, "Select None or Some", &["None".to_string(), "Some".to_string()]);
+                  let selection = proxy::util::dialog::read_select(dep, "Select an option tag", &["none".to_string(), "some".to_string()]);
                   if selection == 0 {
                       None
                   } else {
