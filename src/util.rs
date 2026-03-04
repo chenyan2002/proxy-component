@@ -2,8 +2,9 @@ use crate::codegen::{self, ItemFlag, TypeInfo};
 use heck::ToKebabCase;
 use quote::ToTokens;
 use std::borrow::Cow;
+use std::collections::{BTreeMap, BTreeSet};
 use syn::{FnArg, Ident, Item, Signature, Type, Visibility, parse_quote, visit_mut::VisitMut};
-
+use wit_bindgen_core::wit_parser::{PackageId, Resolve};
 pub struct FullTypePath<'a> {
     pub module_path: &'a [String],
 }
@@ -76,13 +77,6 @@ pub fn get_return_type(ret: &syn::ReturnType) -> Option<Type> {
 pub fn extract_arg_info(sig: &Signature) -> (Option<ResourceFuncKind>, Vec<ArgInfo>) {
     let mut kind = None;
     let mut arg_infos = Vec::new();
-    if sig.ident == "new"
-        && sig.inputs.is_empty()
-        && let Some(Type::Path(path)) = get_return_type(&sig.output)
-        && path.path.is_ident("Self")
-    {
-        return (Some(ResourceFuncKind::Constructor), arg_infos);
-    }
     for arg in sig.inputs.iter() {
         match arg {
             FnArg::Receiver(_) => {
@@ -102,6 +96,12 @@ pub fn extract_arg_info(sig: &Signature) -> (Option<ResourceFuncKind>, Vec<ArgIn
                 });
             }
         }
+    }
+    if sig.ident == "new"
+        && let Some(Type::Path(path)) = get_return_type(&sig.output)
+        && path.path.is_ident("Self")
+    {
+        kind = Some(ResourceFuncKind::Constructor);
     }
     (kind, arg_infos)
 }
@@ -433,4 +433,22 @@ fn is_keyword(name: &str) -> bool {
             | "error-context"
             | "async"
     )
+}
+
+/// Return the set of package ids that will have version suffix in the wit-bindgen
+/// Use the same logic as in https://github.com/bytecodealliance/wit-bindgen/blob/main/crates/core/src/path.rs
+pub fn package_with_version(resolve: &Resolve) -> BTreeSet<PackageId> {
+    let mut seen: BTreeMap<(String, String), Vec<PackageId>> = BTreeMap::new();
+    for (id, p) in resolve.packages.iter() {
+        seen.entry((p.name.namespace.clone(), p.name.name.clone()))
+            .or_default()
+            .push(id);
+    }
+    let mut res = BTreeSet::new();
+    for (_, ids) in seen {
+        if ids.len() > 1 {
+            res.extend(ids);
+        }
+    }
+    res
 }

@@ -266,6 +266,7 @@ impl<'a> Opt<'a> {
     pub fn generate_wrapped_wits(&self, dir: &std::path::Path) -> Result<()> {
         let mut resolve = Resolve::default();
         let (main_id, _files) = resolve.push_dir(dir)?;
+        let has_version = package_with_version(&resolve);
         // Generate conversion interface. Not updating resolve to avoid deep cloning the packages.
         let mut resources = BTreeMap::new();
         for (_, iface) in resolve.interfaces.iter().filter(|(_, iface)| {
@@ -279,13 +280,17 @@ impl<'a> Opt<'a> {
                 if matches!(ty.kind, TypeDefKind::Resource) {
                     let mut resource =
                         format!("{}:{}/{}", pkg_name.namespace, pkg_name.name, iface_name);
-                    let resource_no_ver = resource.clone();
+                    let mut bindgen_name = format!("{}:{}", pkg_name.namespace, pkg_name.name);
                     if let Some(ver) = &pkg_name.version {
                         resource.push_str(&format!("@{ver}"));
+                        if has_version.contains(&pkg_id) {
+                            bindgen_name.push_str(&format!("{ver}"));
+                        }
                     }
+                    bindgen_name.push_str(&format!("/{}", iface_name));
                     assert!(
                         resources
-                            .insert(*ty_id, (ty_name, resource, resource_no_ver))
+                            .insert(*ty_id, (ty_name, resource, bindgen_name))
                             .is_none()
                     );
                 }
@@ -293,9 +298,9 @@ impl<'a> Opt<'a> {
         }
         let mut out = Source::default();
         out.push_str("package proxy:conversion;\ninterface conversion {");
-        for (resource, iface, iface_no_ver) in resources.into_values() {
+        for (resource, iface, bindgen_name) in resources.into_values() {
             use heck::ToKebabCase;
-            let func_name = format!("{iface_no_ver}-{resource}").to_kebab_case();
+            let func_name = format!("{bindgen_name}-{resource}").to_kebab_case();
             match self.mode {
                 Mode::Record => {
                     out.push_str(&format!(
@@ -313,7 +318,7 @@ impl<'a> Opt<'a> {
                 }
                 Mode::Replay | Mode::Fuzz | Mode::Dialog => {
                     // Add a magic separator so that codegen::generate_conversion_func can recover the resource name
-                    let magic_name = format!("{iface_no_ver}-magic42-{resource}").to_kebab_case();
+                    let magic_name = format!("{bindgen_name}-magic42-{resource}").to_kebab_case();
                     out.push_str(&format!("\nuse {iface}.{{{resource} as {func_name}}};\n"));
                     out.push_str(&format!(
                         "get-mock-{magic_name}: func(handle: u32) -> {func_name};\n"
@@ -339,11 +344,12 @@ impl<'a> Opt<'a> {
             for (id, pkg) in resolve.packages.iter().filter(|(id, _)| *id != main_id) {
                 let mut printer = WitPrinter::default();
                 printer.print_package(&resolve, id, true)?;
-                std::fs::write(
-                    dir.join("deps")
-                        .join(format!("wrapped-{}.wit", pkg.name.name)),
-                    printer.output.to_string(),
-                )?;
+                let filename = if let Some(ver) = &pkg.name.version {
+                    format!("wrapped-{}@{}.wit", pkg.name.name, ver)
+                } else {
+                    format!("wrapped-{}.wit", pkg.name.name)
+                };
+                std::fs::write(dir.join("deps").join(&filename), printer.output.to_string())?;
             }
         }
         Ok(())
