@@ -265,8 +265,8 @@ impl<'a> Opt<'a> {
 
     pub fn generate_wrapped_wits(&self, dir: &std::path::Path) -> Result<()> {
         let mut resolve = Resolve::default();
-        let has_version = package_with_version(&resolve);
         let (main_id, _files) = resolve.push_dir(dir)?;
+        let has_version = package_with_version(&resolve);
         // Generate conversion interface. Not updating resolve to avoid deep cloning the packages.
         let mut resources = BTreeMap::new();
         for (_, iface) in resolve.interfaces.iter().filter(|(_, iface)| {
@@ -280,15 +280,14 @@ impl<'a> Opt<'a> {
                 if matches!(ty.kind, TypeDefKind::Resource) {
                     let mut resource =
                         format!("{}:{}/{}", pkg_name.namespace, pkg_name.name, iface_name);
-                    let resource_no_ver = resource.clone();
+                    let mut bindgen_name = format!("{}:{}", pkg_name.namespace, pkg_name.name);
                     if let Some(ver) = &pkg_name.version {
                         resource.push_str(&format!("@{ver}"));
+                        if has_version.contains(&pkg_id) {
+                            bindgen_name.push_str(&format!("{ver}"));
+                        }
                     }
-                    let bindgen_name = if has_version.contains(&pkg_id) {
-                        resource.clone()
-                    } else {
-                        resource_no_ver
-                    };
+                    bindgen_name.push_str(&format!("/{}", iface_name));
                     assert!(
                         resources
                             .insert(*ty_id, (ty_name, resource, bindgen_name))
