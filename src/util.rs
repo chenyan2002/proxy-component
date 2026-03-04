@@ -77,13 +77,6 @@ pub fn get_return_type(ret: &syn::ReturnType) -> Option<Type> {
 pub fn extract_arg_info(sig: &Signature) -> (Option<ResourceFuncKind>, Vec<ArgInfo>) {
     let mut kind = None;
     let mut arg_infos = Vec::new();
-    if sig.ident == "new"
-        && sig.inputs.is_empty()
-        && let Some(Type::Path(path)) = get_return_type(&sig.output)
-        && path.path.is_ident("Self")
-    {
-        return (Some(ResourceFuncKind::Constructor), arg_infos);
-    }
     for arg in sig.inputs.iter() {
         match arg {
             FnArg::Receiver(_) => {
@@ -103,6 +96,12 @@ pub fn extract_arg_info(sig: &Signature) -> (Option<ResourceFuncKind>, Vec<ArgIn
                 });
             }
         }
+    }
+    if sig.ident == "new"
+        && let Some(Type::Path(path)) = get_return_type(&sig.output)
+        && path.path.is_ident("Self")
+    {
+        kind = Some(ResourceFuncKind::Constructor);
     }
     (kind, arg_infos)
 }

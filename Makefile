@@ -13,6 +13,7 @@ test: test-fuzz test-record test-dialog
 
 test-fuzz:
 	$(MAKE) run-fuzz WASM=tests/calculator.wasm
+	$(MAKE) run-fuzz WASM=tests/wasi_http.wasm
 	# build-only test
 	target/release/proxy-component instrument -m fuzz tests/rust.wasm
 	target/release/proxy-component instrument -m fuzz tests/go.wasm
@@ -28,6 +29,8 @@ test-record:
 	# build-only test
 	target/release/proxy-component instrument -m record tests/calculator.wasm
 	target/release/proxy-component instrument -m replay tests/calculator.wasm
+	target/release/proxy-component instrument -m record tests/wasi_http.wasm
+	target/release/proxy-component instrument -m replay tests/wasi_http.wasm
 
 test-dialog:
 	rm tests/composed.wasm || true
