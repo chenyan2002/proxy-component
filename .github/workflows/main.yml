@@ -22,6 +22,8 @@ jobs:
           version: 1.94.0
       - uses: bytecodealliance/actions/wasmtime/setup@v1
       - uses: bytecodealliance/actions/wasm-tools/setup@v1
+        with:
+          version: 1.245.0
       - uses: bytecodealliance/actions/wit-bindgen/setup@v1
         with:
           version: ${{ env.WIT_BINDGEN_VERSION }}
