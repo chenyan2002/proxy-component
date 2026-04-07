@@ -236,8 +236,14 @@ impl Trait for DialogTrait {
           }
           impl Dialog for MockedResource {
               fn read_value(_dep: u32) -> Self {
+                  let handle = HANDLE_ID.with(|id| {
+                        let mut id = id.borrow_mut();
+                        let current_id = *id;
+                        *id += 1;
+                        current_id
+                  });
                   Self {
-                      handle: 42,
+                      handle,
                       name: "mocked-resource".to_string(),
                   }
               }

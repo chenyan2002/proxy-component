@@ -14,6 +14,7 @@ pub struct Opt<'a> {
     imports: LinkInfo,
     exports: LinkInfo,
     main: LinkInfo,
+    need_debug: bool,
 }
 #[derive(Default)]
 struct LinkInfo {
@@ -37,6 +38,7 @@ impl<'a> Opt<'a> {
             imports: LinkInfo::default(),
             exports: LinkInfo::default(),
             main: LinkInfo::default(),
+            need_debug: false,
         }
     }
     fn generate_main_wit(&mut self, resolve: &Resolve, id: WorldId, files: &mut Files) {
@@ -162,7 +164,9 @@ impl<'a> Opt<'a> {
         self.load_exports(exports_wasm)?;
         let mut out = Source::default();
         out.push_str("package component:composed;\n");
-        out.push_str("let debug = new import:debug { ... };\n");
+        if self.need_debug {
+            out.push_str("let debug = new import:debug { ... };\n");
+        }
         if !self.args.use_host_recorder {
             out.push_str("let recorder = new import:recorder { ... };\n");
         }
@@ -362,7 +366,10 @@ impl<'a> Opt<'a> {
                 WorldItem::Interface { .. } => {
                     let name = resolve.name_world_key(name);
                     let link_type = match name.as_str() {
-                        "proxy:util/debug" => LinkType::Debug,
+                        "proxy:util/debug" => {
+                            self.need_debug = true;
+                            LinkType::Debug
+                        }
                         "proxy:util/dialog" => LinkType::Host,
                         name if name.starts_with("proxy:recorder/") => LinkType::Recorder,
                         _ => LinkType::Host,
@@ -382,7 +389,10 @@ impl<'a> Opt<'a> {
                 WorldItem::Interface { .. } => {
                     let name = resolve.name_world_key(name);
                     let link_type = match name.as_str() {
-                        "proxy:util/debug" => LinkType::Debug,
+                        "proxy:util/debug" => {
+                            self.need_debug = true;
+                            LinkType::Debug
+                        }
                         "proxy:conversion/conversion" => LinkType::Imports,
                         "proxy:util/dialog" => LinkType::Host,
                         name if name.starts_with("proxy:recorder/") => LinkType::Recorder,
