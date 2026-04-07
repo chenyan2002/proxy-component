@@ -10,7 +10,7 @@ jobs:
     name: Build and Test
     runs-on: ubuntu-latest
     env:
-      WIT_BINDGEN_VERSION: 0.53.1
+      WIT_BINDGEN_VERSION: 0.55.0
       WAC_VERSION: 0.9.0
       VICEROY_VERSION: 0.16.4
     steps:
