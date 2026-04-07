@@ -38,7 +38,7 @@ impl<'a> Opt<'a> {
             imports: LinkInfo::default(),
             exports: LinkInfo::default(),
             main: LinkInfo::default(),
-            need_debug: false,
+            need_debug: true,
         }
     }
     fn generate_main_wit(&mut self, resolve: &Resolve, id: WorldId, files: &mut Files) {
