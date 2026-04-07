@@ -12,18 +12,20 @@ jobs:
     env:
       WIT_BINDGEN_VERSION: 0.53.1
       WAC_VERSION: 0.9.0
-      VICEROY_VERSION: 0.16.5
+      VICEROY_VERSION: 0.16.4
     steps:
       - uses: actions/checkout@v5
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: wasm32-unknown-unknown, wasm32-wasip2
           components: rustfmt, clippy
-          version: 1.94.0
+          version: 1.93.1
       - uses: bytecodealliance/actions/wasmtime/setup@v1
+        with:
+          version: 42.0.1
       - uses: bytecodealliance/actions/wasm-tools/setup@v1
         with:
-          version: 1.245.0
+          version: 1.245.1
       - uses: bytecodealliance/actions/wit-bindgen/setup@v1
         with:
           version: ${{ env.WIT_BINDGEN_VERSION }}
