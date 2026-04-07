@@ -19,7 +19,7 @@ jobs:
         with:
           target: wasm32-unknown-unknown, wasm32-wasip2
           components: rustfmt, clippy
-          toolchain: 1.93.0
+          toolchain: 1.94.0
       - uses: bytecodealliance/actions/wasmtime/setup@v1
       - uses: bytecodealliance/actions/wasm-tools/setup@v1
       - uses: bytecodealliance/actions/wit-bindgen/setup@v1
