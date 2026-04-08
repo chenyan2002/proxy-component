@@ -68,6 +68,7 @@ impl<'a> Opt<'a> {
                     let name = resolve.name_world_key(name);
                     // Don't virtualize util imports
                     if name.starts_with("proxy:util/") {
+                        self.need_debug = true;
                         self.main.imports.insert(name.clone(), LinkType::Debug);
                         out.push_str(&format!("import {name};\n"));
                         continue;
