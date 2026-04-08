@@ -12,7 +12,7 @@ jobs:
     env:
       WIT_BINDGEN_VERSION: 0.55.0
       WAC_VERSION: 0.9.0
-      VICEROY_VERSION: 0.16.5
+      VICEROY_VERSION: 0.16.4
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
