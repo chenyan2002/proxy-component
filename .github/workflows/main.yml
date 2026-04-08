@@ -21,8 +21,6 @@ jobs:
           components: rustfmt, clippy
           toolchain: 1.93.1   # Pin to 1.93 to use WASI 0.2.6, before viceroy catches up to 0.2.9
       - uses: bytecodealliance/actions/wasmtime/setup@v1
-        with:
-          version: 40.0.0
       - uses: bytecodealliance/actions/wasm-tools/setup@v1
       - uses: bytecodealliance/actions/wit-bindgen/setup@v1
         with:
