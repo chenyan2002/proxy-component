@@ -19,7 +19,7 @@ jobs:
         with:
           target: wasm32-unknown-unknown, wasm32-wasip2
           components: rustfmt, clippy
-          toolchain: 1.93.1   # Pin to 1.93 to use WASI 0.2.6, before viceroy catches up to 0.2.9
+          toolchain: 1.92.0   # Pin to 1.93 to use WASI 0.2.6, before viceroy catches up to 0.2.9
       - uses: bytecodealliance/actions/wasmtime/setup@v1
       - uses: bytecodealliance/actions/wasm-tools/setup@v1
       - uses: bytecodealliance/actions/wit-bindgen/setup@v1
