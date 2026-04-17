@@ -138,7 +138,7 @@ fn bindgen(
         .arg("--world")
         .arg(world_name)
         .arg("--generate-all")
-        //.arg("--merge-structurally-equal-types=true")
+        .arg("--merge-structurally-equal-types=true")
         .arg("--out-dir")
         .arg(&out_dir)
         .status()?;
