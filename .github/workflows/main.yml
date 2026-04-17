@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     name: Build and Test
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     env:
       WIT_BINDGEN_VERSION: 0.55.0
       WAC_VERSION: 0.9.0
