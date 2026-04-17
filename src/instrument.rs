@@ -17,8 +17,12 @@ pub struct InstrumentArgs {
     /// Whether to use the host recorder implementation or link the recorder component
     #[arg(long)]
     pub use_host_recorder: bool,
+    /// Whether to use a one-byte page size for the wasm component
+    #[arg(long, default_value_t = true)]
+    pub one_byte_page_size: bool,
 }
 
+// TODO: Add one-byte and regular page size wasm binaries
 const DEBUG_WASM: &[u8] = include_bytes!("../assets/debug.wasm");
 const RECORDER_WASM: &[u8] = include_bytes!("../assets/recorder.wasm");
 
@@ -63,10 +67,27 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     }
 
     // 5. Generate Rust binding for both import and export interface
-    bindgen(&tmp_dir, &wit_dir, &args.mode, "imports", "record_imports")?;
-    bindgen(&tmp_dir, &wit_dir, &args.mode, "exports", "record_exports")?;
+    bindgen(
+        &tmp_dir,
+        &wit_dir,
+        &args.mode,
+        "imports",
+        "record_imports",
+        args.one_byte_page_size,
+    )?;
+    bindgen(
+        &tmp_dir,
+        &wit_dir,
+        &args.mode,
+        "exports",
+        "record_exports",
+        args.one_byte_page_size,
+    )?;
     // 6. cargo build
     let mut cmd = Command::new("cargo");
+    if args.one_byte_page_size {
+        cmd.env("RUSTFLAGS", "-C link-arg=--page-size=1");
+    }
     cmd.arg("build")
         .arg("--target=wasm32-unknown-unknown")
         .current_dir(tmp_dir.as_path());
@@ -128,6 +149,7 @@ fn bindgen(
     mode: &Mode,
     world_name: &str,
     dest_name: &str,
+    use_custom_allocator: bool,
 ) -> Result<()> {
     let out_dir = tmp_dir.join(dest_name);
     let status = Command::new("wit-bindgen")
@@ -154,6 +176,7 @@ fn bindgen(
         bindings: binding_file.clone(),
         output_file: out_dir.join("lib.rs"),
         mode: codegen_mode,
+        use_custom_allocator,
     };
     codegen_opt.generate()?;
     let status = Command::new("mv")

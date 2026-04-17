@@ -9,3 +9,4 @@ crate-type = ["cdylib"]
 [dependencies]
 wit-bindgen.workspace = true
 getrandom = "0.3"
+talc = "5.0.3"
