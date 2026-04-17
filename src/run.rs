@@ -74,6 +74,7 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
     let mut config = Config::new();
     config
         .consume_fuel(true)
+        .wasm_custom_page_sizes(true)
         //.debug_info(true)
         .wasm_backtrace_details(WasmBacktraceDetails::Enable);
     let engine = Engine::new(&config)?;

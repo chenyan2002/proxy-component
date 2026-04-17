@@ -10,3 +10,4 @@ crate-type = ["cdylib"]
 trace = { path = "../../crates/trace" }
 serde_json.workspace = true
 wit-bindgen.workspace = true
+talc = "5.0.3"
