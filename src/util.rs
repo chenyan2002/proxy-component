@@ -493,6 +493,31 @@ pub fn extract_wit(wasm_file: &Path, out_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Generate Rust bindings from WIT definitions.
+/// Equivalent to `wit-bindgen rust <wit_dir> --world <world_name> --generate-all --merge-structurally-equal-types=true --out-dir <out_dir>`.
+pub fn generate_bindings(wit_dir: &Path, world_name: &str, out_dir: &Path) -> Result<()> {
+    use wit_bindgen_core::{Files, WorldGenerator};
+    let mut resolve = Resolve::default();
+    let (pkg, _) = resolve.push_dir(wit_dir)?;
+    let world = resolve.select_world(&[pkg], Some(world_name))?;
+
+    let opts = wit_bindgen_rust::Opts {
+        generate_all: true,
+        merge_structurally_equal_types: Some(Some(true)),
+        ..Default::default()
+    };
+    let mut generator = opts.build();
+    let mut files = Files::default();
+    generator.generate(&mut resolve, world, &mut files)?;
+
+    std::fs::create_dir_all(out_dir)?;
+    for (name, content) in files.iter() {
+        let path = out_dir.join(name);
+        std::fs::write(&path, content)?;
+    }
+    Ok(())
+}
+
 /// Return the set of package ids that will have version suffix in the wit-bindgen
 /// Use the same logic as in https://github.com/bytecodealliance/wit-bindgen/blob/main/crates/core/src/path.rs
 pub fn package_with_version(resolve: &Resolve) -> BTreeSet<PackageId> {

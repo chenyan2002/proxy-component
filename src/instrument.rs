@@ -32,6 +32,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     let wit_dir = tmp_dir.join("wit");
 
     // 2. Extract WIT from the wasm component into {tmp_dir/wit}
+    // TODO: no need to write to disk
     crate::util::extract_wit(&args.wasm_file, &wit_dir)?;
 
     // 3. Parse the main wit file from tmp_dir/wit and feed into opts.generate_component
@@ -123,19 +124,7 @@ fn bindgen(
     dest_name: &str,
 ) -> Result<()> {
     let out_dir = tmp_dir.join(dest_name);
-    let status = Command::new("wit-bindgen")
-        //let status =
-        //    Command::new("/Users/chenyan/src/bytecodealliance/wit-bindgen/target/debug/wit-bindgen")
-        .arg("rust")
-        .arg(wit_dir)
-        .arg("--world")
-        .arg(world_name)
-        .arg("--generate-all")
-        .arg("--merge-structurally-equal-types=true")
-        .arg("--out-dir")
-        .arg(&out_dir)
-        .status()?;
-    assert!(status.success());
+    crate::util::generate_bindings(wit_dir, world_name, &out_dir)?;
     let binding_file = out_dir.join(world_name.to_owned() + ".rs");
     let codegen_mode = match mode {
         Mode::Record => codegen::GenerateMode::Record,
