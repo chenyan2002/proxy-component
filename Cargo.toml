@@ -4,7 +4,7 @@ members = [
   "components/recorder"
 , "crates/dialog", "crates/trace"]
 [workspace.dependencies]
-wit-bindgen = { version = "0.52.0", default-features = false, features = ["bitflags", "std", "macros"] }
+wit-bindgen = { version = "0.62.0", default-features = false, features = ["bitflags", "std", "macros"] }
 serde = { version = "1.0.226", features = ["derive"] }
 serde_json = "1.0.145"
 wasm-wave = { git = "https://github.com/chenyan2002/wasm-tools.git", branch = "extend-wave", version = "0.239.0", default-features = false }
@@ -24,8 +24,9 @@ quote = "1.0.41"
 proc-macro2 = "1.0.103"
 syn = { version = "2.0.108", features = ["visit-mut"] }
 tempfile = "3.20.0"
-wit-bindgen-core = "0.53.1"
-wit-component = "0.245.0"
+wit-bindgen-core = "0.62.0"
+wit-bindgen-rust = "0.62.0"
+wit-component = "0.259.0"
 
 wasmtime = { version = "42.0.0", features = ["wave"], optional = true }
 wasmtime-wasi = { version = "42.0.0", optional = true }
