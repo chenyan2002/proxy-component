@@ -22,6 +22,8 @@ pub struct GenerateArgs {
     /// The path to the output file.
     #[arg(short, long, default_value("lib.rs"))]
     pub output_file: PathBuf,
+    #[arg(long)]
+    pub use_custom_allocator: bool,
 }
 #[derive(clap::ValueEnum, clap::Parser, Clone)]
 pub enum GenerateMode {
@@ -84,7 +86,19 @@ impl GenerateArgs {
         let traits = trait_generator.generate();
         drop(trait_generator);
         state.output.extend(traits);
-        let file = state.into_output_file();
+        let mut file = state.into_output_file();
+        if self.use_custom_allocator {
+            file.items.push(parse_quote! {
+                #[cfg(all(not(target_feature = "atomics"), target_family = "wasm"))]
+                #[global_allocator]
+                static TALC: talc::wasm::WasmArenaTalc = {
+                    use core::mem::MaybeUninit;
+                    static mut MEMORY: [MaybeUninit<u8>; 0x80000] = [MaybeUninit::uninit(); 0x80000];
+                    // SAFETY: the memory for MEMORY is never modified externally. It's the allocator's.
+                    unsafe { talc::wasm::new_wasm_arena_allocator(&raw mut MEMORY) }
+                };
+            });
+        }
         let output = prettyplease::unparse(&file);
         std::fs::write(&self.output_file, output)?;
         Ok(())

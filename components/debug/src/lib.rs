@@ -1,3 +1,12 @@
+#[cfg(all(not(target_feature = "atomics"), target_family = "wasm"))]
+#[global_allocator]
+static TALC: talc::wasm::WasmArenaTalc = {
+    use core::mem::MaybeUninit;
+    static mut MEMORY: [MaybeUninit<u8>; 0x80000] = [MaybeUninit::uninit(); 0x80000];
+    // SAFETY: the memory for MEMORY is never modified externally. It's the allocator's.
+    unsafe { talc::wasm::new_wasm_arena_allocator(&raw mut MEMORY) }
+};
+
 mod bindings {
     wit_bindgen::generate!({
         path: "../../assets/util.wit",
