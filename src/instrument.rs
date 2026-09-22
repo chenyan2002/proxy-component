@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use wit_bindgen_core::{Files, wit_parser};
+use wit_component::{ComponentEncoder, embed_component_metadata};
 use wit_parser::{Resolve, WorldId};
 
 #[derive(Parser)]
@@ -30,16 +31,8 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     let tmp_dir = init_rust_project()?;
     let wit_dir = tmp_dir.join("wit");
 
-    // 2. run `wasm-tools component wit {wasm_file from CLI} --out-dir {tmp_dir/wit}`
-    let status = Command::new("wasm-tools")
-        .arg("component")
-        .arg("wit")
-        .arg(&args.wasm_file)
-        .arg("--out-dir")
-        .arg(&wit_dir)
-        .status()
-        .context("Failed to execute wasm-tools. Is it installed and in your PATH?")?;
-    assert!(status.success());
+    // 2. Extract WIT from the wasm component into {tmp_dir/wit}
+    crate::util::extract_wit(&args.wasm_file, &wit_dir)?;
 
     // 3. Parse the main wit file from tmp_dir/wit and feed into opts.generate_component
     let (resolve, world) = parse_wit(&wit_dir, None)?;
@@ -156,11 +149,7 @@ fn bindgen(
         mode: codegen_mode,
     };
     codegen_opt.generate()?;
-    let status = Command::new("mv")
-        .arg(&binding_file)
-        .arg(out_dir.join("bindings.rs"))
-        .status()?;
-    assert!(status.success());
+    fs::rename(&binding_file, out_dir.join("bindings.rs"))?;
     Ok(())
 }
 fn component_new(
@@ -173,25 +162,21 @@ fn component_new(
         .join("target/wasm32-unknown-unknown/")
         .join(wasm_file);
     let world = "component:proxy/".to_string() + world_name;
-    let status = Command::new("wasm-tools")
-        .arg("component")
-        .arg("embed")
-        .arg(wit_dir)
-        .arg(&wasm_path)
-        .arg("-o")
-        .arg(&wasm_path)
-        .arg("--world")
-        .arg(&world)
-        .status()?;
-    assert!(status.success());
-    let status = Command::new("wasm-tools")
-        .arg("component")
-        .arg("new")
-        .arg(&wasm_path)
-        .arg("-o")
-        .arg(&wasm_path)
-        .status()?;
-    assert!(status.success());
+    // embed component type metadata
+    let mut wasm = fs::read(&wasm_path)?;
+    let (resolve, world_id) = parse_wit(wit_dir, Some(&world))?;
+    embed_component_metadata(
+        &mut wasm,
+        &resolve,
+        world_id,
+        wit_component::StringEncoding::UTF8,
+    )?;
+    // create component from the embedded module
+    let component = ComponentEncoder::default()
+        .module(&wasm)?
+        .encode()
+        .context("failed to encode a component from module")?;
+    fs::write(&wasm_path, component)?;
     Ok(wasm_path)
 }
 fn init_rust_project() -> Result<PathBuf> {
