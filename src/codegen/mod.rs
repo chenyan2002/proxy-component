@@ -152,7 +152,10 @@ impl State {
                     methods.push(syn::ImplItem::Type(impl_item));
                 }
                 TraitItem::Fn(method) => {
-                    if method.sig.ident.to_string().starts_with("_resource_") {
+                    let method_name = method.sig.ident.to_string();
+                    if method_name.starts_with("_resource_")
+                        || (method_name.starts_with("resource") && method_name.ends_with("_"))
+                    {
                         continue;
                     }
                     let mut sig = method.sig.clone();

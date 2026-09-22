@@ -62,7 +62,7 @@ impl Trait for ProxyTrait<'_> {
                 impl<'a> ToProxy for &'a #resource_path {
                   type Output = #export_borrow;
                   fn to_proxy(self) -> Self::Output {
-                    unsafe { Self::Output::lift(self as *const _ as usize) }
+                    unsafe { Self::Output::lift(self as *const _ as *const u8) }
                   }
                 }});
             }
