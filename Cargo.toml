@@ -4,7 +4,7 @@ members = [
   "components/recorder"
 , "crates/dialog", "crates/trace"]
 [workspace.dependencies]
-wit-bindgen = { version = "0.52.0", default-features = false, features = ["bitflags", "std", "macros"] }
+wit-bindgen = { version = "0.62.0", default-features = false, features = ["bitflags", "std", "macros"] }
 serde = { version = "1.0.226", features = ["derive"] }
 serde_json = "1.0.145"
 wasm-wave = { git = "https://github.com/chenyan2002/wasm-tools.git", branch = "extend-wave", version = "0.239.0", default-features = false }
