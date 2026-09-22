@@ -4,8 +4,8 @@ all: build-components build-cli
 build-cli:
 	cargo build --all-features --release
 build-components:
-	RUSTFLAGS="-C link-arg=--page-size=1" cargo build -p debug --target wasm32-wasip2 --release
-	RUSTFLAGS="-C link-arg=--page-size=1" cargo build -p recorder --target wasm32-wasip2 --release
+	RUSTFLAGS="-C link-arg=--page-size=1 -C link-arg=--adapt=assets/wasi_snapshot_preview1.reactor.one_byte_page.wasm" cargo build -p debug --target wasm32-wasip2 --release
+	RUSTFLAGS="-C link-arg=--page-size=1 -C link-arg=--adapt=assets/wasi_snapshot_preview1.reactor.one_byte_page.wasm" cargo build -p recorder --target wasm32-wasip2 --release
 	cp target/wasm32-wasip2/release/debug.wasm assets/debug.wasm
 	cp target/wasm32-wasip2/release/recorder.wasm assets/recorder.wasm
 
