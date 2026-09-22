@@ -26,6 +26,8 @@ pub struct InstrumentArgs {
 // TODO: Add one-byte and regular page size wasm binaries
 const DEBUG_WASM: &[u8] = include_bytes!("../assets/debug.wasm");
 const RECORDER_WASM: &[u8] = include_bytes!("../assets/recorder.wasm");
+const WASI_ADAPTER_ONE_BYTE_PAGE: &[u8] =
+    include_bytes!("../assets/wasi_snapshot_preview1.reactor.one_byte_page.wasm");
 
 pub fn run(args: InstrumentArgs) -> Result<()> {
     if args.use_host_recorder && !matches!(args.mode, Mode::Record | Mode::Replay) {
@@ -88,10 +90,20 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     let status = cmd.status()?;
     assert!(status.success());
 
-    let exports_wasm_path =
-        component_new(&tmp_dir, &wit_dir, "exports", "debug/record_exports.wasm")?;
-    let imports_wasm_path =
-        component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
+    let exports_wasm_path = component_new(
+        &tmp_dir,
+        &wit_dir,
+        "exports",
+        "debug/record_exports.wasm",
+        args.one_byte_page_size,
+    )?;
+    let imports_wasm_path = component_new(
+        &tmp_dir,
+        &wit_dir,
+        "imports",
+        "debug/record_imports.wasm",
+        args.one_byte_page_size,
+    )?;
     // 7. run wac
     opts.generate_wac(&imports_wasm_path, &exports_wasm_path, &wit_dir)?;
     let output_file = "composed.wasm";
@@ -169,6 +181,7 @@ fn component_new(
     wit_dir: &Path,
     world_name: &str,
     wasm_file: &str,
+    one_byte_page_size: bool,
 ) -> Result<PathBuf> {
     let wasm_path = tmp_dir
         .join("target/wasm32-unknown-unknown/")
@@ -184,8 +197,12 @@ fn component_new(
         wit_component::StringEncoding::UTF8,
     )?;
     // create component from the embedded module
-    let component = ComponentEncoder::default()
-        .module(&wasm)?
+    let mut encoder = ComponentEncoder::default();
+    encoder.module(&wasm)?;
+    if one_byte_page_size {
+        encoder.adapter("wasi_snapshot_preview1", WASI_ADAPTER_ONE_BYTE_PAGE)?;
+    }
+    let component = encoder
         .encode()
         .context("failed to encode a component from module")?;
     fs::write(&wasm_path, component)?;
