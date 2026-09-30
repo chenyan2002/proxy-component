@@ -1,3 +1,5 @@
+extern crate libc_alloc;
+
 #[cfg(all(not(target_feature = "atomics"), target_family = "wasm"))]
 #[global_allocator]
 static TALC: talc::wasm::WasmArenaTalc = {

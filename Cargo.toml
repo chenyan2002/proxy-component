@@ -2,7 +2,7 @@
 members = [
   "components/debug",
   "components/recorder"
-, "crates/dialog", "crates/trace"]
+, "crates/dialog", "crates/libc-alloc", "crates/trace"]
 [workspace.dependencies]
 wit-bindgen = { version = "0.62.0", default-features = false, features = ["bitflags", "std", "macros"] }
 serde = { version = "1.0.226", features = ["derive"] }

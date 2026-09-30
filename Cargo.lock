@@ -566,6 +566,7 @@ name = "debug"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
+ "libc-alloc",
  "talc",
  "wit-bindgen 0.62.0",
 ]
@@ -1201,6 +1202,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6800badb6cb2082ffd7b6a67e6125bb39f18782f793520caee8cb8846be06112"
 
 [[package]]
+name = "libc-alloc"
+version = "0.1.0"
+
+[[package]]
 name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1584,6 +1589,7 @@ dependencies = [
 name = "recorder"
 version = "0.1.0"
 dependencies = [
+ "libc-alloc",
  "serde_json",
  "talc",
  "trace",
