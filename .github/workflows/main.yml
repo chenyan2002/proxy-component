@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       WAC_VERSION: 0.9.0
-      VICEROY_VERSION: 0.16.4
+      VICEROY_VERSION: 0.16.5
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
