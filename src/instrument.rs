@@ -18,10 +18,16 @@ pub struct InstrumentArgs {
     /// Whether to use the host recorder implementation or link the recorder component
     #[arg(long)]
     pub use_host_recorder: bool,
+    /// Whether to use a one-byte page size for the wasm component
+    #[arg(long, default_value_t = true)]
+    pub one_byte_page_size: bool,
 }
 
+// TODO: Add one-byte and regular page size wasm binaries
 const DEBUG_WASM: &[u8] = include_bytes!("../assets/debug.wasm");
 const RECORDER_WASM: &[u8] = include_bytes!("../assets/recorder.wasm");
+const WASI_ADAPTER_ONE_BYTE_PAGE: &[u8] =
+    include_bytes!("../assets/wasi_snapshot_preview1.reactor.one_byte_page.wasm");
 
 pub fn run(args: InstrumentArgs) -> Result<()> {
     if args.use_host_recorder && !matches!(args.mode, Mode::Record | Mode::Replay) {
@@ -57,20 +63,47 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     }
 
     // 5. Generate Rust binding for both import and export interface
-    bindgen(&tmp_dir, &wit_dir, &args.mode, "imports", "record_imports")?;
-    bindgen(&tmp_dir, &wit_dir, &args.mode, "exports", "record_exports")?;
+    bindgen(
+        &tmp_dir,
+        &wit_dir,
+        &args.mode,
+        "imports",
+        "record_imports",
+        args.one_byte_page_size,
+    )?;
+    bindgen(
+        &tmp_dir,
+        &wit_dir,
+        &args.mode,
+        "exports",
+        "record_exports",
+        args.one_byte_page_size,
+    )?;
     // 6. cargo build
     let mut cmd = Command::new("cargo");
+    if args.one_byte_page_size {
+        cmd.env("RUSTFLAGS", "-C link-arg=--page-size=1");
+    }
     cmd.arg("build")
         .arg("--target=wasm32-unknown-unknown")
         .current_dir(tmp_dir.as_path());
     let status = cmd.status()?;
     assert!(status.success());
 
-    let exports_wasm_path =
-        component_new(&tmp_dir, &wit_dir, "exports", "debug/record_exports.wasm")?;
-    let imports_wasm_path =
-        component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
+    let exports_wasm_path = component_new(
+        &tmp_dir,
+        &wit_dir,
+        "exports",
+        "debug/record_exports.wasm",
+        args.one_byte_page_size,
+    )?;
+    let imports_wasm_path = component_new(
+        &tmp_dir,
+        &wit_dir,
+        "imports",
+        "debug/record_imports.wasm",
+        args.one_byte_page_size,
+    )?;
     // 7. run wac
     opts.generate_wac(&imports_wasm_path, &exports_wasm_path, &wit_dir)?;
     let output_file = "composed.wasm";
@@ -122,6 +155,7 @@ fn bindgen(
     mode: &Mode,
     world_name: &str,
     dest_name: &str,
+    use_custom_allocator: bool,
 ) -> Result<()> {
     let out_dir = tmp_dir.join(dest_name);
     crate::util::generate_bindings(wit_dir, world_name, &out_dir)?;
@@ -136,6 +170,7 @@ fn bindgen(
         bindings: binding_file.clone(),
         output_file: out_dir.join("lib.rs"),
         mode: codegen_mode,
+        use_custom_allocator,
     };
     codegen_opt.generate()?;
     fs::rename(&binding_file, out_dir.join("bindings.rs"))?;
@@ -146,6 +181,7 @@ fn component_new(
     wit_dir: &Path,
     world_name: &str,
     wasm_file: &str,
+    one_byte_page_size: bool,
 ) -> Result<PathBuf> {
     let wasm_path = tmp_dir
         .join("target/wasm32-unknown-unknown/")
@@ -161,8 +197,12 @@ fn component_new(
         wit_component::StringEncoding::UTF8,
     )?;
     // create component from the embedded module
-    let component = ComponentEncoder::default()
-        .module(&wasm)?
+    let mut encoder = ComponentEncoder::default();
+    encoder.module(&wasm)?;
+    if one_byte_page_size {
+        encoder.adapter("wasi_snapshot_preview1", WASI_ADAPTER_ONE_BYTE_PAGE)?;
+    }
+    let component = encoder
         .encode()
         .context("failed to encode a component from module")?;
     fs::write(&wasm_path, component)?;

@@ -11,3 +11,4 @@ path = "lib.rs"
 wit-bindgen.workspace = true
 wasm-wave.workspace = true
 arbitrary.workspace = true
+talc.workspace = true

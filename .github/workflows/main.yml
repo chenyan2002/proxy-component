@@ -10,15 +10,15 @@ jobs:
     name: Build and Test
     runs-on: ubuntu-latest
     env:
-      WAC_VERSION: 0.9.0
-      VICEROY_VERSION: 0.16.4
+      WAC_VERSION: 0.12.0
+      VICEROY_VERSION: 0.21.1
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: wasm32-unknown-unknown, wasm32-wasip2
           components: rustfmt, clippy
-          toolchain: 1.93.1   # Pin to 1.93 to use WASI 0.2.6, before viceroy catches up to 0.2.9
+          toolchain: 1.99.0   # Pin to 1.93 to use WASI 0.2.6, before viceroy catches up to 0.2.9
       - uses: bytecodealliance/actions/wasmtime/setup@v1
       - name: Install wac
         run: |
@@ -28,16 +28,18 @@ jobs:
           mv "$tmp/wac-cli" /usr/local/bin/wac
       - name: Install viceroy
         run: |
-          tmp=$(mktemp -d)
-          curl -sLo "$tmp/viceroy.tar.gz" https://github.com/fastly/Viceroy/releases/download/v${{ env.VICEROY_VERSION }}/viceroy_v${{ env.VICEROY_VERSION }}_linux-amd64.tar.gz
-          tar -xz -f "$tmp/viceroy.tar.gz" -C "$tmp"
-          chmod a+x "$tmp/viceroy"
-          mv "$tmp/viceroy" /usr/local/bin/
+          RUSTFLAGS="--cap-lints=warn" cargo install --git https://github.com/fastly/Viceroy.git --locked viceroy
+#          tmp=$(mktemp -d)
+#          curl -sLo "$tmp/viceroy.tar.gz" https://github.com/fastly/Viceroy/releases/download/v${{ env.VICEROY_VERSION }}/viceroy_v${{ env.VICEROY_VERSION }}_linux-amd64.tar.gz
+#          tar -xz -f "$tmp/viceroy.tar.gz" -C "$tmp"
+#          chmod a+x "$tmp/viceroy"
+#          mv "$tmp/viceroy" /usr/local/bin/
       - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            ~/.cargo/bin
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
