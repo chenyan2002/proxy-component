@@ -1,10 +1,13 @@
-use crate::util::{FullTypePath, get_resource_from_trait_name, get_return_type, make_path};
+use crate::util::{
+    FullTypePath, get_resource_from_trait_name, get_return_type, make_path, toggle_wrapped_module,
+};
 use anyhow::Result;
+use heck::ToSnakeCase;
 use quote::quote;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use syn::{
-    File, Ident, Item, ItemEnum, ItemStruct, ItemTrait, Signature, TraitItem, parse_quote,
+    File, Ident, Item, ItemEnum, ItemStruct, ItemTrait, Signature, TraitItem, Type, parse_quote,
     visit_mut::VisitMut,
 };
 
@@ -53,6 +56,8 @@ pub struct State {
     pub types: BTreeMap<Vec<String>, Vec<TypeInfo>>,
     pub funcs: BTreeMap<Vec<String>, BTreeMap<Option<String>, Vec<Signature>>>,
     pub module_paths: BTreeSet<Vec<String>>,
+    /// Full path of each public type alias to its target type.
+    pub type_aliases: BTreeMap<Vec<String>, Type>,
     pub output: Vec<Item>,
 }
 pub enum TypeInfo {
@@ -77,6 +82,7 @@ impl GenerateArgs {
             types: BTreeMap::new(),
             funcs: BTreeMap::new(),
             module_paths: BTreeSet::new(),
+            type_aliases: BTreeMap::new(),
             output: Vec::new(),
         };
         state.generate_preamble();
@@ -196,16 +202,11 @@ impl State {
 
     fn generate_conversion_func(&self, sig: &Signature) -> syn::ImplItemFn {
         let func_name = &sig.ident.to_string();
-        let body = if func_name.starts_with("get_wrapped_") {
-            quote! { x.to_proxy() }
-        } else if func_name.starts_with("get_host_") {
+        let body = if func_name.starts_with("get_wrapped_") || func_name.starts_with("get_host_") {
             quote! { x.to_proxy() }
         } else if func_name.starts_with("get_mock_") {
             let resource = get_return_type(&sig.output).unwrap();
-            let name = func_name
-                .rfind("_magic42_")
-                .map(|idx| &func_name[idx + 9..])
-                .unwrap();
+            let name = self.resource_name(&resource);
             quote! {
                 #resource::new(MockedResource { handle, name: #name.to_string() })
             }
@@ -217,6 +218,31 @@ impl State {
                 #body
             }
         }
+    }
+    /// The conversion interface refers to resources through type aliases, e.g.
+    /// `WasiIoStreamsOutputStream = ...::wasi::io::streams::OutputStream`.
+    /// Returns the snake case name of the aliased resource, e.g. `output_stream`.
+    fn resource_name(&self, alias: &Type) -> String {
+        let Type::Path(alias) = alias else {
+            unreachable!()
+        };
+        let alias_path: Vec<_> = alias
+            .path
+            .segments
+            .iter()
+            .map(|s| s.ident.to_string())
+            .collect();
+        let Some(Type::Path(target)) = self.type_aliases.get(&alias_path) else {
+            panic!("{} is not a type alias", alias_path.join("::"));
+        };
+        target
+            .path
+            .segments
+            .last()
+            .unwrap()
+            .ident
+            .to_string()
+            .to_snake_case()
     }
     fn into_output_file(self) -> File {
         File {
@@ -237,9 +263,6 @@ pub fn get_proxy_path(src_path: &[String]) -> Vec<String> {
         res.insert(0, "exports".to_string());
         wrapped_idx = 1;
     }
-    match res[wrapped_idx].strip_prefix("wrapped_") {
-        Some(name) => res[wrapped_idx] = name.to_string(),
-        None => res[wrapped_idx] = "wrapped_".to_string() + &res[wrapped_idx],
-    }
+    res[wrapped_idx] = toggle_wrapped_module(&res[wrapped_idx]);
     res
 }

@@ -1,5 +1,6 @@
+use crate::codegen::State;
 use crate::traits::Trait;
-use crate::{codegen::State, util::make_path};
+use crate::util::{is_wrapped_module, make_path};
 use heck::ToSnakeCase;
 use quote::quote;
 use syn::{File, Item, ItemEnum, ItemStruct, parse_quote};
@@ -23,7 +24,7 @@ impl Trait for ProxyTrait<'_> {
         if in_import {
             let is_import_only = output_path[0] != "exports";
             if is_import_only {
-                let call = if output_path[0].starts_with("wrapped_") {
+                let call = if is_wrapped_module(&output_path[0]) {
                     "get_"
                 } else {
                     "get_host_"
