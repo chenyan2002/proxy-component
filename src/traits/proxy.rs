@@ -103,6 +103,9 @@ impl Trait for ProxyTrait<'_> {
                     fn to_proxy(self) -> Self::Output {
                         self
                     }
+                    fn vec_to_proxy(v: Vec<Self>) -> Vec<Self::Output> {
+                        v
+                    }
                 }
             }];
         }
@@ -137,6 +140,9 @@ impl Trait for ProxyTrait<'_> {
                     type Output = #enum_name #ty_generics;
                     fn to_proxy(self) -> Self::Output {
                         self
+                    }
+                    fn vec_to_proxy(v: Vec<Self>) -> Vec<Self::Output> {
+                        v
                     }
                 }
             }];
@@ -176,6 +182,9 @@ impl Trait for ProxyTrait<'_> {
                     fn to_proxy(self) -> Self::Output {
                         self
                     }
+                    fn vec_to_proxy(v: Vec<Self>) -> Vec<Self::Output> {
+                        v
+                    }
                 }
             }];
         }
@@ -192,20 +201,27 @@ impl Trait for ProxyTrait<'_> {
     }
     fn trait_defs(&self) -> Vec<Item> {
         let defs: File = parse_quote! {
-        trait ToProxy {
+        trait ToProxy: Sized {
           type Output;
           fn to_proxy(self) -> Self::Output;
+          // Identity impls override this to convert Vec<Self> without iterating.
+          fn vec_to_proxy(v: Vec<Self>) -> Vec<Self::Output> {
+              v.into_iter().map(|x| x.to_proxy()).collect()
+          }
         }
         impl crate::ToProxy for String {
             type Output = String;
             fn to_proxy(self) -> Self::Output {
                 self
             }
+            fn vec_to_proxy(v: Vec<Self>) -> Vec<Self::Output> {
+                v
+            }
         }
         impl<T: crate::ToProxy> crate::ToProxy for Vec::<T> {
             type Output = Vec::<T::Output>;
             fn to_proxy(self) -> Self::Output {
-                self.into_iter().map(|x| x.to_proxy()).collect()
+                T::vec_to_proxy(self)
             }
         }
         impl<Ok, Err> ToProxy for Result<Ok, Err>
@@ -232,6 +248,9 @@ impl Trait for ProxyTrait<'_> {
                         type Output = $t;
                         fn to_proxy(self) -> Self::Output {
                             self
+                        }
+                        fn vec_to_proxy(v: Vec<Self>) -> Vec<Self::Output> {
+                            v
                         }
                     }
                 )*
