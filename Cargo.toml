@@ -29,8 +29,8 @@ wit-bindgen-rust = "0.62.0"
 wit-component = "0.261.0"
 wit-parser = "0.261.0"
 
-wasmtime = { version = "46.0.0", features = ["wave"], optional = true }
-wasmtime-wasi = { version = "46.0.0", optional = true }
+wasmtime = { version = "49.0.2", features = ["wave"], optional = true }
+wasmtime-wasi = { version = "49.0.2", optional = true }
 dialog = { path = "crates/dialog", optional = true }
 ctrlc = "3.5.2"
 
