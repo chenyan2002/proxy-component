@@ -1,7 +1,7 @@
 use super::State;
 use crate::util::{
-    FullTypePath, ResourceFuncKind, extract_arg_info, get_owned_type, get_return_type, make_path,
-    wit_func_name,
+    FullTypePath, ResourceFuncKind, constructor_resource_name, extract_arg_info, get_owned_type,
+    get_return_type, make_path, wit_func_name,
 };
 use quote::quote;
 use syn::{Signature, parse_quote, visit_mut::VisitMut};
@@ -21,10 +21,16 @@ impl State {
             let display_name = wit_func_name(module_path, resource, func_name, &kind);
             let ret_ty = get_return_type(&sig.output);
             let replay_import = if let Some(ret_ty) = ret_ty {
+                let to_rust = match constructor_resource_name(resource, &kind) {
+                    Some(name) => {
+                        quote! { MockedResource { name: #name.to_string(), ..ret.to_rust() } }
+                    }
+                    None => quote! { ret.to_rust() },
+                };
                 quote! {
                     let wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&args)).unwrap();
                     let ret: Value = wasm_wave::from_str(&<#ret_ty as ValueTyped>::value_type(), &wave).unwrap();
-                    ret.to_rust()
+                    #to_rust
                 }
             } else {
                 quote! {

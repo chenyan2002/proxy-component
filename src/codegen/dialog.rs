@@ -1,7 +1,7 @@
 use super::State;
 use crate::util::{
-    FullTypePath, ResourceFuncKind, extract_arg_info, get_owned_type, get_return_type, make_path,
-    wit_func_name,
+    FullTypePath, ResourceFuncKind, constructor_resource_name, extract_arg_info, get_owned_type,
+    get_return_type, make_path, wit_func_name,
 };
 use quote::quote;
 use syn::{Signature, parse_quote, visit_mut::VisitMut};
@@ -26,6 +26,16 @@ impl State {
                 } else {
                     quote! { Vec::new() }
                 };
+                let (ret_name, read_ret) = match constructor_resource_name(resource, &kind) {
+                    Some(name) => (
+                        quote! { #name },
+                        quote! { MockedResource { name: #name.to_string(), ..Dialog::read_value(0) } },
+                    ),
+                    None => (
+                        quote! { <#ty as WitName>::name() },
+                        quote! { Dialog::read_value(0) },
+                    ),
+                };
                 parse_quote! {
                     #sig {
                         let mut __params: Vec<String> = #init_vec;
@@ -33,8 +43,8 @@ impl State {
                             __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*
                         proxy::util::dialog::print(0, &format!("import: {}({})", #display_name, __params.join(", ")));
-                        proxy::util::dialog::print(0, &format!("return type: {}", <#ty as WitName>::name()));
-                        let ret = Dialog::read_value(0);
+                        proxy::util::dialog::print(0, &format!("return type: {}", #ret_name));
+                        let ret = #read_ret;
                         proxy::util::dialog::print(0, &format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&ret)).unwrap()));
                         ret
                     }

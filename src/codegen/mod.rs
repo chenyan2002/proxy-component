@@ -2,7 +2,7 @@ use crate::util::{
     FullTypePath, get_resource_from_trait_name, get_return_type, make_path, toggle_wrapped_module,
 };
 use anyhow::Result;
-use heck::ToSnakeCase;
+use heck::ToKebabCase;
 use quote::quote;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -221,7 +221,7 @@ impl State {
     }
     /// The conversion interface refers to resources through type aliases, e.g.
     /// `WasiIoStreamsOutputStream = ...::wasi::io::streams::OutputStream`.
-    /// Returns the snake case name of the aliased resource, e.g. `output_stream`.
+    /// Returns the WIT name of the aliased resource, e.g. `output-stream`.
     fn resource_name(&self, alias: &Type) -> String {
         let Type::Path(alias) = alias else {
             unreachable!()
@@ -242,7 +242,7 @@ impl State {
             .unwrap()
             .ident
             .to_string()
-            .to_snake_case()
+            .to_kebab_case()
     }
     fn into_output_file(self) -> File {
         File {
