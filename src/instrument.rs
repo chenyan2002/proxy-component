@@ -44,7 +44,6 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     // 3. Parse the main wit file from tmp_dir/wit and feed into opts.generate_component
     let (resolve, world) = parse_wit(&wit_dir, None)?;
     let mut opts = crate::ast::Opt::new(&args);
-    opts.generate_wrapped_wits(&wit_dir)?;
     let mut files = Files::default();
     opts.generate_component(&resolve, world, &mut files)?;
 
@@ -55,7 +54,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     }
     // Re-generate exports world to bring in extra imports
     let (export_resolve, export_world) = parse_wit(&wit_dir, Some("tmp-exports"))?;
-    opts.generate_exports_world(&export_resolve, export_world, &mut files);
+    opts.generate_exports_world(&export_resolve, export_world, &mut files)?;
     for (name, content) in files.iter() {
         let path = wit_dir.as_path().join(name);
         eprintln!("Generating: {}", path.display());

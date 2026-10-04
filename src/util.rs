@@ -52,10 +52,7 @@ pub fn wit_func_name(
         Some(ResourceFuncKind::Method) => res.push_str("[method]"),
         _ => {}
     }
-    let nonwrapped = module_path[0]
-        .strip_prefix("wrapped_")
-        .unwrap_or(&module_path[0]);
-    res.push_str(&nonwrapped.to_kebab_case());
+    res.push_str(&unwrapped_module(&module_path[0]).to_kebab_case());
     res.push(':');
     res.push_str(&module_path[1].to_kebab_case());
     res.push('/');
@@ -376,6 +373,33 @@ fn extract_bitflag(macro_item: &syn::ItemMacro) -> Option<ItemFlag> {
         return Some(ItemFlag { name, flags });
     }
     None
+}
+
+// In record mode, the guest sees a copy of each imported package with its namespace
+// prefixed by `wrapped-` in WIT, which becomes `wrapped_` in the generated Rust modules.
+const WRAPPED_WIT: &str = "wrapped-";
+const WRAPPED_RUST: &str = "wrapped_";
+/// `ns:pkg/iface` -> `wrapped-ns:pkg/iface`
+pub fn wrapped_name(name: &str) -> String {
+    format!("{WRAPPED_WIT}{name}")
+}
+/// `wrapped-ns:pkg/iface` -> `Some("ns:pkg/iface")`
+pub fn strip_wrapped(name: &str) -> Option<&str> {
+    name.strip_prefix(WRAPPED_WIT)
+}
+pub fn is_wrapped_module(module: &str) -> bool {
+    module.starts_with(WRAPPED_RUST)
+}
+/// Strips the `wrapped_` prefix from a Rust module name if present.
+pub fn unwrapped_module(module: &str) -> &str {
+    module.strip_prefix(WRAPPED_RUST).unwrap_or(module)
+}
+/// Maps a Rust module name between its host and wrapped copy.
+pub fn toggle_wrapped_module(module: &str) -> String {
+    match module.strip_prefix(WRAPPED_RUST) {
+        Some(name) => name.to_string(),
+        None => format!("{WRAPPED_RUST}{module}"),
+    }
 }
 
 // utils for WIT names

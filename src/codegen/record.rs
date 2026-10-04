@@ -1,5 +1,7 @@
 use super::{GenerateMode, State, get_proxy_path};
-use crate::util::{ResourceFuncKind, extract_arg_info, get_return_type, wit_func_name};
+use crate::util::{
+    ResourceFuncKind, extract_arg_info, get_return_type, is_wrapped_module, wit_func_name,
+};
 use quote::quote;
 use syn::{Signature, parse_quote};
 
@@ -61,7 +63,7 @@ impl State {
                     quote! { mut }
                 };
                 let display_name = wit_func_name(module_path, resource, func_name, &kind);
-                let is_export = !module_path[1].starts_with("wrapped_");
+                let is_export = !is_wrapped_module(&module_path[1]);
                 let record_ret = if get_return_type(&sig.output).is_none() {
                     quote! {
                         #func(#(#call_args),*);

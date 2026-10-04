@@ -1,4 +1,6 @@
-use crate::util::{FullTypePath, get_resource_from_trait_name, get_return_type, make_path};
+use crate::util::{
+    FullTypePath, get_resource_from_trait_name, get_return_type, make_path, toggle_wrapped_module,
+};
 use anyhow::Result;
 use quote::quote;
 use std::collections::{BTreeMap, BTreeSet};
@@ -196,9 +198,7 @@ impl State {
 
     fn generate_conversion_func(&self, sig: &Signature) -> syn::ImplItemFn {
         let func_name = &sig.ident.to_string();
-        let body = if func_name.starts_with("get_wrapped_") {
-            quote! { x.to_proxy() }
-        } else if func_name.starts_with("get_host_") {
+        let body = if func_name.starts_with("get_wrapped_") || func_name.starts_with("get_host_") {
             quote! { x.to_proxy() }
         } else if func_name.starts_with("get_mock_") {
             let resource = get_return_type(&sig.output).unwrap();
@@ -237,9 +237,6 @@ pub fn get_proxy_path(src_path: &[String]) -> Vec<String> {
         res.insert(0, "exports".to_string());
         wrapped_idx = 1;
     }
-    match res[wrapped_idx].strip_prefix("wrapped_") {
-        Some(name) => res[wrapped_idx] = name.to_string(),
-        None => res[wrapped_idx] = "wrapped_".to_string() + &res[wrapped_idx],
-    }
+    res[wrapped_idx] = toggle_wrapped_module(&res[wrapped_idx]);
     res
 }
