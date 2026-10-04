@@ -88,15 +88,12 @@ impl GenerateArgs {
         state.output.extend(traits);
         let mut file = state.into_output_file();
         if self.use_custom_allocator {
+            // dlmalloc with a memory source that grows by bytes, for `--page-size=1`.
+            let alloc = syn::parse_file(include_str!("../../assets/one_byte_page_alloc.rs"))?;
+            let items = alloc.items;
             file.items.push(parse_quote! {
-                #[cfg(all(not(target_feature = "atomics"), target_family = "wasm"))]
-                #[global_allocator]
-                static TALC: talc::wasm::WasmArenaTalc = {
-                    use core::mem::MaybeUninit;
-                    static mut MEMORY: [MaybeUninit<u8>; 0x80000] = [MaybeUninit::uninit(); 0x80000];
-                    // SAFETY: the memory for MEMORY is never modified externally. It's the allocator's.
-                    unsafe { talc::wasm::new_wasm_arena_allocator(&raw mut MEMORY) }
-                };
+                #[cfg(all(not(target_feature = "atomics"), target_arch = "wasm32"))]
+                mod one_byte_page_alloc { #(#items)* }
             });
         }
         let output = prettyplease::unparse(&file);
