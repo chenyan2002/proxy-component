@@ -12,6 +12,9 @@
 //! `wasip2` crate) calls `__rust_alloc`, so C code can `free()` canonical-ABI
 //! buffers. Users must therefore not set a `#[global_allocator]`; just
 //! `extern crate libc_alloc;`.
+//!
+//! Only link this into modules built with 1-byte pages (the components'
+//! `one-byte-page` feature); regular builds use wasi-libc's own `sbrk`.
 #![no_std]
 
 #[cfg(all(target_os = "wasi", target_arch = "wasm32"))]

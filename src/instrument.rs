@@ -18,14 +18,16 @@ pub struct InstrumentArgs {
     /// Whether to use the host recorder implementation or link the recorder component
     #[arg(long)]
     pub use_host_recorder: bool,
-    /// Whether to use a one-byte page size for the wasm component
-    #[arg(long, default_value_t = true)]
+    /// Use 1-byte wasm pages for the generated and bundled components
+    #[arg(long)]
     pub one_byte_page_size: bool,
 }
 
-// TODO: Add one-byte and regular page size wasm binaries
 const DEBUG_WASM: &[u8] = include_bytes!("../assets/debug.wasm");
 const RECORDER_WASM: &[u8] = include_bytes!("../assets/recorder.wasm");
+// Built with `--features one-byte-page` (see Makefile `build-components`).
+const DEBUG_WASM_ONE_BYTE_PAGE: &[u8] = include_bytes!("../assets/debug.one_byte_page.wasm");
+const RECORDER_WASM_ONE_BYTE_PAGE: &[u8] = include_bytes!("../assets/recorder.one_byte_page.wasm");
 
 pub fn run(args: InstrumentArgs) -> Result<()> {
     if args.use_host_recorder && !matches!(args.mode, Mode::Record | Mode::Replay) {
@@ -98,7 +100,12 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     let imports = format!("import:proxy={}", imports_wasm_path.display());
     let exports = format!("export:proxy={}", exports_wasm_path.display());
     let root = format!("root:component={}", args.wasm_file.display());
-    fs::write(tmp_dir.join("debug.wasm"), DEBUG_WASM)?;
+    let (debug_wasm, recorder_wasm) = if args.one_byte_page_size {
+        (DEBUG_WASM_ONE_BYTE_PAGE, RECORDER_WASM_ONE_BYTE_PAGE)
+    } else {
+        (DEBUG_WASM, RECORDER_WASM)
+    };
+    fs::write(tmp_dir.join("debug.wasm"), debug_wasm)?;
     let debug = format!("import:debug={}/debug.wasm", tmp_dir.display());
     let wac_path = tmp_dir.join("wit/compose.wac");
     let mut cmd = Command::new("wac");
@@ -116,7 +123,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         .arg(output_file);
     if !args.use_host_recorder {
         let wasm_path = tmp_dir.join("recorder.wasm");
-        fs::write(&wasm_path, RECORDER_WASM)?;
+        fs::write(&wasm_path, recorder_wasm)?;
         let recorder = format!("import:recorder={}", wasm_path.display());
         cmd.arg("--dep").arg(&recorder);
     }

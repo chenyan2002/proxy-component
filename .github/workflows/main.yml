@@ -7,8 +7,16 @@ on:
 
 jobs:
   build:
-    name: Build and Test
+    name: Build and Test (${{ matrix.memory }} pages)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - memory: regular
+            one_byte_page: 0
+          - memory: one-byte
+            one_byte_page: 1
     env:
       WAC_VERSION: 0.12.0
       VICEROY_VERSION: 0.21.1
@@ -48,4 +56,4 @@ jobs:
       - name: Build
         run: make
       - name: Test
-        run: make test
+        run: make test ONE_BYTE_PAGE=${{ matrix.one_byte_page }}
