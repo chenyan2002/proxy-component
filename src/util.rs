@@ -64,6 +64,18 @@ pub fn wit_func_name(
     res.push_str(&func_name.to_string().to_kebab_case());
     res
 }
+/// In virtualized components, constructors return `Self`, i.e. `MockedResource`, so type-directed
+/// traits like `Dialog` or `Arbitrary` cannot recover the resource name. Returns the WIT name of
+/// the resource to patch into the `MockedResource`, if `kind` is a constructor.
+pub fn constructor_resource_name(
+    resource: &Option<String>,
+    kind: &Option<ResourceFuncKind>,
+) -> Option<String> {
+    match kind {
+        Some(ResourceFuncKind::Constructor) => Some(resource.as_ref()?.to_kebab_case()),
+        _ => None,
+    }
+}
 pub fn get_return_type(ret: &syn::ReturnType) -> Option<Type> {
     match ret {
         syn::ReturnType::Default => None,

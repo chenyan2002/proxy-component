@@ -1,7 +1,7 @@
 use super::State;
 use crate::util::{
-    FullTypePath, ResourceFuncKind, extract_arg_info, get_owned_type, get_return_type, make_path,
-    wit_func_name,
+    FullTypePath, ResourceFuncKind, constructor_resource_name, extract_arg_info, get_owned_type,
+    get_return_type, make_path, wit_func_name,
 };
 use quote::quote;
 use syn::{Signature, parse_quote, visit_mut::VisitMut};
@@ -26,6 +26,12 @@ impl State {
                 } else {
                     quote! { Vec::new() }
                 };
+                let gen_ret = match constructor_resource_name(resource, &kind) {
+                    Some(name) => {
+                        quote! { MockedResource { name: #name.to_string(), ..u.arbitrary().unwrap() } }
+                    }
+                    None => quote! { u.arbitrary().unwrap() },
+                };
                 parse_quote! {
                     #sig {
                         let mut __params: Vec<String> = #init_vec;
@@ -36,7 +42,7 @@ impl State {
                         proxy::util::debug::print(&format!("import: {}({})", #display_name, __buf));
                         __buf += #display_name;
                         let mut u = Unstructured::new(&__buf.as_bytes());
-                        let res = u.arbitrary().unwrap();
+                        let res = #gen_ret;
                         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
                         proxy::util::debug::print(&format!("ret: {}", res_str));
                         res
