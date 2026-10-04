@@ -4,7 +4,7 @@ use clap::Parser;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use wit_bindgen_core::{Files, wit_parser};
+use wit_bindgen_core::Files;
 use wit_component::{ComponentEncoder, embed_component_metadata};
 use wit_parser::{Resolve, WorldId};
 
@@ -26,8 +26,6 @@ pub struct InstrumentArgs {
 // TODO: Add one-byte and regular page size wasm binaries
 const DEBUG_WASM: &[u8] = include_bytes!("../assets/debug.wasm");
 const RECORDER_WASM: &[u8] = include_bytes!("../assets/recorder.wasm");
-const WASI_ADAPTER_ONE_BYTE_PAGE: &[u8] =
-    include_bytes!("../assets/wasi_snapshot_preview1.reactor.one_byte_page.wasm");
 
 pub fn run(args: InstrumentArgs) -> Result<()> {
     if args.use_host_recorder && !matches!(args.mode, Mode::Record | Mode::Replay) {
@@ -90,20 +88,10 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     let status = cmd.status()?;
     assert!(status.success());
 
-    let exports_wasm_path = component_new(
-        &tmp_dir,
-        &wit_dir,
-        "exports",
-        "debug/record_exports.wasm",
-        args.one_byte_page_size,
-    )?;
-    let imports_wasm_path = component_new(
-        &tmp_dir,
-        &wit_dir,
-        "imports",
-        "debug/record_imports.wasm",
-        args.one_byte_page_size,
-    )?;
+    let exports_wasm_path =
+        component_new(&tmp_dir, &wit_dir, "exports", "debug/record_exports.wasm")?;
+    let imports_wasm_path =
+        component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
     // 7. run wac
     opts.generate_wac(&imports_wasm_path, &exports_wasm_path, &wit_dir)?;
     let output_file = "composed.wasm";
@@ -181,7 +169,6 @@ fn component_new(
     wit_dir: &Path,
     world_name: &str,
     wasm_file: &str,
-    one_byte_page_size: bool,
 ) -> Result<PathBuf> {
     let wasm_path = tmp_dir
         .join("target/wasm32-unknown-unknown/")
@@ -195,14 +182,11 @@ fn component_new(
         &resolve,
         world_id,
         wit_component::StringEncoding::UTF8,
+        false,
     )?;
-    // create component from the embedded module
-    let mut encoder = ComponentEncoder::default();
-    encoder.module(&wasm)?;
-    if one_byte_page_size {
-        encoder.adapter("wasi_snapshot_preview1", WASI_ADAPTER_ONE_BYTE_PAGE)?;
-    }
-    let component = encoder
+    // create component from the embedded module.
+    let component = ComponentEncoder::default()
+        .module(&wasm)?
         .encode()
         .context("failed to encode a component from module")?;
     fs::write(&wasm_path, component)?;

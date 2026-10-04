@@ -6,8 +6,8 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use syn::{FnArg, Ident, Item, Signature, Type, Visibility, parse_quote, visit_mut::VisitMut};
-use wit_bindgen_core::wit_parser::{PackageId, Resolve};
 use wit_component::WitPrinter;
+use wit_parser::{PackageId, Resolve};
 pub struct FullTypePath<'a> {
     pub module_path: &'a [String],
 }
@@ -496,7 +496,8 @@ pub fn extract_wit(wasm_file: &Path, out_dir: &Path) -> Result<()> {
 /// Generate Rust bindings from WIT definitions.
 /// Equivalent to `wit-bindgen rust <wit_dir> --world <world_name> --generate-all --merge-structurally-equal-types=true --out-dir <out_dir>`.
 pub fn generate_bindings(wit_dir: &Path, world_name: &str, out_dir: &Path) -> Result<()> {
-    use wit_bindgen_core::{Files, WorldGenerator};
+    // wit-bindgen may depend on a different wit-parser version than wit-component
+    use wit_bindgen_core::{Files, WorldGenerator, wit_parser::Resolve};
     let mut resolve = Resolve::default();
     let (pkg, _) = resolve.push_dir(wit_dir)?;
     let world = resolve.select_world(&[pkg], Some(world_name))?;
