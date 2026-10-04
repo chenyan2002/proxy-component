@@ -573,7 +573,6 @@ version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
  "libc-alloc",
- "talc",
  "wit-bindgen 0.62.0",
 ]
 
@@ -1187,6 +1186,9 @@ checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 [[package]]
 name = "libc-alloc"
 version = "0.1.0"
+dependencies = [
+ "talc",
+]
 
 [[package]]
 name = "libm"
@@ -1535,7 +1537,6 @@ version = "0.1.0"
 dependencies = [
  "libc-alloc",
  "serde_json",
- "talc",
  "trace",
  "wit-bindgen 0.62.0",
 ]

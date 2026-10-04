@@ -1,17 +1,36 @@
-//! Replaces wasi-libc's dlmalloc with the Rust global allocator.
+//! Replaces wasi-libc's dlmalloc with a talc arena.
 //!
 //! wasi-libc's `sbrk` assumes 64 KiB wasm pages, so its dlmalloc traps when the
 //! module is linked with `--page-size=1`. Defining every symbol that
 //! `dlmalloc.c.obj` provides keeps the linker from pulling it (and `sbrk`) in.
+//!
+//! The talc arena lives here and backs `malloc`, rather than being the Rust
+//! `#[global_allocator]`. `free(p)` has no size, so every block carries a
+//! header. `cabi_realloc` (from std's `wasip2` crate) calls `__rust_alloc`,
+//! and wasi-libc frees those canonical-ABI buffers with `free()` (e.g. the
+//! list returned by `blocking-read` in `read()`). If `__rust_alloc` went
+//! straight to talc, those blocks would have no header and `free` would trap.
+//! Leaving Rust on the default `System` allocator, which calls `malloc`,
+//! `posix_memalign` and `free` on wasi, gives every allocation the header.
+//!
+//! Users must therefore not set a `#[global_allocator]`; just `extern crate libc_alloc;`.
 #![no_std]
 
 #[cfg(target_os = "wasi")]
 mod imp {
-    extern crate alloc;
-
-    use alloc::alloc::{Layout, alloc, alloc_zeroed, dealloc, realloc as rust_realloc};
+    use core::alloc::{GlobalAlloc, Layout};
     use core::ffi::c_void;
+    use core::mem::MaybeUninit;
     use core::ptr::{self, null_mut};
+
+    // The only heap in the module: both C (`malloc`) and Rust (`System` -> `malloc`)
+    // allocate from it. A fixed arena avoids the 64 KiB page assumptions of
+    // `sbrk` and talc's `memory.grow` source.
+    static TALC: talc::wasm::WasmArenaTalc = {
+        static mut MEMORY: [MaybeUninit<u8>; 0x80000] = [MaybeUninit::uninit(); 0x80000];
+        // SAFETY: the memory for MEMORY is never modified externally. It's the allocator's.
+        unsafe { talc::wasm::new_wasm_arena_allocator(&raw mut MEMORY) }
+    };
 
     /// `max_align_t` on wasm32.
     const MIN_ALIGN: usize = 16;
@@ -51,9 +70,9 @@ mod imp {
         };
         unsafe {
             let base = if zeroed {
-                alloc_zeroed(layout)
+                TALC.alloc_zeroed(layout)
             } else {
-                alloc(layout)
+                TALC.alloc(layout)
             };
             if base.is_null() {
                 return null_mut();
@@ -82,7 +101,7 @@ mod imp {
         }
         unsafe {
             let (base, layout) = header(p as *mut u8);
-            dealloc(base, layout);
+            TALC.dealloc(base, layout);
         }
     }
 
@@ -105,7 +124,7 @@ mod imp {
                 if Layout::from_size_align(total, align).is_err() {
                     return null_mut();
                 }
-                let new_base = rust_realloc(base, layout, total);
+                let new_base = TALC.realloc(base, layout, total);
                 if new_base.is_null() {
                     return null_mut();
                 }
