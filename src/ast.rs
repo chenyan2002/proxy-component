@@ -4,7 +4,7 @@ use crate::util::*;
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
-use wit_bindgen_core::{Files, Source, wit_parser};
+use wit_bindgen_core::{Files, Source};
 use wit_component::WitPrinter;
 use wit_parser::*;
 

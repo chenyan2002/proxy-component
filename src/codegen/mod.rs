@@ -22,6 +22,8 @@ pub struct GenerateArgs {
     /// The path to the output file.
     #[arg(short, long, default_value("lib.rs"))]
     pub output_file: PathBuf,
+    #[arg(long)]
+    pub use_custom_allocator: bool,
 }
 #[derive(clap::ValueEnum, clap::Parser, Clone)]
 pub enum GenerateMode {
@@ -84,7 +86,16 @@ impl GenerateArgs {
         let traits = trait_generator.generate();
         drop(trait_generator);
         state.output.extend(traits);
-        let file = state.into_output_file();
+        let mut file = state.into_output_file();
+        if self.use_custom_allocator {
+            // dlmalloc with a memory source that grows by bytes, for `--page-size=1`.
+            let alloc = syn::parse_file(include_str!("../../assets/one_byte_page_alloc.rs"))?;
+            let items = alloc.items;
+            file.items.push(parse_quote! {
+                #[cfg(all(not(target_feature = "atomics"), target_arch = "wasm32"))]
+                mod one_byte_page_alloc { #(#items)* }
+            });
+        }
         let output = prettyplease::unparse(&file);
         std::fs::write(&self.output_file, output)?;
         Ok(())

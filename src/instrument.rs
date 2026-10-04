@@ -4,7 +4,7 @@ use clap::Parser;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use wit_bindgen_core::{Files, wit_parser};
+use wit_bindgen_core::Files;
 use wit_component::{ComponentEncoder, embed_component_metadata};
 use wit_parser::{Resolve, WorldId};
 
@@ -18,10 +18,16 @@ pub struct InstrumentArgs {
     /// Whether to use the host recorder implementation or link the recorder component
     #[arg(long)]
     pub use_host_recorder: bool,
+    /// Use 1-byte wasm pages for the generated and bundled components
+    #[arg(long)]
+    pub one_byte_page_size: bool,
 }
 
 const DEBUG_WASM: &[u8] = include_bytes!("../assets/debug.wasm");
 const RECORDER_WASM: &[u8] = include_bytes!("../assets/recorder.wasm");
+// Built with `--features one-byte-page` (see Makefile `build-components`).
+const DEBUG_WASM_ONE_BYTE_PAGE: &[u8] = include_bytes!("../assets/debug.one_byte_page.wasm");
+const RECORDER_WASM_ONE_BYTE_PAGE: &[u8] = include_bytes!("../assets/recorder.one_byte_page.wasm");
 
 pub fn run(args: InstrumentArgs) -> Result<()> {
     if args.use_host_recorder && !matches!(args.mode, Mode::Record | Mode::Replay) {
@@ -57,10 +63,27 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     }
 
     // 5. Generate Rust binding for both import and export interface
-    bindgen(&tmp_dir, &wit_dir, &args.mode, "imports", "record_imports")?;
-    bindgen(&tmp_dir, &wit_dir, &args.mode, "exports", "record_exports")?;
+    bindgen(
+        &tmp_dir,
+        &wit_dir,
+        &args.mode,
+        "imports",
+        "record_imports",
+        args.one_byte_page_size,
+    )?;
+    bindgen(
+        &tmp_dir,
+        &wit_dir,
+        &args.mode,
+        "exports",
+        "record_exports",
+        args.one_byte_page_size,
+    )?;
     // 6. cargo build
     let mut cmd = Command::new("cargo");
+    if args.one_byte_page_size {
+        cmd.env("RUSTFLAGS", "-C link-arg=--page-size=1");
+    }
     cmd.arg("build")
         .arg("--target=wasm32-unknown-unknown")
         .current_dir(tmp_dir.as_path());
@@ -77,7 +100,12 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     let imports = format!("import:proxy={}", imports_wasm_path.display());
     let exports = format!("export:proxy={}", exports_wasm_path.display());
     let root = format!("root:component={}", args.wasm_file.display());
-    fs::write(tmp_dir.join("debug.wasm"), DEBUG_WASM)?;
+    let (debug_wasm, recorder_wasm) = if args.one_byte_page_size {
+        (DEBUG_WASM_ONE_BYTE_PAGE, RECORDER_WASM_ONE_BYTE_PAGE)
+    } else {
+        (DEBUG_WASM, RECORDER_WASM)
+    };
+    fs::write(tmp_dir.join("debug.wasm"), debug_wasm)?;
     let debug = format!("import:debug={}/debug.wasm", tmp_dir.display());
     let wac_path = tmp_dir.join("wit/compose.wac");
     let mut cmd = Command::new("wac");
@@ -95,7 +123,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         .arg(output_file);
     if !args.use_host_recorder {
         let wasm_path = tmp_dir.join("recorder.wasm");
-        fs::write(&wasm_path, RECORDER_WASM)?;
+        fs::write(&wasm_path, recorder_wasm)?;
         let recorder = format!("import:recorder={}", wasm_path.display());
         cmd.arg("--dep").arg(&recorder);
     }
@@ -122,6 +150,7 @@ fn bindgen(
     mode: &Mode,
     world_name: &str,
     dest_name: &str,
+    use_custom_allocator: bool,
 ) -> Result<()> {
     let out_dir = tmp_dir.join(dest_name);
     crate::util::generate_bindings(wit_dir, world_name, &out_dir)?;
@@ -136,6 +165,7 @@ fn bindgen(
         bindings: binding_file.clone(),
         output_file: out_dir.join("lib.rs"),
         mode: codegen_mode,
+        use_custom_allocator,
     };
     codegen_opt.generate()?;
     fs::rename(&binding_file, out_dir.join("bindings.rs"))?;
@@ -159,8 +189,9 @@ fn component_new(
         &resolve,
         world_id,
         wit_component::StringEncoding::UTF8,
+        false,
     )?;
-    // create component from the embedded module
+    // create component from the embedded module.
     let component = ComponentEncoder::default()
         .module(&wasm)?
         .encode()

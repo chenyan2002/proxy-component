@@ -74,6 +74,7 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
     let mut config = Config::new();
     config
         .consume_fuel(true)
+        .wasm_custom_page_sizes(true)
         //.debug_info(true)
         .wasm_backtrace_details(WasmBacktraceDetails::Enable);
     let engine = Engine::new(&config)?;
@@ -159,7 +160,7 @@ fn collect_exports(
             .flat_map(move |(name, item)| {
                 let mut names = basename.clone();
                 names.push(name.to_string());
-                collect_exports(engine, item, names)
+                collect_exports(engine, item.ty, names)
             })
             .collect(),
         CItem::ComponentInstance(c) => c
@@ -167,7 +168,7 @@ fn collect_exports(
             .flat_map(move |(name, item)| {
                 let mut names = basename.clone();
                 names.push(name.to_string());
-                collect_exports(engine, item, names)
+                collect_exports(engine, item.ty, names)
             })
             .collect(),
         _ => vec![(basename, item)],

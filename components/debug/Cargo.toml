@@ -9,3 +9,8 @@ crate-type = ["cdylib"]
 [dependencies]
 wit-bindgen.workspace = true
 getrandom = "0.3"
+libc-alloc = { path = "../../crates/libc-alloc", optional = true }
+
+[features]
+# Link with 1-byte wasm pages (see build.rs)
+one-byte-page = ["dep:libc-alloc"]

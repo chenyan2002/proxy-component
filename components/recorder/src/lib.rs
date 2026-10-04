@@ -1,3 +1,8 @@
+// Regular builds use stock wasi-libc malloc. With 1-byte pages, libc_alloc makes it work;
+// either way, don't add a #[global_allocator] (see crates/libc-alloc).
+#[cfg(feature = "one-byte-page")]
+extern crate libc_alloc;
+
 mod bindings {
     wit_bindgen::generate!({
         path: "../../assets/recorder.wit",
