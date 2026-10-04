@@ -13,12 +13,8 @@ impl Trait for DialogTrait {
         let wit_name = resource.ident.to_string().to_kebab_case();
         let in_import = module_path[0] != "exports";
         if in_import {
-            let call = format!(
-                "get_mock_{}_magic42_{}",
-                module_path.join("_"),
-                resource.ident
-            )
-            .to_snake_case();
+            let call =
+                format!("get_mock_{}_{}", module_path.join("_"), resource.ident).to_snake_case();
             let call: syn::Ident = syn::parse_str(&call).unwrap();
             res.push(parse_quote! {
             impl Dialog for #resource_path {

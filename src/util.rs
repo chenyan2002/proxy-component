@@ -235,6 +235,12 @@ impl codegen::State {
                         .or_default()
                         .push(TypeInfo::Enum(enum_item));
                 }
+                // type aliases, e.g. the resources used by the conversion interface
+                Item::Type(type_item) if matches!(type_item.vis, Visibility::Public(_)) => {
+                    let mut path = current_path.clone();
+                    path.push(type_item.ident.to_string());
+                    self.type_aliases.insert(path, (*type_item.ty).clone());
+                }
                 // flags
                 Item::Macro(macro_item) => {
                     if let Some(enum_item) = extract_bitflag(macro_item) {
