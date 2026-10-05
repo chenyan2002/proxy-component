@@ -4,7 +4,7 @@ mod ast;
 mod codegen;
 mod instrument;
 mod traits;
-mod util;
+mod wit_util;
 
 #[cfg(feature = "run")]
 mod run;

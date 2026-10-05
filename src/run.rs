@@ -1,7 +1,8 @@
+use anyhow::Context;
 use clap::Parser;
 use std::path::PathBuf;
 use trace::Logger;
-use wasmtime::component::types::{ComponentFunc, ComponentItem as CItem};
+use wasmtime::component::types::{ComponentExtern, ComponentFunc, ComponentItem as CItem};
 use wasmtime::component::wasm_wave::{untyped::UntypedFuncCall, wasm::WasmFunc};
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable, Val};
 use wasmtime::*;
@@ -112,11 +113,10 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         let untyped_call = UntypedFuncCall::parse(invoke)?;
         let exports = collect_export_funcs(&engine, &component);
         //println!("Exported funcs: {exports:?}");
-        let mut find_export = exports.into_iter().filter_map(|(names, func)| {
-            let func_name = names.last().unwrap();
-            (func_name == untyped_call.name()).then_some((names, func))
-        });
-        let (names, func_type) = &find_export.next().unwrap();
+        let (names, func_type) = exports
+            .into_iter()
+            .find(|(names, _)| names.last().is_some_and(|name| name == untyped_call.name()))
+            .with_context(|| format!("no exported function named `{}`", untyped_call.name()))?;
         let export = names
             .iter()
             .fold(None, |instance, name| {
@@ -125,20 +125,18 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
             .unwrap();
         let instance = linker.instantiate(&mut store, &component)?;
 
-        let param_types = WasmFunc::params(func_type).collect::<Vec<_>>();
+        let param_types = WasmFunc::params(&func_type).collect::<Vec<_>>();
         let params = untyped_call.to_wasm_params(&param_types)?;
         let func = instance.get_func(&mut store, export).unwrap();
         let mut results = vec![Val::Bool(false); func_type.results().len()];
-        match func.call(&mut store, &params, &mut results) {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                if store.data().exit_called {
-                    Ok(())
-                } else {
-                    Err(e)
-                }
+        // A replayed `wasi:cli/exit` traps the guest on purpose.
+        func.call(&mut store, &params, &mut results).or_else(|e| {
+            if store.data().exit_called {
+                Ok(())
+            } else {
+                Err(e)
             }
-        }?;
+        })?;
         if args.trace.is_none() {
             let trace = store.data().logger.dump_trace();
             std::fs::write("trace.out", &trace)?;
@@ -154,25 +152,18 @@ fn collect_exports(
     item: CItem,
     basename: Vec<String>,
 ) -> Vec<(Vec<String>, CItem)> {
-    match item {
-        CItem::Component(c) => c
-            .exports(engine)
-            .flat_map(move |(name, item)| {
-                let mut names = basename.clone();
-                names.push(name.to_string());
-                collect_exports(engine, item.ty, names)
-            })
-            .collect(),
-        CItem::ComponentInstance(c) => c
-            .exports(engine)
-            .flat_map(move |(name, item)| {
-                let mut names = basename.clone();
-                names.push(name.to_string());
-                collect_exports(engine, item.ty, names)
-            })
-            .collect(),
-        _ => vec![(basename, item)],
-    }
+    let exports: Box<dyn Iterator<Item = (&str, ComponentExtern<'_>)> + '_> = match &item {
+        CItem::Component(c) => Box::new(c.exports(engine)),
+        CItem::ComponentInstance(c) => Box::new(c.exports(engine)),
+        _ => return vec![(basename, item)],
+    };
+    exports
+        .flat_map(|(name, export)| {
+            let mut names = basename.clone();
+            names.push(name.to_string());
+            collect_exports(engine, export.ty, names)
+        })
+        .collect()
 }
 fn collect_export_funcs(
     engine: &Engine,
@@ -209,49 +200,35 @@ mod dialog_bindings {
     });
 }
 
+/// Forwards `dialog` host functions of the form `fn(&mut self, dep: u32) -> String`.
+macro_rules! forward_dialog_reads {
+    ($($name:ident),* $(,)?) => {
+        $(
+            fn $name(&mut self, dep: u32) -> String {
+                dialog::$name(dep)
+            }
+        )*
+    };
+}
 impl dialog_bindings::proxy::util::dialog::Host for crate::run::State {
     fn print(&mut self, dep: u32, message: String) {
         dialog::print(dep, &message);
     }
-    fn read_string(&mut self, dep: u32) -> String {
-        dialog::read_string(dep)
-    }
-    fn read_u8(&mut self, dep: u32) -> String {
-        dialog::read_u8(dep)
-    }
-    fn read_u16(&mut self, dep: u32) -> String {
-        dialog::read_u16(dep)
-    }
-    fn read_u32(&mut self, dep: u32) -> String {
-        dialog::read_u32(dep)
-    }
-    fn read_u64(&mut self, dep: u32) -> String {
-        dialog::read_u64(dep)
-    }
-    fn read_s8(&mut self, dep: u32) -> String {
-        dialog::read_s8(dep)
-    }
-    fn read_s16(&mut self, dep: u32) -> String {
-        dialog::read_s16(dep)
-    }
-    fn read_s32(&mut self, dep: u32) -> String {
-        dialog::read_s32(dep)
-    }
-    fn read_s64(&mut self, dep: u32) -> String {
-        dialog::read_s64(dep)
-    }
-    fn read_f32(&mut self, dep: u32) -> String {
-        dialog::read_f32(dep)
-    }
-    fn read_f64(&mut self, dep: u32) -> String {
-        dialog::read_f64(dep)
-    }
-    fn read_bool(&mut self, dep: u32) -> String {
-        dialog::read_bool(dep)
-    }
-    fn read_char(&mut self, dep: u32) -> String {
-        dialog::read_char(dep)
-    }
+    forward_dialog_reads!(
+        read_string,
+        read_u8,
+        read_u16,
+        read_u32,
+        read_u64,
+        read_s8,
+        read_s16,
+        read_s32,
+        read_s64,
+        read_f32,
+        read_f64,
+        read_bool,
+        read_char,
+    );
     fn read_select(&mut self, dep: u32, prompt: String, items: Vec<String>) -> u32 {
         dialog::read_select(dep, prompt, items)
     }

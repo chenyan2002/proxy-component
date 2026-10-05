@@ -1,6 +1,6 @@
 use crate::codegen::State;
+use crate::codegen::util::{is_wrapped_module, make_path};
 use crate::traits::Trait;
-use crate::util::{is_wrapped_module, make_path};
 use heck::ToSnakeCase;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};

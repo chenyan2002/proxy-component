@@ -1,6 +1,3 @@
-use crate::util::{
-    FullTypePath, get_resource_from_trait_name, get_return_type, make_path, toggle_wrapped_module,
-};
 use anyhow::Result;
 use heck::ToKebabCase;
 use quote::quote;
@@ -10,11 +7,17 @@ use syn::{
     File, Ident, Item, ItemEnum, ItemStruct, ItemTrait, Signature, TraitItem, Type, parse_quote,
     visit_mut::VisitMut,
 };
+use util::{
+    FullTypePath, ResourceFuncKind, extract_arg_info, get_owned_type, get_resource_from_trait_name,
+    get_return_type, make_path, toggle_wrapped_module, wit_func_name,
+};
 
 mod dialog;
 mod fuzz;
+mod parse;
 mod record;
 mod replay;
+pub mod util;
 
 #[derive(clap::Parser)]
 pub struct GenerateArgs {
@@ -70,27 +73,35 @@ pub struct ItemFlag {
     pub name: Ident,
     pub flags: Vec<Ident>,
 }
+/// An exported function of the main component, see `State::export_funcs`.
+struct ExportFunc {
+    /// WIT name, e.g. `ns:pkg/iface.func`
+    display_name: String,
+    /// Rust path to the function
+    func: syn::Path,
+    arg_names: Vec<Ident>,
+    /// Owned argument types, e.g. `String` for `&str`
+    arg_tys: Vec<Type>,
+    /// Arguments at the call site, borrowed where the function expects a reference
+    call_params: Vec<syn::Expr>,
+    has_ret: bool,
+}
+
+/// Interface for converting resources between the generated components.
+const CONVERSION_MODULE: &str = "exports::proxy::conversion::conversion";
+/// Interface whose `start` function drives the main component's exports in virtualized modes.
+const START_REPLAY_MODULE: &str = "exports::proxy::recorder::start_replay";
 
 impl GenerateArgs {
     pub fn generate(&self) -> Result<()> {
         let file = std::fs::read_to_string(&self.bindings)?;
         let ast = syn::parse_file(&file)?;
 
-        let mut state = State {
-            mode: self.mode.clone(),
-            traits: BTreeMap::new(),
-            types: BTreeMap::new(),
-            funcs: BTreeMap::new(),
-            module_paths: BTreeSet::new(),
-            type_aliases: BTreeMap::new(),
-            output: Vec::new(),
-        };
+        let mut state = State::new(self.mode.clone());
         state.generate_preamble();
         state.find_all_items(&ast.items, vec![]);
         state.generate_stubs();
-        let trait_generator = crate::traits::TraitGenerator::new(&state);
-        let traits = trait_generator.generate();
-        drop(trait_generator);
+        let traits = crate::traits::TraitGenerator::new(&state).generate();
         state.output.extend(traits);
         let mut file = state.into_output_file();
         if self.use_custom_allocator {
@@ -108,6 +119,17 @@ impl GenerateArgs {
     }
 }
 impl State {
+    fn new(mode: GenerateMode) -> Self {
+        State {
+            mode,
+            traits: BTreeMap::new(),
+            types: BTreeMap::new(),
+            funcs: BTreeMap::new(),
+            module_paths: BTreeSet::new(),
+            type_aliases: BTreeMap::new(),
+            output: Vec::new(),
+        }
+    }
     fn generate_stubs(&mut self) {
         for (module_path, traits) in &self.traits {
             for trait_item in traits {
@@ -165,28 +187,37 @@ impl State {
                     let mut transformer = FullTypePath { module_path };
                     transformer.visit_signature_mut(&mut sig);
                     let module_full_name = module_path.join("::");
-                    if module_full_name == "exports::proxy::conversion::conversion" {
+                    if module_full_name == CONVERSION_MODULE {
                         let stub_impl = self.generate_conversion_func(&sig);
                         methods.push(syn::ImplItem::Fn(stub_impl));
                         continue;
                     }
-                    let stub_impl = match self.mode {
-                        GenerateMode::Stubs => parse_quote! {
+                    let is_start = module_full_name == START_REPLAY_MODULE;
+                    if is_start {
+                        assert!(sig.ident == "start");
+                    }
+                    let stub_impl = match (&self.mode, is_start) {
+                        (GenerateMode::Stubs, _) => parse_quote! {
                             #[allow(unused_variables)]
                             #sig {
                                 unimplemented!()
                             }
                         },
-                        GenerateMode::Instrument | GenerateMode::Record => {
-                            self.generate_instrument_func(module_path, &sig, &resource)
+                        (GenerateMode::Instrument | GenerateMode::Record, _) => {
+                            self.generate_instrument_func(module_path, &sig, resource.as_deref())
                         }
-                        GenerateMode::Replay => {
-                            self.generate_replay_func(module_path, &sig, &resource)
+                        (GenerateMode::Replay, false) => {
+                            self.generate_replay_import_func(module_path, &sig, resource.as_deref())
                         }
-                        GenerateMode::Fuzz => self.generate_fuzz_func(module_path, &sig, &resource),
-                        GenerateMode::Dialog => {
-                            self.generate_dialog_func(module_path, &sig, &resource)
+                        (GenerateMode::Replay, true) => self.generate_replay_start_func(&sig),
+                        (GenerateMode::Fuzz, false) => {
+                            self.generate_fuzz_import_func(module_path, &sig, resource.as_deref())
                         }
+                        (GenerateMode::Fuzz, true) => self.generate_fuzz_start_func(&sig),
+                        (GenerateMode::Dialog, false) => {
+                            self.generate_dialog_import_func(module_path, &sig, resource.as_deref())
+                        }
+                        (GenerateMode::Dialog, true) => self.generate_dialog_start_func(&sig),
                     };
                     methods.push(syn::ImplItem::Fn(stub_impl));
                 }
@@ -243,6 +274,51 @@ impl State {
             .ident
             .to_string()
             .to_kebab_case()
+    }
+    /// Functions exported by the main component, which the `start` function of the virtualized
+    /// modes calls. Resource methods are skipped.
+    fn export_funcs(&self) -> Vec<ExportFunc> {
+        let mut res = Vec::new();
+        for (path, resources) in self
+            .funcs
+            .iter()
+            .filter(|(path, _)| path[0] != "exports" && path[0] != "proxy")
+        {
+            for (resource, sigs) in resources {
+                for sig in sigs {
+                    let (kind, args) = extract_arg_info(sig);
+                    if matches!(kind, Some(ResourceFuncKind::Method)) {
+                        continue;
+                    }
+                    let arg_tys = args
+                        .iter()
+                        .map(|arg| {
+                            let mut ty = arg.ty.clone();
+                            FullTypePath { module_path: path }.visit_type_mut(&mut ty);
+                            get_owned_type(&ty).unwrap_or(ty)
+                        })
+                        .collect();
+                    let func_name = match resource {
+                        Some(resource) => format!("{}::{}", resource, sig.ident),
+                        None => sig.ident.to_string(),
+                    };
+                    res.push(ExportFunc {
+                        display_name: wit_func_name(
+                            path,
+                            resource.as_deref(),
+                            &sig.ident,
+                            kind.as_ref(),
+                        ),
+                        func: make_path(path, &func_name),
+                        arg_names: args.iter().map(|arg| arg.ident.clone()).collect(),
+                        arg_tys,
+                        call_params: args.iter().map(|arg| arg.call_param()).collect(),
+                        has_ret: get_return_type(&sig.output).is_some(),
+                    });
+                }
+            }
+        }
+        res
     }
     fn into_output_file(self) -> File {
         File {

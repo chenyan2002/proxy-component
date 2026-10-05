@@ -1,122 +1,91 @@
-use super::State;
-use crate::util::{
-    FullTypePath, ResourceFuncKind, constructor_resource_name, extract_arg_info, get_owned_type,
-    get_return_type, make_path, wit_func_name,
+use super::util::{
+    constructor_resource_name, extract_arg_info, get_return_type, params_to_wave, wit_func_name,
 };
+use super::{ExportFunc, State};
 use quote::quote;
-use syn::{Signature, parse_quote, visit_mut::VisitMut};
+use syn::{Signature, parse_quote};
 
 impl State {
-    pub fn generate_fuzz_func(
+    pub fn generate_fuzz_import_func(
         &self,
         module_path: &[String],
         sig: &Signature,
-        resource: &Option<String>,
+        resource: Option<&str>,
     ) -> syn::ImplItemFn {
         let func_name = &sig.ident;
-        let is_export = module_path.join("::") == "exports::proxy::recorder::start_replay";
-        if !is_export {
-            let (kind, args) = extract_arg_info(sig);
-            let arg_names = args.iter().map(|arg| &arg.ident);
-            let display_name = wit_func_name(module_path, resource, func_name, &kind);
-            let ret_ty = get_return_type(&sig.output);
-            if ret_ty.is_some() {
-                let init_vec = if matches!(kind, Some(ResourceFuncKind::Method)) {
-                    quote! { vec![wasm_wave::to_string(&ToValue::to_value(&self)).unwrap()] }
-                } else {
-                    quote! { Vec::new() }
-                };
-                let gen_ret = match constructor_resource_name(resource, &kind) {
-                    Some(name) => {
-                        quote! { MockedResource { name: #name.to_string(), ..u.arbitrary().unwrap() } }
-                    }
-                    None => quote! { u.arbitrary().unwrap() },
-                };
-                parse_quote! {
-                    #sig {
-                        let mut __params: Vec<String> = #init_vec;
-                        #(
-                            __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
-                        )*
-                        let mut __buf = __params.join(",");
-                        proxy::util::debug::print(&format!("import: {}({})", #display_name, __buf));
-                        __buf += #display_name;
-                        let mut u = Unstructured::new(&__buf.as_bytes());
-                        let res = #gen_ret;
-                        let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
-                        proxy::util::debug::print(&format!("ret: {}", res_str));
-                        res
-                    }
+        let (kind, args) = extract_arg_info(sig);
+        let display_name = wit_func_name(module_path, resource, func_name, kind.as_ref());
+        let ret_ty = get_return_type(&sig.output);
+        if ret_ty.is_some() {
+            let params = params_to_wave(kind.as_ref(), &args);
+            let gen_ret = match constructor_resource_name(resource, kind.as_ref()) {
+                Some(name) => {
+                    quote! { MockedResource { name: #name.to_string(), ..u.arbitrary().unwrap() } }
                 }
-            } else {
-                parse_quote! {
-                    #[allow(unused_variables)]
-                    #sig {}
+                None => quote! { u.arbitrary().unwrap() },
+            };
+            parse_quote! {
+                #sig {
+                    #params
+                    let mut __buf = __params.join(",");
+                    proxy::util::debug::print(&format!("import: {}({})", #display_name, __buf));
+                    __buf += #display_name;
+                    let mut u = Unstructured::new(&__buf.as_bytes());
+                    let res = #gen_ret;
+                    let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
+                    proxy::util::debug::print(&format!("ret: {}", res_str));
+                    res
                 }
             }
         } else {
-            assert!(func_name == "start");
-            let arms: Vec<_> = self
-                .funcs
-                .iter()
-                .filter(|(path, _)| path[0] != "exports" && path[0] != "proxy")
-                .flat_map(|(path, resources)| {
-                    resources.iter().flat_map(move |(resource, sigs)| {
-                        sigs.iter().filter_map(move |sig| {
-                            let (kind, args) = extract_arg_info(sig);
-                            if matches!(kind, Some(ResourceFuncKind::Method)) {
-                                return None;
-                            }
-                            let arg_name: Vec<_> = args.iter().map(|arg| &arg.ident).collect();
-                            let call_param = args.iter().map(|arg| arg.call_param());
-                            let ty = args.iter().map(|arg| {
-                                let mut ty = arg.ty.clone();
-                                FullTypePath { module_path: path }.visit_type_mut(&mut ty);
-                                if let Some(owned) = get_owned_type(&ty) {
-                                    owned
-                                } else {
-                                    ty
-                                }
-                            });
-                            let func_name = if let Some(resource) = resource {
-                                format!("{}::{}", resource, sig.ident)
-                            } else {
-                                sig.ident.to_string()
-                            };
-                            let func = make_path(path, &func_name);
-                            let display_name = wit_func_name(path, resource, &sig.ident, &kind);
-                            Some(quote! {
-                                {
-                                    let mut __params: Vec<String> = Vec::new();
-                                    #(
-                                        let #arg_name: #ty = u.arbitrary().unwrap();
-                                        __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_name)).unwrap());
-                                    )*
-                                    proxy::util::debug::print(&format!("export: {}({})", #display_name, __params.join(", ")));
-                                    let _ = #func(#(#call_param),*);
-                                }
-                            })
-                        })
-                    })
-                })
-                .collect();
-            let func_len = arms.iter().len();
-            let idxs = 1..=func_len;
             parse_quote! {
-                #sig {
-                    let __buf = proxy::util::debug::get_random();
-                    let mut u = Unstructured::new(&__buf);
-                    for _ in 0..10 {
-                        let idx = u.int_in_range(1..=#func_len).unwrap();
-                        match idx {
-                            #(#idxs => #arms)*
-                            _ => unreachable!(),
-                        }
-                        // clean up borrowed resources from input args
-                        SCOPED_ALLOC.with(|alloc| {
-                            alloc.borrow_mut().clear();
-                        });
+                #[allow(unused_variables)]
+                #sig {}
+            }
+        }
+    }
+    pub fn generate_fuzz_start_func(&self, sig: &Signature) -> syn::ImplItemFn {
+        let arms: Vec<_> = self
+            .export_funcs()
+            .into_iter()
+            .map(|func| {
+                let ExportFunc {
+                    display_name,
+                    func,
+                    arg_names,
+                    arg_tys,
+                    call_params,
+                    ..
+                } = func;
+                quote! {
+                    {
+                        let mut __params: Vec<String> = Vec::new();
+                        #(
+                            let #arg_names: #arg_tys = u.arbitrary().unwrap();
+                            __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
+                        )*
+                        proxy::util::debug::print(&format!("export: {}({})", #display_name, __params.join(", ")));
+                        let _ = #func(#(#call_params),*);
                     }
+                }
+            })
+            .collect();
+        let func_len = arms.len();
+        let idxs = 1..=func_len;
+        parse_quote! {
+            #sig {
+                let __buf = proxy::util::debug::get_random();
+                let mut u = Unstructured::new(&__buf);
+                for _ in 0..10 {
+                    let idx = u.int_in_range(1..=#func_len).unwrap();
+                    match idx {
+                        #(#idxs => #arms)*
+                        _ => unreachable!(),
+                    }
+                    // clean up borrowed resources from input args
+                    SCOPED_ALLOC.with(|alloc| {
+                        alloc.borrow_mut().clear();
+                    });
                 }
             }
         }
