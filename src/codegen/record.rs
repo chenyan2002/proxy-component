@@ -11,7 +11,7 @@ impl State {
         &self,
         module_path: &[String],
         sig: &Signature,
-        resource: &Option<String>,
+        resource: Option<&str>,
     ) -> syn::ImplItemFn {
         let func_name = &sig.ident;
         let (kind, args) = extract_arg_info(sig);
@@ -53,13 +53,13 @@ impl State {
                 }
             },
             GenerateMode::Record => {
-                let init_vec = init_params(&kind);
+                let init_vec = init_params(kind.as_ref());
                 let is_mut = if args.is_empty() {
                     quote! {}
                 } else {
                     quote! { mut }
                 };
-                let display_name = wit_func_name(module_path, resource, func_name, &kind);
+                let display_name = wit_func_name(module_path, resource, func_name, kind.as_ref());
                 let is_export = !is_wrapped_module(&module_path[1]);
                 let record_ret = if get_return_type(&sig.output).is_none() {
                     quote! {

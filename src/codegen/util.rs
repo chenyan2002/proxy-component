@@ -30,9 +30,9 @@ pub fn make_path(module_path: &[String], name: &str) -> syn::Path {
 }
 pub fn wit_func_name(
     module_path: &[String],
-    resource: &Option<String>,
+    resource: Option<&str>,
     func_name: &Ident,
-    kind: &Option<ResourceFuncKind>,
+    kind: Option<&ResourceFuncKind>,
 ) -> String {
     assert!(module_path.len() >= 3);
     let mut module_path = module_path.to_vec();
@@ -62,11 +62,11 @@ pub fn wit_func_name(
 /// traits like `Dialog` or `Arbitrary` cannot recover the resource name. Returns the WIT name of
 /// the resource to patch into the `MockedResource`, if `kind` is a constructor.
 pub fn constructor_resource_name(
-    resource: &Option<String>,
-    kind: &Option<ResourceFuncKind>,
+    resource: Option<&str>,
+    kind: Option<&ResourceFuncKind>,
 ) -> Option<String> {
     match kind {
-        Some(ResourceFuncKind::Constructor) => Some(resource.as_ref()?.to_kebab_case()),
+        Some(ResourceFuncKind::Constructor) => Some(resource?.to_kebab_case()),
         _ => None,
     }
 }
@@ -143,7 +143,7 @@ impl<'a> VisitMut for FullTypePath<'a> {
 }
 
 /// Initial `Vec<String>` of WAVE params: `self` for methods, empty otherwise.
-pub fn init_params(kind: &Option<ResourceFuncKind>) -> TokenStream {
+pub fn init_params(kind: Option<&ResourceFuncKind>) -> TokenStream {
     if matches!(kind, Some(ResourceFuncKind::Method)) {
         // Use ToValue::to_value to avoid the auto-deref from self.to_value()
         quote! { vec![wasm_wave::to_string(&ToValue::to_value(&self)).unwrap()] }
@@ -152,7 +152,7 @@ pub fn init_params(kind: &Option<ResourceFuncKind>) -> TokenStream {
     }
 }
 /// Binds `__params` to the WAVE strings of `self` (for methods) and each arg.
-pub fn params_to_wave(kind: &Option<ResourceFuncKind>, args: &[ArgInfo]) -> TokenStream {
+pub fn params_to_wave(kind: Option<&ResourceFuncKind>, args: &[ArgInfo]) -> TokenStream {
     let init = init_params(kind);
     let arg_names = args.iter().map(|arg| &arg.ident);
     quote! {

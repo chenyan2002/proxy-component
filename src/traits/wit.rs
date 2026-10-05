@@ -41,7 +41,7 @@ impl Trait for WitTrait {
     fn struct_trait(&self, module_path: &[String], struct_item: &ItemStruct) -> Vec<Item> {
         let mut res = Vec::new();
         let struct_name = make_path(module_path, &struct_item.ident.to_string());
-        let struct_wit_name = wit_func_name(module_path, &None, &struct_item.ident, &None);
+        let struct_wit_name = wit_func_name(module_path, None, &struct_item.ident, None);
         let (impl_generics, ty_generics, where_clause) = struct_item.generics.split_for_impl();
         res.push(parse_quote! {
             impl #impl_generics WitName for #struct_name #ty_generics #where_clause {
@@ -55,7 +55,7 @@ impl Trait for WitTrait {
     fn enum_trait(&self, module_path: &[String], enum_item: &ItemEnum) -> Vec<Item> {
         let mut res = Vec::new();
         let enum_name = make_path(module_path, &enum_item.ident.to_string());
-        let enum_wit_name = wit_func_name(module_path, &None, &enum_item.ident, &None);
+        let enum_wit_name = wit_func_name(module_path, None, &enum_item.ident, None);
         let (impl_generics, ty_generics, where_clause) = enum_item.generics.split_for_impl();
         res.push(parse_quote! {
             impl #impl_generics WitName for #enum_name #ty_generics #where_clause {
@@ -69,7 +69,7 @@ impl Trait for WitTrait {
     fn flag_trait(&self, module_path: &[String], item: &crate::codegen::ItemFlag) -> Vec<Item> {
         let mut res = Vec::new();
         let flag_path = make_path(module_path, &item.name.to_string());
-        let flag_wit_name = wit_func_name(module_path, &None, &item.name, &None);
+        let flag_wit_name = wit_func_name(module_path, None, &item.name, None);
         res.push(parse_quote! {
             impl WitName for #flag_path {
                 fn name() -> String {

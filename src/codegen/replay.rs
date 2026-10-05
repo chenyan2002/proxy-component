@@ -10,14 +10,14 @@ impl State {
         &self,
         module_path: &[String],
         sig: &Signature,
-        resource: &Option<String>,
+        resource: Option<&str>,
     ) -> syn::ImplItemFn {
         let func_name = &sig.ident;
         let (kind, args) = extract_arg_info(sig);
-        let display_name = wit_func_name(module_path, resource, func_name, &kind);
+        let display_name = wit_func_name(module_path, resource, func_name, kind.as_ref());
         let ret_ty = get_return_type(&sig.output);
         let replay_import = if let Some(ret_ty) = ret_ty {
-            let to_rust = match constructor_resource_name(resource, &kind) {
+            let to_rust = match constructor_resource_name(resource, kind.as_ref()) {
                 Some(name) => {
                     quote! { MockedResource { name: #name.to_string(), ..ret.to_rust() } }
                 }
@@ -34,7 +34,7 @@ impl State {
                 assert!(wave.is_none());
             }
         };
-        let params = params_to_wave(&kind, &args);
+        let params = params_to_wave(kind.as_ref(), &args);
         parse_quote! {
             #sig {
                 #params

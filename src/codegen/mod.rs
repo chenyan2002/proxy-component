@@ -97,21 +97,11 @@ impl GenerateArgs {
         let file = std::fs::read_to_string(&self.bindings)?;
         let ast = syn::parse_file(&file)?;
 
-        let mut state = State {
-            mode: self.mode.clone(),
-            traits: BTreeMap::new(),
-            types: BTreeMap::new(),
-            funcs: BTreeMap::new(),
-            module_paths: BTreeSet::new(),
-            type_aliases: BTreeMap::new(),
-            output: Vec::new(),
-        };
+        let mut state = State::new(self.mode.clone());
         state.generate_preamble();
         state.find_all_items(&ast.items, vec![]);
         state.generate_stubs();
-        let trait_generator = crate::traits::TraitGenerator::new(&state);
-        let traits = trait_generator.generate();
-        drop(trait_generator);
+        let traits = crate::traits::TraitGenerator::new(&state).generate();
         state.output.extend(traits);
         let mut file = state.into_output_file();
         if self.use_custom_allocator {
@@ -129,6 +119,17 @@ impl GenerateArgs {
     }
 }
 impl State {
+    fn new(mode: GenerateMode) -> Self {
+        State {
+            mode,
+            traits: BTreeMap::new(),
+            types: BTreeMap::new(),
+            funcs: BTreeMap::new(),
+            module_paths: BTreeSet::new(),
+            type_aliases: BTreeMap::new(),
+            output: Vec::new(),
+        }
+    }
     fn generate_stubs(&mut self) {
         for (module_path, traits) in &self.traits {
             for trait_item in traits {
@@ -203,18 +204,18 @@ impl State {
                             }
                         },
                         (GenerateMode::Instrument | GenerateMode::Record, _) => {
-                            self.generate_instrument_func(module_path, &sig, &resource)
+                            self.generate_instrument_func(module_path, &sig, resource.as_deref())
                         }
                         (GenerateMode::Replay, false) => {
-                            self.generate_replay_import_func(module_path, &sig, &resource)
+                            self.generate_replay_import_func(module_path, &sig, resource.as_deref())
                         }
                         (GenerateMode::Replay, true) => self.generate_replay_start_func(&sig),
                         (GenerateMode::Fuzz, false) => {
-                            self.generate_fuzz_import_func(module_path, &sig, &resource)
+                            self.generate_fuzz_import_func(module_path, &sig, resource.as_deref())
                         }
                         (GenerateMode::Fuzz, true) => self.generate_fuzz_start_func(&sig),
                         (GenerateMode::Dialog, false) => {
-                            self.generate_dialog_import_func(module_path, &sig, &resource)
+                            self.generate_dialog_import_func(module_path, &sig, resource.as_deref())
                         }
                         (GenerateMode::Dialog, true) => self.generate_dialog_start_func(&sig),
                     };
@@ -302,7 +303,12 @@ impl State {
                         None => sig.ident.to_string(),
                     };
                     res.push(ExportFunc {
-                        display_name: wit_func_name(path, resource, &sig.ident, &kind),
+                        display_name: wit_func_name(
+                            path,
+                            resource.as_deref(),
+                            &sig.ident,
+                            kind.as_ref(),
+                        ),
                         func: make_path(path, &func_name),
                         arg_names: args.iter().map(|arg| arg.ident.clone()).collect(),
                         arg_tys,

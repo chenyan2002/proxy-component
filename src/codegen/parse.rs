@@ -131,11 +131,11 @@ impl State {
     pub fn find_function(
         &self,
         module_path: &[String],
-        resource: &Option<String>,
+        resource: Option<&str>,
         func: &Ident,
     ) -> Option<&Signature> {
         let module = self.funcs.get(module_path)?;
-        let funcs = module.get(resource)?;
+        let funcs = module.get(&resource.map(str::to_string))?;
         funcs.iter().find(|sig| sig.ident == *func)
     }
     pub fn has_type_def(&self, module_path: &[String], name: &str) -> bool {

@@ -10,15 +10,15 @@ impl State {
         &self,
         module_path: &[String],
         sig: &Signature,
-        resource: &Option<String>,
+        resource: Option<&str>,
     ) -> syn::ImplItemFn {
         let func_name = &sig.ident;
         let (kind, args) = extract_arg_info(sig);
-        let display_name = wit_func_name(module_path, resource, func_name, &kind);
+        let display_name = wit_func_name(module_path, resource, func_name, kind.as_ref());
         let ret_ty = get_return_type(&sig.output);
         if let Some(ty) = ret_ty {
-            let params = params_to_wave(&kind, &args);
-            let (ret_name, read_ret) = match constructor_resource_name(resource, &kind) {
+            let params = params_to_wave(kind.as_ref(), &args);
+            let (ret_name, read_ret) = match constructor_resource_name(resource, kind.as_ref()) {
                 Some(name) => (
                     quote! { #name },
                     quote! { MockedResource { name: #name.to_string(), ..Dialog::read_value(0) } },
