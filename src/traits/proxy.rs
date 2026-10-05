@@ -2,7 +2,8 @@ use crate::codegen::State;
 use crate::traits::Trait;
 use crate::util::{is_wrapped_module, make_path};
 use heck::ToSnakeCase;
-use quote::quote;
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
 use syn::{File, Item, ItemEnum, ItemStruct, parse_quote};
 
 pub struct ProxyTrait<'a> {
@@ -97,12 +98,14 @@ impl Trait for ProxyTrait<'_> {
         let (impl_generics, ty_generics, where_clause) = struct_item.generics.split_for_impl();
         let output_path = self.get_proxy_path(module_path);
         if !self.state.has_type_def(&output_path, &name) {
+            let identity_cast = identity_cast();
             return vec![parse_quote! {
                 impl #impl_generics ToProxy for #struct_name #ty_generics #where_clause {
                     type Output = #struct_name #ty_generics;
                     fn to_proxy(self) -> Self::Output {
                         self
                     }
+                    #identity_cast
                 }
             }];
         }
@@ -132,12 +135,14 @@ impl Trait for ProxyTrait<'_> {
         let (impl_generics, ty_generics, where_clause) = enum_item.generics.split_for_impl();
         let output_path = self.get_proxy_path(module_path);
         if !self.state.has_type_def(&output_path, &name) {
+            let identity_cast = identity_cast();
             return vec![parse_quote! {
                 impl #impl_generics ToProxy for #enum_name #ty_generics #where_clause {
                     type Output = #enum_name #ty_generics;
                     fn to_proxy(self) -> Self::Output {
                         self
                     }
+                    #identity_cast
                 }
             }];
         }
@@ -170,12 +175,14 @@ impl Trait for ProxyTrait<'_> {
         let flag_name = make_path(module_path, &name);
         let output_path = self.get_proxy_path(module_path);
         if !self.state.has_type_def(&output_path, &name) {
+            let identity_cast = identity_cast();
             return vec![parse_quote! {
                 impl ToProxy for #flag_name {
                     type Output = #flag_name;
                     fn to_proxy(self) -> Self::Output {
                         self
                     }
+                    #identity_cast
                 }
             }];
         }
@@ -191,31 +198,114 @@ impl Trait for ProxyTrait<'_> {
         res
     }
     fn trait_defs(&self) -> Vec<Item> {
+        let identity_cast = identity_cast();
         let defs: File = parse_quote! {
-        trait ToProxy {
+        trait ToProxy: Sized {
           type Output;
           fn to_proxy(self) -> Self::Output;
+          // True iff `Output == Self`, for this type and all types nested in it.
+          const IS_ID: bool = false;
+          // Converts `Self` to `Output` inside any type constructor `F` (e.g. `Vec<Option<_>>`)
+          // without touching the value. Returns `Ok` iff `IS_ID`; identity impls return `Ok(x)`, which
+          // type-checks only because `Output == Self` there.
+          fn cast<F: TypeCtor>(x: F::Apply<Self>) -> Result<F::Apply<Self::Output>, F::Apply<Self>> {
+              Err(x)
+          }
+        }
+        // A type constructor, i.e. a function from types to types. Rust can only express this as
+        // a trait with a generic associated type: `F::Apply<X>` is `F` applied to `X`.
+        //
+        // How to read the impls below: each struct is one constructor, and its `Apply` says what
+        // it produces. `InVec<F>` means "a `Vec` around `X`, then `F` around that", so
+        // constructors nest inside-out: the outermost struct is the innermost wrapper.
+        //   Id::Apply<X>                  = X
+        //   InVec<Id>::Apply<X>           = Vec<X>
+        //   InOption<InVec<Id>>::Apply<X> = Vec<Option<X>>
+        //   InResultErr<Id, u8>::Apply<X> = Result<u8, X>
+        // Types with several slots (`Result`, tuples) need one constructor per slot, since each
+        // slot is a different function of `X`.
+        //
+        // The same impls read two other ways:
+        // - Fill: `F` is a type with one hole, and `Apply<X>` fills the hole with `X`.
+        //   `InVec<Id>` is `Vec<_>`, `InOption<InVec<Id>>` is `Vec<Option<_>>`, and
+        //   `InResultErr<Id, u8>` is `Result<u8, _>`.
+        // - Family pattern: `F` names a family of types indexed by `X`, and `Apply<X>` is the
+        //   member at index `X`. `InVec<Id>` is the family {`Vec<u8>`, `Vec<String>`, ...}, and
+        //   `InVec<Id>::Apply<u8>` picks out `Vec<u8>`. See
+        //   https://smallcultfollowing.com/babysteps/blog/2016/11/03/associated-type-constructors-part-2-family-traits/
+        //
+        // `ToProxy::cast` uses this as Leibniz equality: if `A == B`, then `F::Apply<A>` and
+        // `F::Apply<B>` are the same type for every `F`. An identity impl (`Output == Self`) can
+        // therefore return its `F::Apply<Self>` argument as `F::Apply<Self::Output>` unchanged, no
+        // matter how deeply `Self` is nested in containers. `cast` is the Rust analog of Haskell's
+        // `subst :: forall c. c a -> c b` in
+        // https://hackage.haskell.org/package/eq/docs/Data-Eq-Type.html
+        trait TypeCtor {
+            type Apply<X>;
+        }
+        #[allow(dead_code)]
+        struct Id;
+        impl TypeCtor for Id {
+            type Apply<X> = X;
+        }
+        #[allow(dead_code)]
+        struct InVec<F>(core::marker::PhantomData<F>);
+        impl<F: TypeCtor> TypeCtor for InVec<F> {
+            type Apply<X> = F::Apply<Vec<X>>;
+        }
+        #[allow(dead_code)]
+        struct InOption<F>(core::marker::PhantomData<F>);
+        impl<F: TypeCtor> TypeCtor for InOption<F> {
+            type Apply<X> = F::Apply<Option<X>>;
+        }
+        #[allow(dead_code)]
+        struct InResultOk<F, E>(core::marker::PhantomData<(F, E)>);
+        impl<F: TypeCtor, E> TypeCtor for InResultOk<F, E> {
+            type Apply<X> = F::Apply<Result<X, E>>;
+        }
+        #[allow(dead_code)]
+        struct InResultErr<F, T>(core::marker::PhantomData<(F, T)>);
+        impl<F: TypeCtor, T> TypeCtor for InResultErr<F, T> {
+            type Apply<X> = F::Apply<Result<T, X>>;
         }
         impl crate::ToProxy for String {
             type Output = String;
             fn to_proxy(self) -> Self::Output {
                 self
             }
+            #identity_cast
         }
         impl<T: crate::ToProxy> crate::ToProxy for Vec::<T> {
             type Output = Vec::<T::Output>;
             fn to_proxy(self) -> Self::Output {
-                self.into_iter().map(|x| x.to_proxy()).collect()
+                match T::cast::<InVec<Id>>(self) {
+                    Ok(v) => v,
+                    Err(v) => v.into_iter().map(|x| x.to_proxy()).collect(),
+                }
+            }
+            const IS_ID: bool = T::IS_ID;
+            fn cast<F: TypeCtor>(x: F::Apply<Self>) -> Result<F::Apply<Self::Output>, F::Apply<Self>> {
+                T::cast::<InVec<F>>(x)
             }
         }
-        impl<Ok, Err> ToProxy for Result<Ok, Err>
-        where Ok: ToProxy, Err: ToProxy {
-            type Output = Result<Ok::Output, Err::Output>;
+        impl<T, E> ToProxy for Result<T, E>
+        where T: ToProxy, E: ToProxy {
+            type Output = Result<T::Output, E::Output>;
             fn to_proxy(self) -> Self::Output {
                 match self {
                     Ok(ok) => Ok(ok.to_proxy()),
                     Err(err) => Err(err.to_proxy()),
                 }
+            }
+            const IS_ID: bool = T::IS_ID && E::IS_ID;
+            fn cast<F: TypeCtor>(x: F::Apply<Self>) -> Result<F::Apply<Self::Output>, F::Apply<Self>> {
+                // Check first, so that we never fail after casting only one side.
+                if !Self::IS_ID {
+                    return Err(x);
+                }
+                let Ok(x) = T::cast::<InResultOk<F, E>>(x) else { unreachable!() };
+                let Ok(x) = E::cast::<InResultErr<F, T::Output>>(x) else { unreachable!() };
+                Ok(x)
             }
         }
         impl<Inner> ToProxy for Option<Inner>
@@ -223,6 +313,10 @@ impl Trait for ProxyTrait<'_> {
             type Output = Option<Inner::Output>;
             fn to_proxy(self) -> Self::Output {
                 self.map(|x| x.to_proxy())
+            }
+            const IS_ID: bool = Inner::IS_ID;
+            fn cast<F: TypeCtor>(x: F::Apply<Self>) -> Result<F::Apply<Self::Output>, F::Apply<Self>> {
+                Inner::cast::<InOption<F>>(x)
             }
         }
         macro_rules! impl_to_import_export_for_primitive {
@@ -233,34 +327,90 @@ impl Trait for ProxyTrait<'_> {
                         fn to_proxy(self) -> Self::Output {
                             self
                         }
+                        #identity_cast
                     }
                 )*
             };
         }
         impl_to_import_export_for_primitive!(u8, u16, u32, u64, i8, i16, i32, i64, usize, isize, f32, f64, (), bool, char);
-
-        macro_rules! impl_to_import_export_for_tuple {
-            ( $($T:ident, $i:tt),* ) => {
-                impl<$($T: ToProxy),*> ToProxy for ($($T,)*) {
-                    type Output = ($($T::Output,)*);
-                    fn to_proxy(self) -> Self::Output {
-                        ($(self.$i.to_proxy(),)*)
-                    }
-                }
-            };
-        }
-        impl_to_import_export_for_tuple!(T0, 0);
-        impl_to_import_export_for_tuple!(T0, 0, T1, 1);
-        impl_to_import_export_for_tuple!(T0, 0, T1, 1, T2, 2);
-        impl_to_import_export_for_tuple!(T0, 0, T1, 1, T2, 2, T3, 3);
-        impl_to_import_export_for_tuple!(T0, 0, T1, 1, T2, 2, T3, 3, T4, 4);
-        impl_to_import_export_for_tuple!(T0, 0, T1, 1, T2, 2, T3, 3, T4, 4, T5, 5);
-        impl_to_import_export_for_tuple!(T0, 0, T1, 1, T2, 2, T3, 3, T4, 4, T5, 5, T6, 6);
-        impl_to_import_export_for_tuple!(T0, 0, T1, 1, T2, 2, T3, 3, T4, 4, T5, 5, T6, 6, T7, 7);
-        impl_to_import_export_for_tuple!(T0, 0, T1, 1, T2, 2, T3, 3, T4, 4, T5, 5, T6, 6, T7, 7, T8, 8);
         };
-        defs.items
+        let mut items = defs.items;
+        for n in 1..=9 {
+            items.extend(tuple_trait(n));
+        }
+        items
     }
+}
+// Overrides `ToProxy::cast` for impls where `Output == Self`.
+fn identity_cast() -> TokenStream {
+    quote! {
+        const IS_ID: bool = true;
+        fn cast<F: TypeCtor>(x: F::Apply<Self>) -> Result<F::Apply<Self::Output>, F::Apply<Self>> {
+            Ok(x)
+        }
+    }
+}
+// `ToProxy` for an n-tuple, plus one `TypeCtor` per position for `cast`.
+fn tuple_trait(n: usize) -> Vec<Item> {
+    let mut res = Vec::new();
+    let tys: Vec<_> = (0..n).map(|i| format_ident!("T{i}")).collect();
+    let idx = (0..n).map(syn::Index::from);
+    let mut casts = Vec::new();
+    for i in 0..n {
+        let ctx = format_ident!("InTuple{n}_{i}");
+        let params: Vec<_> = (0..n)
+            .filter(|j| *j != i)
+            .map(|j| format_ident!("A{j}"))
+            .collect();
+        let slots = (0..n).map(|j| {
+            if j == i {
+                quote! { X }
+            } else {
+                let a = format_ident!("A{j}");
+                quote! { #a }
+            }
+        });
+        res.push(parse_quote! {
+            #[allow(dead_code, non_camel_case_types)]
+            struct #ctx<F, #(#params),*>(core::marker::PhantomData<(F, #(#params),*)>);
+        });
+        res.push(parse_quote! {
+            impl<F: TypeCtor, #(#params),*> TypeCtor for #ctx<F, #(#params),*> {
+                type Apply<X> = F::Apply<(#(#slots,)*)>;
+            }
+        });
+        // Positions before `i` have already been cast to their `Output`.
+        let args = (0..n).filter(|j| *j != i).map(|j| {
+            let t = &tys[j];
+            if j < i {
+                quote! { #t::Output }
+            } else {
+                quote! { #t }
+            }
+        });
+        let ti = &tys[i];
+        casts.push(quote! {
+            let Ok(x) = #ti::cast::<#ctx<F, #(#args),*>>(x) else { unreachable!() };
+        });
+    }
+    res.push(parse_quote! {
+        impl<#(#tys: ToProxy),*> ToProxy for (#(#tys,)*) {
+            type Output = (#(#tys::Output,)*);
+            fn to_proxy(self) -> Self::Output {
+                (#(self.#idx.to_proxy(),)*)
+            }
+            const IS_ID: bool = #(#tys::IS_ID)&&*;
+            fn cast<F: TypeCtor>(x: F::Apply<Self>) -> Result<F::Apply<Self::Output>, F::Apply<Self>> {
+                // Check first, so that we never fail after casting only some positions.
+                if !Self::IS_ID {
+                    return Err(x);
+                }
+                #(#casts)*
+                Ok(x)
+            }
+        }
+    });
+    res
 }
 impl ProxyTrait<'_> {
     fn get_proxy_path(&self, src_path: &[String]) -> Vec<String> {
