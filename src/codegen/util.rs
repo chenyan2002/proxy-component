@@ -1,4 +1,6 @@
 use heck::ToKebabCase;
+use proc_macro2::TokenStream;
+use quote::quote;
 use syn::{FnArg, Ident, Signature, Type, parse_quote, visit_mut::VisitMut};
 pub struct FullTypePath<'a> {
     pub module_path: &'a [String],
@@ -137,6 +139,31 @@ impl<'a> VisitMut for FullTypePath<'a> {
             };
         }
         syn::visit_mut::visit_type_path_mut(self, ty);
+    }
+}
+
+/// WAVE string of `self`, the first param of a resource method.
+// Use ToValue::to_value to avoid the auto-deref from self.to_value()
+pub fn self_wave(kind: &Option<ResourceFuncKind>) -> Option<TokenStream> {
+    matches!(kind, Some(ResourceFuncKind::Method))
+        .then(|| quote! { wasm_wave::to_string(&ToValue::to_value(&self)).unwrap() })
+}
+/// Initial `Vec<String>` of WAVE params: `self` for methods, empty otherwise.
+pub fn init_params(kind: &Option<ResourceFuncKind>) -> TokenStream {
+    match self_wave(kind) {
+        Some(self_wave) => quote! { vec![#self_wave] },
+        None => quote! { Vec::new() },
+    }
+}
+/// Binds `__params` to the WAVE strings of `self` (for methods) and each arg.
+pub fn params_to_wave(kind: &Option<ResourceFuncKind>, args: &[ArgInfo]) -> TokenStream {
+    let init = init_params(kind);
+    let arg_names = args.iter().map(|arg| &arg.ident);
+    quote! {
+        let mut __params: Vec<String> = #init;
+        #(
+            __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
+        )*
     }
 }
 

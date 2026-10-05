@@ -1,5 +1,6 @@
 use super::util::{
-    ResourceFuncKind, extract_arg_info, get_return_type, is_wrapped_module, wit_func_name,
+    ResourceFuncKind, extract_arg_info, get_return_type, init_params, is_wrapped_module,
+    wit_func_name,
 };
 use super::{GenerateMode, State, get_proxy_path};
 use quote::quote;
@@ -52,11 +53,7 @@ impl State {
                 }
             },
             GenerateMode::Record => {
-                let init_vec = if matches!(kind, Some(ResourceFuncKind::Method)) {
-                    quote! { vec![wasm_wave::to_string(&ToValue::to_value(&self)).unwrap()] }
-                } else {
-                    quote! { Vec::new() }
-                };
+                let init_vec = init_params(&kind);
                 let is_mut = if args.is_empty() {
                     quote! {}
                 } else {
