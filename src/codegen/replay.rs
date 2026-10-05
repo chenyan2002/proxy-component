@@ -1,5 +1,5 @@
 use super::util::{
-    constructor_resource_name, extract_arg_info, get_return_type, self_wave, wit_func_name,
+    constructor_resource_name, extract_arg_info, get_return_type, params_to_wave, wit_func_name,
 };
 use super::{ExportFunc, State};
 use quote::quote;
@@ -14,7 +14,6 @@ impl State {
     ) -> syn::ImplItemFn {
         let func_name = &sig.ident;
         let (kind, args) = extract_arg_info(sig);
-        let arg_names = args.iter().map(|arg| &arg.ident);
         let display_name = wit_func_name(module_path, resource, func_name, &kind);
         let ret_ty = get_return_type(&sig.output);
         let replay_import = if let Some(ret_ty) = ret_ty {
@@ -25,20 +24,20 @@ impl State {
                 None => quote! { ret.to_rust() },
             };
             quote! {
-                let wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&args)).unwrap();
+                let wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&__params)).unwrap();
                 let ret: Value = wasm_wave::from_str(&<#ret_ty as ValueTyped>::value_type(), &wave).unwrap();
                 #to_rust
             }
         } else {
             quote! {
-                let wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&args));
+                let wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&__params));
                 assert!(wave.is_none());
             }
         };
-        let self_value = self_wave(&kind).map(|self_wave| quote! { #self_wave, });
+        let params = params_to_wave(&kind, &args);
         parse_quote! {
             #sig {
-                let args = vec![#self_value #( wasm_wave::to_string(&#arg_names.to_value()).unwrap() ),*];
+                #params
                 #replay_import
             }
         }

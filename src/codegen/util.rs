@@ -142,17 +142,13 @@ impl<'a> VisitMut for FullTypePath<'a> {
     }
 }
 
-/// WAVE string of `self`, the first param of a resource method.
-// Use ToValue::to_value to avoid the auto-deref from self.to_value()
-pub fn self_wave(kind: &Option<ResourceFuncKind>) -> Option<TokenStream> {
-    matches!(kind, Some(ResourceFuncKind::Method))
-        .then(|| quote! { wasm_wave::to_string(&ToValue::to_value(&self)).unwrap() })
-}
 /// Initial `Vec<String>` of WAVE params: `self` for methods, empty otherwise.
 pub fn init_params(kind: &Option<ResourceFuncKind>) -> TokenStream {
-    match self_wave(kind) {
-        Some(self_wave) => quote! { vec![#self_wave] },
-        None => quote! { Vec::new() },
+    if matches!(kind, Some(ResourceFuncKind::Method)) {
+        // Use ToValue::to_value to avoid the auto-deref from self.to_value()
+        quote! { vec![wasm_wave::to_string(&ToValue::to_value(&self)).unwrap()] }
+    } else {
+        quote! { Vec::new() }
     }
 }
 /// Binds `__params` to the WAVE strings of `self` (for methods) and each arg.
