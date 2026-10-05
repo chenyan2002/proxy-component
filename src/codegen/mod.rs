@@ -1,6 +1,3 @@
-use crate::util::{
-    FullTypePath, get_resource_from_trait_name, get_return_type, make_path, toggle_wrapped_module,
-};
 use anyhow::Result;
 use heck::ToKebabCase;
 use quote::quote;
@@ -10,11 +7,16 @@ use syn::{
     File, Ident, Item, ItemEnum, ItemStruct, ItemTrait, Signature, TraitItem, Type, parse_quote,
     visit_mut::VisitMut,
 };
+use util::{
+    FullTypePath, get_resource_from_trait_name, get_return_type, make_path, toggle_wrapped_module,
+};
 
 mod dialog;
 mod fuzz;
+mod parse;
 mod record;
 mod replay;
+pub mod util;
 
 #[derive(clap::Parser)]
 pub struct GenerateArgs {

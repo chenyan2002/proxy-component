@@ -1,5 +1,5 @@
 use super::State;
-use crate::util::{
+use super::util::{
     FullTypePath, ResourceFuncKind, constructor_resource_name, extract_arg_info, get_owned_type,
     get_return_type, make_path, wit_func_name,
 };

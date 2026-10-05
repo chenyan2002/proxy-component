@@ -1,6 +1,6 @@
 use crate::Mode;
 use crate::instrument::InstrumentArgs;
-use crate::util::*;
+use crate::wit_util::*;
 use anyhow::{Result, bail};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;

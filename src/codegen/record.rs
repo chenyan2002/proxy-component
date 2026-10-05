@@ -1,7 +1,7 @@
-use super::{GenerateMode, State, get_proxy_path};
-use crate::util::{
+use super::util::{
     ResourceFuncKind, extract_arg_info, get_return_type, is_wrapped_module, wit_func_name,
 };
+use super::{GenerateMode, State, get_proxy_path};
 use quote::quote;
 use syn::{Signature, parse_quote};
 

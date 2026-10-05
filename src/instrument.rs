@@ -39,7 +39,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
 
     // 2. Extract WIT from the wasm component into {tmp_dir/wit}
     // TODO: no need to write to disk
-    crate::util::extract_wit(&args.wasm_file, &wit_dir)?;
+    crate::wit_util::extract_wit(&args.wasm_file, &wit_dir)?;
 
     // 3. Parse the main wit file from tmp_dir/wit and feed into opts.generate_component
     let (resolve, world) = parse_wit(&wit_dir, None)?;
@@ -152,7 +152,7 @@ fn bindgen(
     use_custom_allocator: bool,
 ) -> Result<()> {
     let out_dir = tmp_dir.join(dest_name);
-    crate::util::generate_bindings(wit_dir, world_name, &out_dir)?;
+    crate::wit_util::generate_bindings(wit_dir, world_name, &out_dir)?;
     let binding_file = out_dir.join(world_name.to_owned() + ".rs");
     let codegen_mode = match mode {
         Mode::Record => codegen::GenerateMode::Record,
