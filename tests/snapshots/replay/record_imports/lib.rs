@@ -19,7 +19,7 @@ impl exports::test::host::types::Guest for Stub {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&x)).unwrap());
         __params.push(wasm_wave::to_string(&ToValue::to_value(&y)).unwrap());
         let wave = proxy::recorder::replay::replay_import(
-                Some("test:host/types.make-point"),
+                Some("test:host/types@0.1.0.make-point"),
                 Some(&__params),
             )
             .unwrap();
@@ -38,7 +38,7 @@ impl exports::test::host::types::Guest for Stub {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
         __params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
         let wave = proxy::recorder::replay::replay_import(
-                Some("test:host/types.check"),
+                Some("test:host/types@0.1.0.check"),
                 Some(&__params),
             )
             .unwrap();
@@ -58,7 +58,7 @@ impl exports::test::host::types::Guest for Stub {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
         let wave = proxy::recorder::replay::replay_import(
-                Some("test:host/types.open"),
+                Some("test:host/types@0.1.0.open"),
                 Some(&__params),
             )
             .unwrap();
@@ -78,7 +78,7 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
         let wave = proxy::recorder::replay::replay_import(
-                Some("[constructor]test:host/types/counter.new"),
+                Some("[constructor]test:host/types/counter@0.1.0.new"),
                 Some(&__params),
             )
             .unwrap();
@@ -94,7 +94,7 @@ impl exports::test::host::types::GuestCounter for MockedResource {
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
         let wave = proxy::recorder::replay::replay_import(
-                Some("[method]test:host/types/counter.get"),
+                Some("[method]test:host/types/counter@0.1.0.get"),
                 Some(&__params),
             )
             .unwrap();
@@ -108,7 +108,7 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         ];
         __params.push(wasm_wave::to_string(&ToValue::to_value(&n)).unwrap());
         let wave = proxy::recorder::replay::replay_import(
-            Some("[method]test:host/types/counter.add"),
+            Some("[method]test:host/types/counter@0.1.0.add"),
             Some(&__params),
         );
         assert!(wave.is_none());
@@ -121,7 +121,7 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&a)).unwrap());
         __params.push(wasm_wave::to_string(&ToValue::to_value(&b)).unwrap());
         let wave = proxy::recorder::replay::replay_import(
-                Some("test:host/types/counter.merge"),
+                Some("test:host/types/counter@0.1.0.merge"),
                 Some(&__params),
             )
             .unwrap();
@@ -138,7 +138,7 @@ impl exports::test::log0_1_0::sink::Guest for Stub {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
         let wave = proxy::recorder::replay::replay_import(
-            Some("test:log/sink.write"),
+            Some("test:log/sink@0.1.0.write"),
             Some(&__params),
         );
         assert!(wave.is_none());
@@ -149,7 +149,7 @@ impl exports::test::log0_2_0::sink::Guest for Stub {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
         let wave = proxy::recorder::replay::replay_import(
-                Some("test:log/sink.write"),
+                Some("test:log/sink@0.2.0.write"),
                 Some(&__params),
             )
             .unwrap();

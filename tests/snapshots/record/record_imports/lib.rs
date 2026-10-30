@@ -23,14 +23,14 @@ impl exports::wrapped_test::host::types::Guest for Stub {
         let y = y.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&y)).unwrap());
         proxy::recorder::record::record_args(
-            Some("test:host/types.make-point"),
+            Some("test:host/types@0.1.0.make-point"),
             &params,
             false,
         );
         let res = test::host::types::make_point(x, y);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("test:host/types.make-point"),
+            Some("test:host/types@0.1.0.make-point"),
             Some(&wave_res),
             false,
         );
@@ -46,14 +46,14 @@ impl exports::wrapped_test::host::types::Guest for Stub {
         let c = c.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
         proxy::recorder::record::record_args(
-            Some("test:host/types.check"),
+            Some("test:host/types@0.1.0.check"),
             &params,
             false,
         );
         let res = test::host::types::check(p, c);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("test:host/types.check"),
+            Some("test:host/types@0.1.0.check"),
             Some(&wave_res),
             false,
         );
@@ -66,14 +66,14 @@ impl exports::wrapped_test::host::types::Guest for Stub {
         let name = name.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
         proxy::recorder::record::record_args(
-            Some("test:host/types.open"),
+            Some("test:host/types@0.1.0.open"),
             &params,
             false,
         );
         let res = test::host::types::open(&name);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("test:host/types.open"),
+            Some("test:host/types@0.1.0.open"),
             Some(&wave_res),
             false,
         );
@@ -86,14 +86,14 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
         let start = start.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
         proxy::recorder::record::record_args(
-            Some("[constructor]test:host/types/counter.new"),
+            Some("[constructor]test:host/types/counter@0.1.0.new"),
             &params,
             false,
         );
         let res = Self::new(start);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("[constructor]test:host/types/counter.new"),
+            Some("[constructor]test:host/types/counter@0.1.0.new"),
             Some(&wave_res),
             false,
         );
@@ -104,14 +104,14 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
         proxy::recorder::record::record_args(
-            Some("[method]test:host/types/counter.get"),
+            Some("[method]test:host/types/counter@0.1.0.get"),
             &params,
             false,
         );
         let res = self.get();
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("[method]test:host/types/counter.get"),
+            Some("[method]test:host/types/counter@0.1.0.get"),
             Some(&wave_res),
             false,
         );
@@ -124,13 +124,13 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
         let n = n.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&n)).unwrap());
         proxy::recorder::record::record_args(
-            Some("[method]test:host/types/counter.add"),
+            Some("[method]test:host/types/counter@0.1.0.add"),
             &params,
             false,
         );
         self.add(n);
         proxy::recorder::record::record_ret(
-            Some("[method]test:host/types/counter.add"),
+            Some("[method]test:host/types/counter@0.1.0.add"),
             None,
             false,
         );
@@ -145,14 +145,14 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
         let b = b.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&b)).unwrap());
         proxy::recorder::record::record_args(
-            Some("test:host/types/counter.merge"),
+            Some("test:host/types/counter@0.1.0.merge"),
             &params,
             false,
         );
         let res = Self::merge(&a, b);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("test:host/types/counter.merge"),
+            Some("test:host/types/counter@0.1.0.merge"),
             Some(&wave_res),
             false,
         );
@@ -165,12 +165,16 @@ impl exports::wrapped_test::log0_1_0::sink::Guest for Stub {
         let msg = msg.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
         proxy::recorder::record::record_args(
-            Some("test:log/sink.write"),
+            Some("test:log/sink@0.1.0.write"),
             &params,
             false,
         );
         test::log0_1_0::sink::write(&msg);
-        proxy::recorder::record::record_ret(Some("test:log/sink.write"), None, false);
+        proxy::recorder::record::record_ret(
+            Some("test:log/sink@0.1.0.write"),
+            None,
+            false,
+        );
     }
 }
 impl exports::wrapped_test::log0_2_0::sink::Guest for Stub {
@@ -179,14 +183,14 @@ impl exports::wrapped_test::log0_2_0::sink::Guest for Stub {
         let msg = msg.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
         proxy::recorder::record::record_args(
-            Some("test:log/sink.write"),
+            Some("test:log/sink@0.2.0.write"),
             &params,
             false,
         );
         let res = test::log0_2_0::sink::write(&msg);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("test:log/sink.write"),
+            Some("test:log/sink@0.2.0.write"),
             Some(&wave_res),
             false,
         );

@@ -19,7 +19,7 @@ use wit_parser::{
 /// A WIT function of the bindings.
 pub struct WitFunc {
     pub kind: Option<ResourceFuncKind>,
-    /// The name traces use, e.g. `[method]ns:pkg/iface/res.func`
+    /// The name traces use, e.g. `[method]ns:pkg/iface/res@0.1.0.func`
     pub display_name: String,
     /// The WIT name of the resource of a constructor, method or static function
     pub resource: Option<String>,
@@ -44,7 +44,7 @@ impl WitFunc {
 pub struct WitType {
     /// e.g. `point`
     pub name: String,
-    /// e.g. `ns:pkg/iface.point`
+    /// e.g. `ns:pkg/iface@0.1.0.point`
     pub qualified_name: String,
     /// The record's fields, the variant's or enum's cases, or the flags, in order
     pub members: Vec<String>,
@@ -140,13 +140,21 @@ fn rust_func_name(func: &Function) -> String {
 }
 
 impl State {
-    /// The interface of a Rust module, named as in traces, e.g. `ns:pkg/iface`. In record mode,
-    /// the guest sees each wrapped interface under its own name.
-    fn interface_name(&self, id: InterfaceId) -> String {
+    /// An interface, or one of its resources, named as in traces, with the version last, as
+    /// component-ui names them: e.g. `ns:pkg/iface@0.1.0`, or `ns:pkg/iface/res@0.1.0`. In record
+    /// mode, the guest sees each wrapped interface under its own name.
+    fn interface_name(&self, id: InterfaceId, resource: Option<&str>) -> String {
         let iface = &self.resolve.interfaces[id];
         let pkg = &self.resolve.packages[iface.package.unwrap()].name;
         let namespace = strip_wrapped(&pkg.namespace).unwrap_or(&pkg.namespace);
-        format!("{namespace}:{}/{}", pkg.name, iface.name.as_ref().unwrap())
+        let mut name = format!("{namespace}:{}/{}", pkg.name, iface.name.as_ref().unwrap());
+        if let Some(resource) = resource {
+            name.push_str(&format!("/{resource}"));
+        }
+        if let Some(version) = &pkg.version {
+            name.push_str(&format!("@{version}"));
+        }
+        name
     }
     /// A WIT type as WIT source writes it, e.g. `list<u8>` or `borrow<x>`.
     fn type_name(&self, ty: &Type) -> String {
@@ -183,7 +191,7 @@ impl State {
         };
         let iface = self.interfaces[module_path];
         WitType {
-            qualified_name: format!("{}.{name}", self.interface_name(iface)),
+            qualified_name: format!("{}.{name}", self.interface_name(iface, None)),
             name,
             members,
             field_types,
@@ -246,10 +254,7 @@ impl State {
             Some(ResourceFuncKind::Method) => "[method]".to_string(),
             None => String::new(),
         };
-        display_name.push_str(&self.interface_name(iface_id));
-        if let Some(resource) = &resource {
-            display_name.push_str(&format!("/{resource}"));
-        }
+        display_name.push_str(&self.interface_name(iface_id, resource.as_deref()));
         let func_name = match kind {
             Some(ResourceFuncKind::Constructor) => "new",
             _ => wit_func.item_name(),

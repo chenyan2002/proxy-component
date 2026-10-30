@@ -46,7 +46,7 @@ pub struct ItemFlag {
 }
 /// An exported function of the main component, see `State::export_funcs`.
 struct ExportFunc {
-    /// WIT name, e.g. `ns:pkg/iface.func`
+    /// WIT name, e.g. `ns:pkg/iface@0.1.0.func`
     display_name: String,
     /// Rust path to the function
     func: syn::Path,

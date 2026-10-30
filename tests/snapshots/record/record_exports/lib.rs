@@ -12,11 +12,15 @@ impl exports::test::guest::api::Guest for Stub {
         params.push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
         let c = c.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
-        proxy::recorder::record::record_args(Some("test:guest/api.run"), &params, true);
+        proxy::recorder::record::record_args(
+            Some("test:guest/api@0.1.0.run"),
+            &params,
+            true,
+        );
         let res = wrapped_test::guest::api::run(&p, &c);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("test:guest/api.run"),
+            Some("test:guest/api@0.1.0.run"),
             Some(&wave_res),
             true,
         );
@@ -29,14 +33,14 @@ impl exports::test::guest::api::Guest for Stub {
         let s = s.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&s)).unwrap());
         proxy::recorder::record::record_args(
-            Some("test:guest/api.classify"),
+            Some("test:guest/api@0.1.0.classify"),
             &params,
             true,
         );
         let res = wrapped_test::guest::api::classify(&s);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("test:guest/api.classify"),
+            Some("test:guest/api@0.1.0.classify"),
             Some(&wave_res),
             true,
         );
@@ -49,14 +53,14 @@ impl exports::test::guest::api::Guest for Stub {
         let c = c.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
         proxy::recorder::record::record_args(
-            Some("test:guest/api.begin"),
+            Some("test:guest/api@0.1.0.begin"),
             &params,
             true,
         );
         let res = wrapped_test::guest::api::begin(c);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("test:guest/api.begin"),
+            Some("test:guest/api@0.1.0.begin"),
             Some(&wave_res),
             true,
         );

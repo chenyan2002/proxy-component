@@ -20,9 +20,9 @@ impl exports::test::host::types::Guest for Stub {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&y)).unwrap());
         let mut __buf = __params.join(",");
         proxy::util::debug::print(
-            &format!("import: {}({})", "test:host/types.make-point", __buf),
+            &format!("import: {}({})", "test:host/types@0.1.0.make-point", __buf),
         );
-        __buf += "test:host/types.make-point";
+        __buf += "test:host/types@0.1.0.make-point";
         let mut u = Unstructured::new(&__buf.as_bytes());
         let res = u.arbitrary().unwrap();
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
@@ -38,9 +38,9 @@ impl exports::test::host::types::Guest for Stub {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
         let mut __buf = __params.join(",");
         proxy::util::debug::print(
-            &format!("import: {}({})", "test:host/types.check", __buf),
+            &format!("import: {}({})", "test:host/types@0.1.0.check", __buf),
         );
-        __buf += "test:host/types.check";
+        __buf += "test:host/types@0.1.0.check";
         let mut u = Unstructured::new(&__buf.as_bytes());
         let res = u.arbitrary().unwrap();
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
@@ -54,9 +54,9 @@ impl exports::test::host::types::Guest for Stub {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
         let mut __buf = __params.join(",");
         proxy::util::debug::print(
-            &format!("import: {}({})", "test:host/types.open", __buf),
+            &format!("import: {}({})", "test:host/types@0.1.0.open", __buf),
         );
-        __buf += "test:host/types.open";
+        __buf += "test:host/types@0.1.0.open";
         let mut u = Unstructured::new(&__buf.as_bytes());
         let res = u.arbitrary().unwrap();
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
@@ -70,9 +70,11 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
         let mut __buf = __params.join(",");
         proxy::util::debug::print(
-            &format!("import: {}({})", "[constructor]test:host/types/counter.new", __buf),
+            &format!(
+                "import: {}({})", "[constructor]test:host/types/counter@0.1.0.new", __buf
+            ),
         );
-        __buf += "[constructor]test:host/types/counter.new";
+        __buf += "[constructor]test:host/types/counter@0.1.0.new";
         let mut u = Unstructured::new(&__buf.as_bytes());
         let res = MockedResource {
             name: "counter".to_string(),
@@ -88,9 +90,11 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         ];
         let mut __buf = __params.join(",");
         proxy::util::debug::print(
-            &format!("import: {}({})", "[method]test:host/types/counter.get", __buf),
+            &format!(
+                "import: {}({})", "[method]test:host/types/counter@0.1.0.get", __buf
+            ),
         );
-        __buf += "[method]test:host/types/counter.get";
+        __buf += "[method]test:host/types/counter@0.1.0.get";
         let mut u = Unstructured::new(&__buf.as_bytes());
         let res = u.arbitrary().unwrap();
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
@@ -108,9 +112,9 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&b)).unwrap());
         let mut __buf = __params.join(",");
         proxy::util::debug::print(
-            &format!("import: {}({})", "test:host/types/counter.merge", __buf),
+            &format!("import: {}({})", "test:host/types/counter@0.1.0.merge", __buf),
         );
-        __buf += "test:host/types/counter.merge";
+        __buf += "test:host/types/counter@0.1.0.merge";
         let mut u = Unstructured::new(&__buf.as_bytes());
         let res = u.arbitrary().unwrap();
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
@@ -128,9 +132,9 @@ impl exports::test::log0_2_0::sink::Guest for Stub {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
         let mut __buf = __params.join(",");
         proxy::util::debug::print(
-            &format!("import: {}({})", "test:log/sink.write", __buf),
+            &format!("import: {}({})", "test:log/sink@0.2.0.write", __buf),
         );
-        __buf += "test:log/sink.write";
+        __buf += "test:log/sink@0.2.0.write";
         let mut u = Unstructured::new(&__buf.as_bytes());
         let res = u.arbitrary().unwrap();
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();

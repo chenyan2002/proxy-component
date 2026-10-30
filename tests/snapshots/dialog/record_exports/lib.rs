@@ -10,14 +10,14 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 "Select an export function to call",
                 &[
                     "All done".to_string(),
-                    "test:guest/api.run".to_string(),
-                    "test:guest/api.classify".to_string(),
-                    "test:guest/api.begin".to_string(),
-                    "test:host/types.make-point".to_string(),
-                    "test:host/types.check".to_string(),
-                    "test:host/types.open".to_string(),
-                    "[constructor]test:host/types/counter.new".to_string(),
-                    "test:host/types/counter.merge".to_string(),
+                    "test:guest/api@0.1.0.run".to_string(),
+                    "test:guest/api@0.1.0.classify".to_string(),
+                    "test:guest/api@0.1.0.begin".to_string(),
+                    "test:host/types@0.1.0.make-point".to_string(),
+                    "test:host/types@0.1.0.check".to_string(),
+                    "test:host/types@0.1.0.open".to_string(),
+                    "[constructor]test:host/types/counter@0.1.0.new".to_string(),
+                    "test:host/types/counter@0.1.0.merge".to_string(),
                 ],
             ) as usize;
             match idx {
@@ -25,7 +25,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 1usize => {
                     proxy::util::dialog::print(
                         0,
-                        &format!("call export func {}", "test:guest/api.run"),
+                        &format!("call export func {}", "test:guest/api@0.1.0.run"),
                     );
                     let mut __params: Vec<String> = Vec::new();
                     proxy::util::dialog::print(
@@ -46,7 +46,8 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     proxy::util::dialog::print(
                         0,
                         &format!(
-                            "export: {}({})", "test:guest/api.run", __params.join(", ")
+                            "export: {}({})", "test:guest/api@0.1.0.run", __params
+                            .join(", ")
                         ),
                     );
                     let _ = test::guest::api::run(&p, &c);
@@ -54,7 +55,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 2usize => {
                     proxy::util::dialog::print(
                         0,
-                        &format!("call export func {}", "test:guest/api.classify"),
+                        &format!("call export func {}", "test:guest/api@0.1.0.classify"),
                     );
                     let mut __params: Vec<String> = Vec::new();
                     proxy::util::dialog::print(
@@ -66,7 +67,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     proxy::util::dialog::print(
                         0,
                         &format!(
-                            "export: {}({})", "test:guest/api.classify", __params
+                            "export: {}({})", "test:guest/api@0.1.0.classify", __params
                             .join(", ")
                         ),
                     );
@@ -75,7 +76,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 3usize => {
                     proxy::util::dialog::print(
                         0,
-                        &format!("call export func {}", "test:guest/api.begin"),
+                        &format!("call export func {}", "test:guest/api@0.1.0.begin"),
                     );
                     let mut __params: Vec<String> = Vec::new();
                     proxy::util::dialog::print(
@@ -87,7 +88,8 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     proxy::util::dialog::print(
                         0,
                         &format!(
-                            "export: {}({})", "test:guest/api.begin", __params.join(", ")
+                            "export: {}({})", "test:guest/api@0.1.0.begin", __params
+                            .join(", ")
                         ),
                     );
                     let _ = test::guest::api::begin(c);
@@ -95,7 +97,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 4usize => {
                     proxy::util::dialog::print(
                         0,
-                        &format!("call export func {}", "test:host/types.make-point"),
+                        &format!(
+                            "call export func {}", "test:host/types@0.1.0.make-point"
+                        ),
                     );
                     let mut __params: Vec<String> = Vec::new();
                     proxy::util::dialog::print(
@@ -113,8 +117,8 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     proxy::util::dialog::print(
                         0,
                         &format!(
-                            "export: {}({})", "test:host/types.make-point", __params
-                            .join(", ")
+                            "export: {}({})", "test:host/types@0.1.0.make-point",
+                            __params.join(", ")
                         ),
                     );
                     let _ = test::host::types::make_point(x, y);
@@ -122,7 +126,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 5usize => {
                     proxy::util::dialog::print(
                         0,
-                        &format!("call export func {}", "test:host/types.check"),
+                        &format!("call export func {}", "test:host/types@0.1.0.check"),
                     );
                     let mut __params: Vec<String> = Vec::new();
                     proxy::util::dialog::print(
@@ -140,7 +144,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     proxy::util::dialog::print(
                         0,
                         &format!(
-                            "export: {}({})", "test:host/types.check", __params
+                            "export: {}({})", "test:host/types@0.1.0.check", __params
                             .join(", ")
                         ),
                     );
@@ -149,7 +153,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 6usize => {
                     proxy::util::dialog::print(
                         0,
-                        &format!("call export func {}", "test:host/types.open"),
+                        &format!("call export func {}", "test:host/types@0.1.0.open"),
                     );
                     let mut __params: Vec<String> = Vec::new();
                     proxy::util::dialog::print(
@@ -164,7 +168,8 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     proxy::util::dialog::print(
                         0,
                         &format!(
-                            "export: {}({})", "test:host/types.open", __params.join(", ")
+                            "export: {}({})", "test:host/types@0.1.0.open", __params
+                            .join(", ")
                         ),
                     );
                     let _ = test::host::types::open(&name);
@@ -174,7 +179,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         0,
                         &format!(
                             "call export func {}",
-                            "[constructor]test:host/types/counter.new"
+                            "[constructor]test:host/types/counter@0.1.0.new"
                         ),
                     );
                     let mut __params: Vec<String> = Vec::new();
@@ -188,8 +193,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     proxy::util::dialog::print(
                         0,
                         &format!(
-                            "export: {}({})", "[constructor]test:host/types/counter.new",
-                            __params.join(", ")
+                            "export: {}({})",
+                            "[constructor]test:host/types/counter@0.1.0.new", __params
+                            .join(", ")
                         ),
                     );
                     let _ = test::host::types::Counter::new(start);
@@ -197,7 +203,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 8usize => {
                     proxy::util::dialog::print(
                         0,
-                        &format!("call export func {}", "test:host/types/counter.merge"),
+                        &format!(
+                            "call export func {}", "test:host/types/counter@0.1.0.merge"
+                        ),
                     );
                     let mut __params: Vec<String> = Vec::new();
                     proxy::util::dialog::print(
@@ -218,8 +226,8 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     proxy::util::dialog::print(
                         0,
                         &format!(
-                            "export: {}({})", "test:host/types/counter.merge", __params
-                            .join(", ")
+                            "export: {}({})", "test:host/types/counter@0.1.0.merge",
+                            __params.join(", ")
                         ),
                     );
                     let _ = test::host::types::Counter::merge(&a, b);
@@ -502,7 +510,7 @@ impl Dialog for test::host::types::Point {
     fn read_value(dep: u32) -> Self {
         proxy::util::dialog::print(
             dep,
-            &format!("provide value for struct {}", "test:host/types.point"),
+            &format!("provide value for struct {}", "test:host/types@0.1.0.point"),
         );
         proxy::util::dialog::print(
             dep + 1,
@@ -526,7 +534,7 @@ impl Dialog for test::host::types::Shape {
     fn read_value(dep: u32) -> Self {
         let idx = proxy::util::dialog::read_select(
             dep,
-            &format!("Select a variant for {}", "test:host/types.shape"),
+            &format!("Select a variant for {}", "test:host/types@0.1.0.shape"),
             &[
                 "circle".to_string(),
                 "rect".to_string(),
@@ -547,7 +555,7 @@ impl Dialog for test::host::types::Color {
     fn read_value(dep: u32) -> Self {
         let idx = proxy::util::dialog::read_select(
             dep,
-            &format!("Select a variant for {}", "test:host/types.color"),
+            &format!("Select a variant for {}", "test:host/types@0.1.0.color"),
             &["red".to_string(), "green".to_string(), "DNS-blue".to_string()],
         ) as usize;
         match idx {
@@ -562,7 +570,7 @@ impl Dialog for test::host::types::Perms {
     fn read_value(dep: u32) -> Self {
         let selections = proxy::util::dialog::read_multi_select(
             dep,
-            &format!("Select flags for {}", "test:host/types.perms"),
+            &format!("Select flags for {}", "test:host/types@0.1.0.perms"),
             &["read".to_string(), "write".to_string(), "exec".to_string()],
         );
         let mut res = test::host::types::Perms::empty();

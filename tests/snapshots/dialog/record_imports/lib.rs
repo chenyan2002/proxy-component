@@ -20,7 +20,9 @@ impl exports::test::host::types::Guest for Stub {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&y)).unwrap());
         proxy::util::dialog::print(
             0,
-            &format!("import: {}({})", "test:host/types.make-point", __params.join(", ")),
+            &format!(
+                "import: {}({})", "test:host/types@0.1.0.make-point", __params.join(", ")
+            ),
         );
         proxy::util::dialog::print(0, &format!("return type: {}", "point"));
         let ret = Dialog::read_value(0);
@@ -41,7 +43,9 @@ impl exports::test::host::types::Guest for Stub {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
         proxy::util::dialog::print(
             0,
-            &format!("import: {}({})", "test:host/types.check", __params.join(", ")),
+            &format!(
+                "import: {}({})", "test:host/types@0.1.0.check", __params.join(", ")
+            ),
         );
         proxy::util::dialog::print(
             0,
@@ -63,7 +67,7 @@ impl exports::test::host::types::Guest for Stub {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
         proxy::util::dialog::print(
             0,
-            &format!("import: {}({})", "test:host/types.open", __params.join(", ")),
+            &format!("import: {}({})", "test:host/types@0.1.0.open", __params.join(", ")),
         );
         proxy::util::dialog::print(
             0,
@@ -86,8 +90,8 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         proxy::util::dialog::print(
             0,
             &format!(
-                "import: {}({})", "[constructor]test:host/types/counter.new", __params
-                .join(", ")
+                "import: {}({})", "[constructor]test:host/types/counter@0.1.0.new",
+                __params.join(", ")
             ),
         );
         proxy::util::dialog::print(0, &format!("return type: {}", "counter"));
@@ -110,7 +114,7 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         proxy::util::dialog::print(
             0,
             &format!(
-                "import: {}({})", "[method]test:host/types/counter.get", __params
+                "import: {}({})", "[method]test:host/types/counter@0.1.0.get", __params
                 .join(", ")
             ),
         );
@@ -136,7 +140,8 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         proxy::util::dialog::print(
             0,
             &format!(
-                "import: {}({})", "test:host/types/counter.merge", __params.join(", ")
+                "import: {}({})", "test:host/types/counter@0.1.0.merge", __params
+                .join(", ")
             ),
         );
         proxy::util::dialog::print(0, &format!("return type: {}", "counter"));
@@ -160,7 +165,7 @@ impl exports::test::log0_2_0::sink::Guest for Stub {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
         proxy::util::dialog::print(
             0,
-            &format!("import: {}({})", "test:log/sink.write", __params.join(", ")),
+            &format!("import: {}({})", "test:log/sink@0.2.0.write", __params.join(", ")),
         );
         proxy::util::dialog::print(0, &format!("return type: {}", "bool"));
         let ret = Dialog::read_value(0);
@@ -441,7 +446,7 @@ impl Dialog for exports::test::host::types::Point {
     fn read_value(dep: u32) -> Self {
         proxy::util::dialog::print(
             dep,
-            &format!("provide value for struct {}", "test:host/types.point"),
+            &format!("provide value for struct {}", "test:host/types@0.1.0.point"),
         );
         proxy::util::dialog::print(
             dep + 1,
@@ -465,7 +470,7 @@ impl Dialog for exports::test::host::types::Shape {
     fn read_value(dep: u32) -> Self {
         let idx = proxy::util::dialog::read_select(
             dep,
-            &format!("Select a variant for {}", "test:host/types.shape"),
+            &format!("Select a variant for {}", "test:host/types@0.1.0.shape"),
             &[
                 "circle".to_string(),
                 "rect".to_string(),
@@ -492,7 +497,7 @@ impl Dialog for exports::test::host::types::Color {
     fn read_value(dep: u32) -> Self {
         let idx = proxy::util::dialog::read_select(
             dep,
-            &format!("Select a variant for {}", "test:host/types.color"),
+            &format!("Select a variant for {}", "test:host/types@0.1.0.color"),
             &["red".to_string(), "green".to_string(), "DNS-blue".to_string()],
         ) as usize;
         match idx {
@@ -507,7 +512,7 @@ impl Dialog for exports::test::host::types::Perms {
     fn read_value(dep: u32) -> Self {
         let selections = proxy::util::dialog::read_multi_select(
             dep,
-            &format!("Select flags for {}", "test:host/types.perms"),
+            &format!("Select flags for {}", "test:host/types@0.1.0.perms"),
             &["read".to_string(), "write".to_string(), "exec".to_string()],
         );
         let mut res = exports::test::host::types::Perms::empty();

@@ -6,7 +6,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
     fn start() -> () {
         while let Some((method, args)) = proxy::recorder::replay::replay_export() {
             match method.as_str() {
-                "test:guest/api.run" => {
+                "test:guest/api@0.1.0.run" => {
                     let arg_value: Value = wasm_wave::from_str(
                             &<test::guest::api::Point as ValueTyped>::value_type(),
                             &args[0usize],
@@ -22,11 +22,11 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let res = test::guest::api::run(&p, &c);
                     let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
                     proxy::recorder::replay::assert_export_ret(
-                        Some("test:guest/api.run"),
+                        Some("test:guest/api@0.1.0.run"),
                         Some(&wave_res),
                     );
                 }
-                "test:guest/api.classify" => {
+                "test:guest/api@0.1.0.classify" => {
                     let arg_value: Value = wasm_wave::from_str(
                             &<test::guest::api::Shape as ValueTyped>::value_type(),
                             &args[0usize],
@@ -36,11 +36,11 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let res = test::guest::api::classify(&s);
                     let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
                     proxy::recorder::replay::assert_export_ret(
-                        Some("test:guest/api.classify"),
+                        Some("test:guest/api@0.1.0.classify"),
                         Some(&wave_res),
                     );
                 }
-                "test:guest/api.begin" => {
+                "test:guest/api@0.1.0.begin" => {
                     let arg_value: Value = wasm_wave::from_str(
                             &<test::guest::api::Counter as ValueTyped>::value_type(),
                             &args[0usize],
@@ -50,11 +50,11 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let res = test::guest::api::begin(c);
                     let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
                     proxy::recorder::replay::assert_export_ret(
-                        Some("test:guest/api.begin"),
+                        Some("test:guest/api@0.1.0.begin"),
                         Some(&wave_res),
                     );
                 }
-                "test:host/types.make-point" => {
+                "test:host/types@0.1.0.make-point" => {
                     let arg_value: Value = wasm_wave::from_str(
                             &<i32 as ValueTyped>::value_type(),
                             &args[0usize],
@@ -70,11 +70,11 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let res = test::host::types::make_point(x, y);
                     let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
                     proxy::recorder::replay::assert_export_ret(
-                        Some("test:host/types.make-point"),
+                        Some("test:host/types@0.1.0.make-point"),
                         Some(&wave_res),
                     );
                 }
-                "test:host/types.check" => {
+                "test:host/types@0.1.0.check" => {
                     let arg_value: Value = wasm_wave::from_str(
                             &<test::host::types::Perms as ValueTyped>::value_type(),
                             &args[0usize],
@@ -90,11 +90,11 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let res = test::host::types::check(p, c);
                     let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
                     proxy::recorder::replay::assert_export_ret(
-                        Some("test:host/types.check"),
+                        Some("test:host/types@0.1.0.check"),
                         Some(&wave_res),
                     );
                 }
-                "test:host/types.open" => {
+                "test:host/types@0.1.0.open" => {
                     let arg_value: Value = wasm_wave::from_str(
                             &<String as ValueTyped>::value_type(),
                             &args[0usize],
@@ -104,11 +104,11 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let res = test::host::types::open(&name);
                     let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
                     proxy::recorder::replay::assert_export_ret(
-                        Some("test:host/types.open"),
+                        Some("test:host/types@0.1.0.open"),
                         Some(&wave_res),
                     );
                 }
-                "[constructor]test:host/types/counter.new" => {
+                "[constructor]test:host/types/counter@0.1.0.new" => {
                     let arg_value: Value = wasm_wave::from_str(
                             &<u32 as ValueTyped>::value_type(),
                             &args[0usize],
@@ -118,11 +118,11 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let res = test::host::types::Counter::new(start);
                     let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
                     proxy::recorder::replay::assert_export_ret(
-                        Some("[constructor]test:host/types/counter.new"),
+                        Some("[constructor]test:host/types/counter@0.1.0.new"),
                         Some(&wave_res),
                     );
                 }
-                "test:host/types/counter.merge" => {
+                "test:host/types/counter@0.1.0.merge" => {
                     let arg_value: Value = wasm_wave::from_str(
                             &<test::host::types::Counter as ValueTyped>::value_type(),
                             &args[0usize],
@@ -138,7 +138,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let res = test::host::types::Counter::merge(&a, b);
                     let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
                     proxy::recorder::replay::assert_export_ret(
-                        Some("test:host/types/counter.merge"),
+                        Some("test:host/types/counter@0.1.0.merge"),
                         Some(&wave_res),
                     );
                 }
