@@ -1,0 +1,5 @@
+package proxy:conversion;
+interface conversion {
+  use test:host/types@0.1.0.{counter as test-host-types-counter};
+  get-mock-test-host-types-counter: func(handle: u32) -> test-host-types-counter;
+}

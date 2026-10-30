@@ -1,0 +1,5 @@
+package test:log@0.2.0;
+
+interface sink {
+  write: func(msg: string) -> bool;
+}

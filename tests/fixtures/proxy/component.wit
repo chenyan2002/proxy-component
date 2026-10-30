@@ -1,0 +1,11 @@
+// The WIT of a main component, as `extract_wit` writes it: the main package in
+// `component.wit`, which the generated `component:proxy` package then replaces, and the
+// others in `deps/`.
+package root:component;
+
+world root {
+  import test:host/types@0.1.0;
+  import test:log/sink@0.1.0;
+  import test:log/sink@0.2.0;
+  export test:guest/api@0.1.0;
+}

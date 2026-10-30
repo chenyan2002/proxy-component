@@ -1,0 +1,6 @@
+// Two versions of a package, whose Rust modules have the version in their names.
+package test:log@0.1.0;
+
+interface sink {
+  write: func(msg: string);
+}

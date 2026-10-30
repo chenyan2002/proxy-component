@@ -1,0 +1,19 @@
+package component:proxy;
+world imports {
+  import proxy:util/debug;
+  export proxy:conversion/conversion;
+  export test:host/types@0.1.0;
+  export test:log/sink@0.1.0;
+  export test:log/sink@0.2.0;
+}
+world tmp-exports {
+  import test:guest/api@0.1.0;
+  export proxy:recorder/start-replay@0.1.0;
+}
+world exports {
+  import proxy:util/debug;
+  import proxy:conversion/conversion;
+  import test:host/types@0.1.0;
+  import test:guest/api@0.1.0;
+  export proxy:recorder/start-replay@0.1.0;
+}

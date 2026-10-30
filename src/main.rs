@@ -9,6 +9,11 @@ mod wit_util;
 #[cfg(feature = "run")]
 mod run;
 
+#[cfg(test)]
+mod tests {
+    mod codegen;
+}
+
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {

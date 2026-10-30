@@ -41,43 +41,8 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     // TODO: no need to write to disk
     crate::wit_util::extract_wit(&args.wasm_file, &wit_dir)?;
 
-    // 3. Parse the main wit file from tmp_dir/wit and feed into opts.generate_component
-    let (resolve, world) = parse_wit(&wit_dir, None)?;
-    let mut opts = crate::ast::Opt::new(&args);
-    let mut files = Files::default();
-    opts.generate_component(&resolve, world, &mut files)?;
-
-    // 4. Write generated files to the temp directory.
-    for (name, content) in files.iter() {
-        let path = wit_dir.as_path().join(name);
-        std::fs::write(&path, content)?;
-    }
-    // Re-generate exports world to bring in extra imports
-    let (export_resolve, export_world) = parse_wit(&wit_dir, Some("tmp-exports"))?;
-    opts.generate_exports_world(&export_resolve, export_world, &mut files)?;
-    for (name, content) in files.iter() {
-        let path = wit_dir.as_path().join(name);
-        eprintln!("Generating: {}", path.display());
-        std::fs::write(&path, content)?;
-    }
-
-    // 5. Generate Rust binding for both import and export interface
-    bindgen(
-        &tmp_dir,
-        &wit_dir,
-        &args.mode,
-        "imports",
-        "record_imports",
-        args.one_byte_page_size,
-    )?;
-    bindgen(
-        &tmp_dir,
-        &wit_dir,
-        &args.mode,
-        "exports",
-        "record_exports",
-        args.one_byte_page_size,
-    )?;
+    // 3-5. Generate the WIT and Rust sources of the proxy components.
+    let mut opts = generate_sources(&args, &tmp_dir)?;
     // 6. cargo build
     let mut cmd = Command::new("cargo");
     if args.one_byte_page_size {
@@ -133,6 +98,50 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     Ok(())
 }
 
+/// Generates the WIT of the proxy components into `dir/wit`, next to the main component's
+/// WIT, and their Rust sources into `dir/record_imports` and `dir/record_exports`.
+pub fn generate_sources<'a>(args: &'a InstrumentArgs, dir: &Path) -> Result<crate::ast::Opt<'a>> {
+    let wit_dir = dir.join("wit");
+    // 3. Parse the main wit file from dir/wit and feed into opts.generate_component
+    let (resolve, world) = parse_wit(&wit_dir, None)?;
+    let mut opts = crate::ast::Opt::new(args);
+    let mut files = Files::default();
+    opts.generate_component(&resolve, world, &mut files)?;
+
+    // 4. Write generated files to the temp directory.
+    for (name, content) in files.iter() {
+        let path = wit_dir.as_path().join(name);
+        std::fs::write(&path, content)?;
+    }
+    // Re-generate exports world to bring in extra imports
+    let (export_resolve, export_world) = parse_wit(&wit_dir, Some("tmp-exports"))?;
+    opts.generate_exports_world(&export_resolve, export_world, &mut files)?;
+    for (name, content) in files.iter() {
+        let path = wit_dir.as_path().join(name);
+        eprintln!("Generating: {}", path.display());
+        std::fs::write(&path, content)?;
+    }
+
+    // 5. Generate Rust binding for both import and export interface
+    bindgen(
+        dir,
+        &wit_dir,
+        &args.mode,
+        "imports",
+        "record_imports",
+        args.one_byte_page_size,
+    )?;
+    bindgen(
+        dir,
+        &wit_dir,
+        &args.mode,
+        "exports",
+        "record_exports",
+        args.one_byte_page_size,
+    )?;
+    Ok(opts)
+}
+
 fn parse_wit(dir: &Path, world: Option<&str>) -> Result<(Resolve, WorldId)> {
     let mut resolve = Resolve::default();
     let (pkg, _files) = resolve
@@ -153,6 +162,7 @@ fn bindgen(
     use_custom_allocator: bool,
 ) -> Result<()> {
     let out_dir = tmp_dir.join(dest_name);
+    fs::create_dir_all(&out_dir)?;
     let (mut resolve, world) = parse_wit(wit_dir, Some(world_name))?;
     let bindings = crate::wit_util::generate_bindings(&mut resolve, world)?;
     fs::write(out_dir.join("bindings.rs"), &bindings)?;

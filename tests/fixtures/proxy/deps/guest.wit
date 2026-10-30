@@ -1,0 +1,9 @@
+package test:guest@0.1.0;
+
+interface api {
+  use test:host/types@0.1.0.{point, shape, counter};
+
+  run: func(p: point, c: borrow<counter>) -> list<u8>;
+  classify: func(s: shape) -> option<point>;
+  begin: func(c: counter) -> counter;
+}

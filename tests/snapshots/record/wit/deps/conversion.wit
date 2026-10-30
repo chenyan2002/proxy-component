@@ -1,0 +1,7 @@
+package proxy:conversion;
+interface conversion {
+  use test:host/types@0.1.0.{counter as host-test-host-types-counter};
+  use wrapped-test:host/types@0.1.0.{counter as wrapped-test-host-types-counter};
+  get-wrapped-test-host-types-counter: func(x: host-test-host-types-counter) -> wrapped-test-host-types-counter;
+  get-host-test-host-types-counter: func(x: wrapped-test-host-types-counter) -> host-test-host-types-counter;
+}

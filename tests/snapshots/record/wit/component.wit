@@ -1,0 +1,23 @@
+package component:proxy;
+world imports {
+  import proxy:recorder/%record@0.1.0;
+  export proxy:conversion/conversion;
+  import test:host/types@0.1.0;
+  export wrapped-test:host/types@0.1.0;
+  import test:log/sink@0.1.0;
+  export wrapped-test:log/sink@0.1.0;
+  import test:log/sink@0.2.0;
+  export wrapped-test:log/sink@0.2.0;
+}
+world tmp-exports {
+  import wrapped-test:guest/api@0.1.0;
+  export test:guest/api@0.1.0;
+}
+world exports {
+  import proxy:recorder/%record@0.1.0;
+  import proxy:conversion/conversion;
+  import wrapped-test:host/types@0.1.0;
+  import wrapped-test:guest/api@0.1.0;
+  import test:host/types@0.1.0;
+  export test:guest/api@0.1.0;
+}

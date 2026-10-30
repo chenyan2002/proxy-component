@@ -1,4 +1,4 @@
-.PHONY: all build-components build-cli test test-record test-fuzz test-dialog run-fuzz run-record run-dialog run-viceroy
+.PHONY: all build-components build-cli test test-cargo test-record test-fuzz test-dialog run-fuzz run-record run-dialog run-viceroy
 
 # `make test ONE_BYTE_PAGE=1` tests with 1-byte-page memories
 ifeq ($(ONE_BYTE_PAGE),1)
@@ -20,7 +20,11 @@ build-components:
 	cp target/one-byte-page/wasm32-wasip2/release/debug.wasm assets/debug.one_byte_page.wasm
 	cp target/one-byte-page/wasm32-wasip2/release/recorder.wasm assets/recorder.one_byte_page.wasm
 
-test: test-fuzz test-record test-dialog
+test: test-cargo test-fuzz test-record test-dialog
+
+# Snapshot tests of the generated sources
+test-cargo:
+	cargo test
 
 test-fuzz:
 	$(MAKE) run-fuzz WASM=tests/calculator.wasm
