@@ -1,6 +1,8 @@
 use crate::Mode;
 use crate::codegen::wit::WitType;
 use crate::codegen::{ItemFlag, State, TypeInfo};
+use proc_macro2::TokenStream;
+use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct};
 
 mod dialog;
@@ -11,6 +13,31 @@ mod wave;
 pub struct TraitGenerator<'a> {
     state: &'a State,
     traits: Vec<Box<dyn Trait + 'a>>,
+}
+
+/// Code making a mock of a host resource with `handle`, through its `proxy:conversion`
+/// function. The main component's own resources have none: only its constructors create them.
+fn new_mock(wit: &WitType, handle: TokenStream) -> TokenStream {
+    match &wit.conversion {
+        Some(call) => quote! { proxy::conversion::conversion::#call(#handle) },
+        // TODO: It's exported resource from the main component. We cannot mock it, instead
+        // we need an instance table to track these resources.
+        None => {
+            let message = format!(
+                "cannot mock `{}`, a resource of the main component",
+                wit.name
+            );
+            // A function rather than `unimplemented!()` itself, which would make the code
+            // around it unreachable.
+            quote! {{
+                fn cannot_mock<T>() -> T {
+                    unimplemented!(#message)
+                }
+                let _ = #handle;
+                cannot_mock()
+            }}
+        }
+    }
 }
 
 pub trait Trait {

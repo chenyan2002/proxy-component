@@ -3,7 +3,12 @@ package test:guest@0.1.0;
 interface api {
   use test:host/types@0.1.0.{point, shape, counter};
 
+  // A resource of the main component, which proxy:conversion has no functions for.
+  resource session {
+    constructor(name: string);
+    name: func() -> string;
+  }
   run: func(p: point, c: borrow<counter>) -> list<u8>;
   classify: func(s: shape) -> option<point>;
-  begin: func(c: counter) -> counter;
+  begin: func(c: counter) -> session;
 }

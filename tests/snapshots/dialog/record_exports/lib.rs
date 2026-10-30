@@ -13,6 +13,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     "test:guest/api@0.1.0.run".to_string(),
                     "test:guest/api@0.1.0.classify".to_string(),
                     "test:guest/api@0.1.0.begin".to_string(),
+                    "[constructor]test:guest/api/session@0.1.0.new".to_string(),
                     "test:host/types@0.1.0.make-point".to_string(),
                     "test:host/types@0.1.0.check".to_string(),
                     "test:host/types@0.1.0.open".to_string(),
@@ -98,6 +99,34 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     proxy::util::dialog::print(
                         0,
                         &format!(
+                            "call export func {}",
+                            "[constructor]test:guest/api/session@0.1.0.new"
+                        ),
+                    );
+                    let mut __params: Vec<String> = Vec::new();
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "provide argument for {}: {}", stringify!(name), "string"
+                        ),
+                    );
+                    let name: String = Dialog::read_value(0);
+                    __params
+                        .push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "export: {}({})",
+                            "[constructor]test:guest/api/session@0.1.0.new", __params
+                            .join(", ")
+                        ),
+                    );
+                    let _ = test::guest::api::Session::new(&name);
+                }
+                5usize => {
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
                             "call export func {}", "test:host/types@0.1.0.make-point"
                         ),
                     );
@@ -123,7 +152,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     );
                     let _ = test::host::types::make_point(x, y);
                 }
-                5usize => {
+                6usize => {
                     proxy::util::dialog::print(
                         0,
                         &format!("call export func {}", "test:host/types@0.1.0.check"),
@@ -150,7 +179,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     );
                     let _ = test::host::types::check(p, c);
                 }
-                6usize => {
+                7usize => {
                     proxy::util::dialog::print(
                         0,
                         &format!("call export func {}", "test:host/types@0.1.0.open"),
@@ -174,7 +203,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     );
                     let _ = test::host::types::open(&name);
                 }
-                7usize => {
+                8usize => {
                     proxy::util::dialog::print(
                         0,
                         &format!(
@@ -200,7 +229,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     );
                     let _ = test::host::types::Counter::new(start);
                 }
-                8usize => {
+                9usize => {
                     proxy::util::dialog::print(
                         0,
                         &format!(
@@ -239,6 +268,67 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     alloc.borrow_mut().clear();
                 });
         }
+    }
+}
+impl ValueTyped for test::guest::api::Session {
+    fn value_type() -> Type {
+        Type::handle("session")
+    }
+}
+impl<'a> ValueTyped for &'a test::guest::api::Session {
+    fn value_type() -> Type {
+        Type::handle("session")
+    }
+}
+impl ToValue for test::guest::api::Session {
+    fn to_value(&self) -> Value {
+        let label = format!("{}-{}", "session", self.handle());
+        Value::make_handle(label.into())
+    }
+}
+impl<'a> ToValue for &'a test::guest::api::Session {
+    fn to_value(&self) -> Value {
+        let label = format!("borrow-{}-{}", "session", self.handle());
+        Value::make_handle(label.into())
+    }
+}
+impl ToRust<test::guest::api::Session> for Value {
+    fn to_rust(&self) -> test::guest::api::Session {
+        let label = self.unwrap_handle();
+        let handle = label
+            .strip_prefix(&format!("{}-", "session"))
+            .and_then(|s| s.parse::<u32>().ok())
+            .expect("invalid handle label");
+        {
+            fn cannot_mock<T>() -> T {
+                unimplemented!("cannot mock `session`, a resource of the main component")
+            }
+            let _ = handle;
+            cannot_mock()
+        }
+    }
+}
+impl<'a> ToRust<&'a test::guest::api::Session> for Value {
+    fn to_rust(&self) -> &'a test::guest::api::Session {
+        let label = self.unwrap_handle();
+        let handle = label
+            .strip_prefix(&format!("borrow-{}-", "session"))
+            .and_then(|s| s.parse::<u32>().ok())
+            .expect("invalid handle label");
+        SCOPED_ALLOC
+            .with(|alloc| {
+                let mut alloc = alloc.borrow_mut();
+                alloc
+                    .alloc({
+                        fn cannot_mock<T>() -> T {
+                            unimplemented!(
+                                "cannot mock `session`, a resource of the main component"
+                            )
+                        }
+                        let _ = handle;
+                        cannot_mock()
+                    })
+            })
     }
 }
 impl ValueTyped for test::host::types::Point {
@@ -504,6 +594,49 @@ impl ToRust<MockedResource> for Value {
             })
             .expect("invalid handle label");
         MockedResource { handle, name }
+    }
+}
+impl Dialog for test::guest::api::Session {
+    fn read_value(_dep: u32) -> Self {
+        let handle = HANDLE_ID
+            .with(|id| {
+                let mut id = id.borrow_mut();
+                let current_id = *id;
+                *id += 1;
+                current_id
+            });
+        {
+            fn cannot_mock<T>() -> T {
+                unimplemented!("cannot mock `session`, a resource of the main component")
+            }
+            let _ = handle;
+            cannot_mock()
+        }
+    }
+}
+impl<'a> Dialog for &'a test::guest::api::Session {
+    fn read_value(_dep: u32) -> Self {
+        let handle = HANDLE_ID
+            .with(|id| {
+                let mut id = id.borrow_mut();
+                let current_id = *id;
+                *id += 1;
+                current_id
+            });
+        SCOPED_ALLOC
+            .with(|alloc| {
+                let mut alloc = alloc.borrow_mut();
+                alloc
+                    .alloc({
+                        fn cannot_mock<T>() -> T {
+                            unimplemented!(
+                                "cannot mock `session`, a resource of the main component"
+                            )
+                        }
+                        let _ = handle;
+                        cannot_mock()
+                    })
+            })
     }
 }
 impl Dialog for test::host::types::Point {

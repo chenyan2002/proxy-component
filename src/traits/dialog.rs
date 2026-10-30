@@ -1,6 +1,6 @@
 use crate::codegen::util::make_path;
 use crate::codegen::wit::WitType;
-use crate::traits::Trait;
+use crate::traits::{Trait, new_mock};
 use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
@@ -18,10 +18,7 @@ impl Trait for DialogTrait {
         let wit_name = &wit.name;
         let in_import = module_path[0] != "exports";
         if in_import {
-            let call = wit
-                .conversion
-                .as_ref()
-                .expect("a host resource has a conversion function");
+            let mock = new_mock(wit, quote! { handle });
             res.push(parse_quote! {
             impl Dialog for #resource_path {
                 fn read_value(_dep: u32) -> Self {
@@ -31,7 +28,7 @@ impl Trait for DialogTrait {
                         *id += 1;
                         current_id
                     });
-                    proxy::conversion::conversion::#call(handle)
+                    #mock
                 }
             }
             });
@@ -46,7 +43,7 @@ impl Trait for DialogTrait {
                     });
                     SCOPED_ALLOC.with(|alloc| {
                         let mut alloc = alloc.borrow_mut();
-                        alloc.alloc(proxy::conversion::conversion::#call(handle))
+                        alloc.alloc(#mock)
                     })
                 }
             }

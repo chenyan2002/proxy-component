@@ -1,6 +1,6 @@
 use crate::codegen::util::make_path;
 use crate::codegen::wit::WitType;
-use crate::traits::Trait;
+use crate::traits::{Trait, new_mock};
 use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
@@ -18,14 +18,11 @@ impl Trait for FuzzTrait {
         let wit_name = &wit.name;
         let in_import = module_path[0] != "exports";
         if in_import {
-            let call = wit
-                .conversion
-                .as_ref()
-                .expect("a host resource has a conversion function");
+            let mock = new_mock(wit, quote! { 42 });
             res.push(parse_quote! {
             impl Arbitrary<'_> for #resource_path {
                 fn arbitrary(_u: &mut Unstructured<'_>) -> Result<Self> {
-                    Ok(proxy::conversion::conversion::#call(42))
+                    Ok(#mock)
                 }
                 fn size_hint(_: usize) -> (usize, Option<usize>) {
                     (0, Some(0))
@@ -37,7 +34,7 @@ impl Trait for FuzzTrait {
                 fn arbitrary(_u: &mut Unstructured<'_>) -> Result<Self> {
                     SCOPED_ALLOC.with(|alloc| {
                         let mut alloc = alloc.borrow_mut();
-                        Ok(alloc.alloc(proxy::conversion::conversion::#call(42)))
+                        Ok(alloc.alloc(#mock))
                     })
                 }
             }

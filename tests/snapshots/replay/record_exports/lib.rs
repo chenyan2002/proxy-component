@@ -54,6 +54,20 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         Some(&wave_res),
                     );
                 }
+                "[constructor]test:guest/api/session@0.1.0.new" => {
+                    let arg_value: Value = wasm_wave::from_str(
+                            &<String as ValueTyped>::value_type(),
+                            &args[0usize],
+                        )
+                        .unwrap();
+                    let name: String = arg_value.to_rust();
+                    let res = test::guest::api::Session::new(&name);
+                    let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
+                    proxy::recorder::replay::assert_export_ret(
+                        Some("[constructor]test:guest/api/session@0.1.0.new"),
+                        Some(&wave_res),
+                    );
+                }
                 "test:host/types@0.1.0.make-point" => {
                     let arg_value: Value = wasm_wave::from_str(
                             &<i32 as ValueTyped>::value_type(),
@@ -149,6 +163,67 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     alloc.borrow_mut().clear();
                 });
         }
+    }
+}
+impl ValueTyped for test::guest::api::Session {
+    fn value_type() -> Type {
+        Type::handle("session")
+    }
+}
+impl<'a> ValueTyped for &'a test::guest::api::Session {
+    fn value_type() -> Type {
+        Type::handle("session")
+    }
+}
+impl ToValue for test::guest::api::Session {
+    fn to_value(&self) -> Value {
+        let label = format!("{}-{}", "session", self.handle());
+        Value::make_handle(label.into())
+    }
+}
+impl<'a> ToValue for &'a test::guest::api::Session {
+    fn to_value(&self) -> Value {
+        let label = format!("borrow-{}-{}", "session", self.handle());
+        Value::make_handle(label.into())
+    }
+}
+impl ToRust<test::guest::api::Session> for Value {
+    fn to_rust(&self) -> test::guest::api::Session {
+        let label = self.unwrap_handle();
+        let handle = label
+            .strip_prefix(&format!("{}-", "session"))
+            .and_then(|s| s.parse::<u32>().ok())
+            .expect("invalid handle label");
+        {
+            fn cannot_mock<T>() -> T {
+                unimplemented!("cannot mock `session`, a resource of the main component")
+            }
+            let _ = handle;
+            cannot_mock()
+        }
+    }
+}
+impl<'a> ToRust<&'a test::guest::api::Session> for Value {
+    fn to_rust(&self) -> &'a test::guest::api::Session {
+        let label = self.unwrap_handle();
+        let handle = label
+            .strip_prefix(&format!("borrow-{}-", "session"))
+            .and_then(|s| s.parse::<u32>().ok())
+            .expect("invalid handle label");
+        SCOPED_ALLOC
+            .with(|alloc| {
+                let mut alloc = alloc.borrow_mut();
+                alloc
+                    .alloc({
+                        fn cannot_mock<T>() -> T {
+                            unimplemented!(
+                                "cannot mock `session`, a resource of the main component"
+                            )
+                        }
+                        let _ = handle;
+                        cannot_mock()
+                    })
+            })
     }
 }
 impl ValueTyped for test::host::types::Point {

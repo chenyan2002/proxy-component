@@ -3,6 +3,7 @@ use bindings::*;
 struct Stub;
 bindings::export!(Stub with_types_in bindings);
 impl exports::test::guest::api::Guest for Stub {
+    type Session = wrapped_test::guest::api::Session;
     fn run(
         p: exports::test::guest::api::Point,
         c: &exports::test::guest::api::Counter,
@@ -48,7 +49,7 @@ impl exports::test::guest::api::Guest for Stub {
     }
     fn begin(
         c: exports::test::guest::api::Counter,
-    ) -> exports::test::guest::api::Counter {
+    ) -> exports::test::guest::api::Session {
         let mut params: Vec<String> = Vec::new();
         let c = c.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
@@ -65,6 +66,67 @@ impl exports::test::guest::api::Guest for Stub {
             true,
         );
         res.to_proxy()
+    }
+}
+impl exports::test::guest::api::GuestSession for wrapped_test::guest::api::Session {
+    fn new(name: String) -> Self {
+        let mut params: Vec<String> = Vec::new();
+        let name = name.to_proxy();
+        params.push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
+        proxy::recorder::record::record_args(
+            Some("[constructor]test:guest/api/session@0.1.0.new"),
+            &params,
+            true,
+        );
+        let res = Self::new(&name);
+        let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
+        proxy::recorder::record::record_ret(
+            Some("[constructor]test:guest/api/session@0.1.0.new"),
+            Some(&wave_res),
+            true,
+        );
+        res
+    }
+    fn name(&self) -> String {
+        let params: Vec<String> = vec![
+            wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
+        ];
+        proxy::recorder::record::record_args(
+            Some("[method]test:guest/api/session@0.1.0.name"),
+            &params,
+            true,
+        );
+        let res = self.name();
+        let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
+        proxy::recorder::record::record_ret(
+            Some("[method]test:guest/api/session@0.1.0.name"),
+            Some(&wave_res),
+            true,
+        );
+        res.to_proxy()
+    }
+}
+impl ValueTyped for exports::test::guest::api::Session {
+    fn value_type() -> Type {
+        Type::handle("session")
+    }
+}
+impl<'a> ValueTyped for exports::test::guest::api::SessionBorrow<'a> {
+    fn value_type() -> Type {
+        Type::handle("session")
+    }
+}
+impl ToValue for exports::test::guest::api::Session {
+    fn to_value(&self) -> Value {
+        let label = format!("{}-{}", "session", self.handle());
+        Value::make_handle(label.into())
+    }
+}
+impl<'a> ToValue for exports::test::guest::api::SessionBorrow<'a> {
+    fn to_value(&self) -> Value {
+        type T = wrapped_test::guest::api::Session;
+        let label = format!("borrow-{}-{}", "session", self.get:: < T > ().handle());
+        Value::make_handle(label.into())
     }
 }
 impl ValueTyped for test::host::types::Point {
@@ -174,6 +236,28 @@ impl<'a> ToValue for &'a test::host::types::Counter {
         Value::make_handle(label.into())
     }
 }
+impl ValueTyped for wrapped_test::guest::api::Session {
+    fn value_type() -> Type {
+        Type::handle("session")
+    }
+}
+impl<'a> ValueTyped for &'a wrapped_test::guest::api::Session {
+    fn value_type() -> Type {
+        Type::handle("session")
+    }
+}
+impl ToValue for wrapped_test::guest::api::Session {
+    fn to_value(&self) -> Value {
+        let label = format!("{}-{}", "session", self.handle());
+        Value::make_handle(label.into())
+    }
+}
+impl<'a> ToValue for &'a wrapped_test::guest::api::Session {
+    fn to_value(&self) -> Value {
+        let label = format!("borrow-{}-{}", "session", self.handle());
+        Value::make_handle(label.into())
+    }
+}
 impl ValueTyped for wrapped_test::host::types::Counter {
     fn value_type() -> Type {
         Type::handle("counter")
@@ -200,6 +284,19 @@ impl<'a> ToValue for &'a wrapped_test::host::types::Counter {
 use wasm_wave::{
     wasm::WasmValue, value::{Value, Type, convert::{ToRust, ToValue, ValueTyped}},
 };
+impl ToProxy for exports::test::guest::api::Session {
+    type Output = wrapped_test::guest::api::Session;
+    fn to_proxy(self) -> Self::Output {
+        self.into_inner()
+    }
+}
+impl<'a> ToProxy for exports::test::guest::api::SessionBorrow<'a> {
+    type Output = &'a wrapped_test::guest::api::Session;
+    fn to_proxy(self) -> Self::Output {
+        type T = wrapped_test::guest::api::Session;
+        self.get::<T>()
+    }
+}
 impl ToProxy for test::host::types::Point {
     type Output = test::host::types::Point;
     fn to_proxy(self) -> Self::Output {
@@ -258,6 +355,18 @@ impl<'a> ToProxy for &'a test::host::types::Counter {
     type Output = &'a wrapped_test::host::types::Counter;
     fn to_proxy(self) -> Self::Output {
         unreachable!()
+    }
+}
+impl ToProxy for wrapped_test::guest::api::Session {
+    type Output = exports::test::guest::api::Session;
+    fn to_proxy(self) -> Self::Output {
+        Self::Output::new(self)
+    }
+}
+impl<'a> ToProxy for &'a wrapped_test::guest::api::Session {
+    type Output = exports::test::guest::api::SessionBorrow<'a>;
+    fn to_proxy(self) -> Self::Output {
+        unsafe { Self::Output::lift(self as *const _ as *const u8) }
     }
 }
 impl ToProxy for wrapped_test::host::types::Counter {

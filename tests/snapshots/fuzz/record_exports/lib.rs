@@ -7,7 +7,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
         let __buf = proxy::util::debug::get_random();
         let mut u = Unstructured::new(&__buf);
         for _ in 0..10 {
-            let idx = u.int_in_range(1..=8usize).unwrap();
+            let idx = u.int_in_range(1..=9usize).unwrap();
             match idx {
                 1usize => {
                     let mut __params: Vec<String> = Vec::new();
@@ -49,6 +49,20 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 }
                 4usize => {
                     let mut __params: Vec<String> = Vec::new();
+                    let name: String = u.arbitrary().unwrap();
+                    __params
+                        .push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
+                    proxy::util::debug::print(
+                        &format!(
+                            "export: {}({})",
+                            "[constructor]test:guest/api/session@0.1.0.new", __params
+                            .join(", ")
+                        ),
+                    );
+                    let _ = test::guest::api::Session::new(&name);
+                }
+                5usize => {
+                    let mut __params: Vec<String> = Vec::new();
                     let x: i32 = u.arbitrary().unwrap();
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&x)).unwrap());
                     let y: i32 = u.arbitrary().unwrap();
@@ -61,7 +75,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     );
                     let _ = test::host::types::make_point(x, y);
                 }
-                5usize => {
+                6usize => {
                     let mut __params: Vec<String> = Vec::new();
                     let p: test::host::types::Perms = u.arbitrary().unwrap();
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
@@ -75,7 +89,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     );
                     let _ = test::host::types::check(p, c);
                 }
-                6usize => {
+                7usize => {
                     let mut __params: Vec<String> = Vec::new();
                     let name: String = u.arbitrary().unwrap();
                     __params
@@ -88,7 +102,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     );
                     let _ = test::host::types::open(&name);
                 }
-                7usize => {
+                8usize => {
                     let mut __params: Vec<String> = Vec::new();
                     let start: u32 = u.arbitrary().unwrap();
                     __params
@@ -102,7 +116,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     );
                     let _ = test::host::types::Counter::new(start);
                 }
-                8usize => {
+                9usize => {
                     let mut __params: Vec<String> = Vec::new();
                     let a: test::host::types::Counter = u.arbitrary().unwrap();
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&a)).unwrap());
@@ -123,6 +137,28 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     alloc.borrow_mut().clear();
                 });
         }
+    }
+}
+impl ValueTyped for test::guest::api::Session {
+    fn value_type() -> Type {
+        Type::handle("session")
+    }
+}
+impl<'a> ValueTyped for &'a test::guest::api::Session {
+    fn value_type() -> Type {
+        Type::handle("session")
+    }
+}
+impl ToValue for test::guest::api::Session {
+    fn to_value(&self) -> Value {
+        let label = format!("{}-{}", "session", self.handle());
+        Value::make_handle(label.into())
+    }
+}
+impl<'a> ToValue for &'a test::guest::api::Session {
+    fn to_value(&self) -> Value {
+        let label = format!("borrow-{}-{}", "session", self.handle());
+        Value::make_handle(label.into())
     }
 }
 impl ValueTyped for test::host::types::Point {
@@ -306,6 +342,40 @@ impl ToRust<MockedResource> for Value {
             })
             .expect("invalid handle label");
         MockedResource { handle, name }
+    }
+}
+impl Arbitrary<'_> for test::guest::api::Session {
+    fn arbitrary(_u: &mut Unstructured<'_>) -> Result<Self> {
+        Ok({
+            fn cannot_mock<T>() -> T {
+                unimplemented!("cannot mock `session`, a resource of the main component")
+            }
+            let _ = 42;
+            cannot_mock()
+        })
+    }
+    fn size_hint(_: usize) -> (usize, Option<usize>) {
+        (0, Some(0))
+    }
+}
+impl<'a> Arbitrary<'_> for &'a test::guest::api::Session {
+    fn arbitrary(_u: &mut Unstructured<'_>) -> Result<Self> {
+        SCOPED_ALLOC
+            .with(|alloc| {
+                let mut alloc = alloc.borrow_mut();
+                Ok(
+                    alloc
+                        .alloc({
+                            fn cannot_mock<T>() -> T {
+                                unimplemented!(
+                                    "cannot mock `session`, a resource of the main component"
+                                )
+                            }
+                            let _ = 42;
+                            cannot_mock()
+                        }),
+                )
+            })
     }
 }
 impl Arbitrary<'_> for test::host::types::Point {

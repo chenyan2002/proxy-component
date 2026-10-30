@@ -1,6 +1,6 @@
 use crate::codegen::util::make_path;
 use crate::codegen::wit::WitType;
-use crate::traits::Trait;
+use crate::traits::{Trait, new_mock};
 use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
@@ -55,10 +55,7 @@ impl Trait for WaveTrait {
                 });
             }
             if self.to_rust {
-                let call = wit
-                    .conversion
-                    .as_ref()
-                    .expect("a host resource has a conversion function");
+                let mock = new_mock(wit, quote! { handle });
                 res.push(parse_quote! {
                 impl ToRust<#resource_path> for Value {
                     fn to_rust(&self) -> #resource_path {
@@ -67,7 +64,7 @@ impl Trait for WaveTrait {
                             .strip_prefix(&format!("{}-", #wit_name))
                             .and_then(|s| s.parse::<u32>().ok())
                             .expect("invalid handle label");
-                        proxy::conversion::conversion::#call(handle)
+                        #mock
                     }
                 }
                 });
@@ -81,7 +78,7 @@ impl Trait for WaveTrait {
                             .expect("invalid handle label");
                         SCOPED_ALLOC.with(|alloc| {
                             let mut alloc = alloc.borrow_mut();
-                            alloc.alloc(proxy::conversion::conversion::#call(handle))
+                            alloc.alloc(#mock)
                         })
                     }
                 }

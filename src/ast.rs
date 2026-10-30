@@ -202,7 +202,7 @@ impl<'a> Opt<'a> {
     ) -> Result<()> {
         let main_pkg = resolve.worlds[id].package.unwrap();
         self.generate_main_wit(resolve, id, files)?;
-        self.generate_conversion_wit(resolve, main_pkg, files);
+        self.generate_conversion_wit(resolve, id, files);
         if matches!(self.mode, Mode::Record) {
             generate_wrapped_wits(resolve, main_pkg, files)?;
         }
@@ -216,13 +216,22 @@ impl<'a> Opt<'a> {
         );
         Ok(())
     }
-    /// Generate the `proxy:conversion` interface for converting resources from
-    /// non-main packages between the generated components.
-    fn generate_conversion_wit(&self, resolve: &Resolve, main_pkg: PackageId, files: &mut Files) {
+    /// Generate the `proxy:conversion` interface for converting the resources of the interfaces
+    /// the main component imports, which the generated components virtualize, between them.
+    fn generate_conversion_wit(&self, resolve: &Resolve, world: WorldId, files: &mut Files) {
         let mut resources = BTreeMap::new();
-        for (iface_id, iface) in resolve.interfaces.iter().filter(|(_, iface)| {
-            iface.package.is_some_and(|id| id != main_pkg) && iface.name.is_some()
-        }) {
+        let imports = resolve.worlds[world].imports.iter();
+        let virtualized = imports.filter_map(|(key, item)| match item {
+            // Not virtualized, see `generate_main_wit`
+            _ if resolve.name_world_key(key).starts_with("proxy:util/") => None,
+            WorldItem::Interface { id, .. } => Some(*id),
+            _ => None,
+        });
+        for iface_id in virtualized {
+            let iface = &resolve.interfaces[iface_id];
+            if iface.name.is_none() {
+                continue;
+            }
             let pkg_id = iface.package.unwrap();
             let pkg_name = &resolve.packages[pkg_id].name;
             let iface_name = iface.name.as_ref().unwrap();
