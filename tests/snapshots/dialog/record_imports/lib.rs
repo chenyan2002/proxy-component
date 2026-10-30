@@ -90,8 +90,8 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         proxy::util::dialog::print(
             0,
             &format!(
-                "import: {}({})", "[constructor]test:host/types/counter@0.1.0.new",
-                __params.join(", ")
+                "import: {}({})", "new test:host/types/counter@0.1.0", __params
+                .join(", ")
             ),
         );
         proxy::util::dialog::print(0, &format!("return type: {}", "counter"));
@@ -114,7 +114,7 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         proxy::util::dialog::print(
             0,
             &format!(
-                "import: {}({})", "[method]test:host/types/counter@0.1.0.get", __params
+                "import: {}({})", "test:host/types/counter@0.1.0.get", __params
                 .join(", ")
             ),
         );

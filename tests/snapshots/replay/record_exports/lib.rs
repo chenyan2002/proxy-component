@@ -54,7 +54,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         Some(&wave_res),
                     );
                 }
-                "[constructor]test:guest/api/session@0.1.0.new" => {
+                "new test:guest/api/session@0.1.0" => {
                     let arg_value: Value = wasm_wave::from_str(
                             &<String as ValueTyped>::value_type(),
                             &args[0usize],
@@ -64,7 +64,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let res = test::guest::api::Session::new(&name);
                     let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
                     proxy::recorder::replay::assert_export_ret(
-                        Some("[constructor]test:guest/api/session@0.1.0.new"),
+                        Some("new test:guest/api/session@0.1.0"),
                         Some(&wave_res),
                     );
                 }
@@ -122,7 +122,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         Some(&wave_res),
                     );
                 }
-                "[constructor]test:host/types/counter@0.1.0.new" => {
+                "new test:host/types/counter@0.1.0" => {
                     let arg_value: Value = wasm_wave::from_str(
                             &<u32 as ValueTyped>::value_type(),
                             &args[0usize],
@@ -132,7 +132,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let res = test::host::types::Counter::new(start);
                     let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
                     proxy::recorder::replay::assert_export_ret(
-                        Some("[constructor]test:host/types/counter@0.1.0.new"),
+                        Some("new test:host/types/counter@0.1.0"),
                         Some(&wave_res),
                     );
                 }

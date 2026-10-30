@@ -78,7 +78,7 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
         let wave = proxy::recorder::replay::replay_import(
-                Some("[constructor]test:host/types/counter@0.1.0.new"),
+                Some("new test:host/types/counter@0.1.0"),
                 Some(&__params),
             )
             .unwrap();
@@ -94,7 +94,7 @@ impl exports::test::host::types::GuestCounter for MockedResource {
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
         let wave = proxy::recorder::replay::replay_import(
-                Some("[method]test:host/types/counter@0.1.0.get"),
+                Some("test:host/types/counter@0.1.0.get"),
                 Some(&__params),
             )
             .unwrap();
@@ -108,7 +108,7 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         ];
         __params.push(wasm_wave::to_string(&ToValue::to_value(&n)).unwrap());
         let wave = proxy::recorder::replay::replay_import(
-            Some("[method]test:host/types/counter@0.1.0.add"),
+            Some("test:host/types/counter@0.1.0.add"),
             Some(&__params),
         );
         assert!(wave.is_none());

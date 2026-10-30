@@ -13,11 +13,11 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     "test:guest/api@0.1.0.run".to_string(),
                     "test:guest/api@0.1.0.classify".to_string(),
                     "test:guest/api@0.1.0.begin".to_string(),
-                    "[constructor]test:guest/api/session@0.1.0.new".to_string(),
+                    "new test:guest/api/session@0.1.0".to_string(),
                     "test:host/types@0.1.0.make-point".to_string(),
                     "test:host/types@0.1.0.check".to_string(),
                     "test:host/types@0.1.0.open".to_string(),
-                    "[constructor]test:host/types/counter@0.1.0.new".to_string(),
+                    "new test:host/types/counter@0.1.0".to_string(),
                     "test:host/types/counter@0.1.0.merge".to_string(),
                 ],
             ) as usize;
@@ -99,8 +99,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     proxy::util::dialog::print(
                         0,
                         &format!(
-                            "call export func {}",
-                            "[constructor]test:guest/api/session@0.1.0.new"
+                            "call export func {}", "new test:guest/api/session@0.1.0"
                         ),
                     );
                     let mut __params: Vec<String> = Vec::new();
@@ -116,9 +115,8 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     proxy::util::dialog::print(
                         0,
                         &format!(
-                            "export: {}({})",
-                            "[constructor]test:guest/api/session@0.1.0.new", __params
-                            .join(", ")
+                            "export: {}({})", "new test:guest/api/session@0.1.0",
+                            __params.join(", ")
                         ),
                     );
                     let _ = test::guest::api::Session::new(&name);
@@ -207,8 +205,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     proxy::util::dialog::print(
                         0,
                         &format!(
-                            "call export func {}",
-                            "[constructor]test:host/types/counter@0.1.0.new"
+                            "call export func {}", "new test:host/types/counter@0.1.0"
                         ),
                     );
                     let mut __params: Vec<String> = Vec::new();
@@ -222,9 +219,8 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     proxy::util::dialog::print(
                         0,
                         &format!(
-                            "export: {}({})",
-                            "[constructor]test:host/types/counter@0.1.0.new", __params
-                            .join(", ")
+                            "export: {}({})", "new test:host/types/counter@0.1.0",
+                            __params.join(", ")
                         ),
                     );
                     let _ = test::host::types::Counter::new(start);

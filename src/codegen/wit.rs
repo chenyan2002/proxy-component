@@ -19,7 +19,8 @@ use wit_parser::{
 /// A WIT function of the bindings.
 pub struct WitFunc {
     pub kind: Option<ResourceFuncKind>,
-    /// The name traces use, e.g. `[method]ns:pkg/iface/res@0.1.0.func`
+    /// The name traces use, e.g. `ns:pkg/iface@0.1.0.func`, `ns:pkg/iface/res@0.1.0.func` for a
+    /// method or static function, or `new ns:pkg/iface/res@0.1.0` for a constructor
     pub display_name: String,
     /// The WIT name of the resource of a constructor, method or static function
     pub resource: Option<String>,
@@ -249,17 +250,13 @@ impl State {
             _ => None,
         };
         let resource = resource_name(wit_func);
-        let mut display_name = match kind {
-            Some(ResourceFuncKind::Constructor) => "[constructor]".to_string(),
-            Some(ResourceFuncKind::Method) => "[method]".to_string(),
-            None => String::new(),
+        // As component-ui names calls: a method's `self` is its first argument, so methods and
+        // static functions are named alike.
+        let callee = self.interface_name(iface_id, resource.as_deref());
+        let display_name = match kind {
+            Some(ResourceFuncKind::Constructor) => format!("new {callee}"),
+            _ => format!("{callee}.{}", wit_func.item_name()),
         };
-        display_name.push_str(&self.interface_name(iface_id, resource.as_deref()));
-        let func_name = match kind {
-            Some(ResourceFuncKind::Constructor) => "new",
-            _ => wit_func.item_name(),
-        };
-        display_name.push_str(&format!(".{func_name}"));
         let self_params = matches!(kind, Some(ResourceFuncKind::Method)) as usize;
         Some(WitFunc {
             kind,

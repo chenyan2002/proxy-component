@@ -74,14 +74,14 @@ impl exports::test::guest::api::GuestSession for wrapped_test::guest::api::Sessi
         let name = name.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
         proxy::recorder::record::record_args(
-            Some("[constructor]test:guest/api/session@0.1.0.new"),
+            Some("new test:guest/api/session@0.1.0"),
             &params,
             true,
         );
         let res = Self::new(&name);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("[constructor]test:guest/api/session@0.1.0.new"),
+            Some("new test:guest/api/session@0.1.0"),
             Some(&wave_res),
             true,
         );
@@ -92,14 +92,14 @@ impl exports::test::guest::api::GuestSession for wrapped_test::guest::api::Sessi
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
         proxy::recorder::record::record_args(
-            Some("[method]test:guest/api/session@0.1.0.name"),
+            Some("test:guest/api/session@0.1.0.name"),
             &params,
             true,
         );
         let res = self.name();
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("[method]test:guest/api/session@0.1.0.name"),
+            Some("test:guest/api/session@0.1.0.name"),
             Some(&wave_res),
             true,
         );

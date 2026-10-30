@@ -86,14 +86,14 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
         let start = start.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
         proxy::recorder::record::record_args(
-            Some("[constructor]test:host/types/counter@0.1.0.new"),
+            Some("new test:host/types/counter@0.1.0"),
             &params,
             false,
         );
         let res = Self::new(start);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("[constructor]test:host/types/counter@0.1.0.new"),
+            Some("new test:host/types/counter@0.1.0"),
             Some(&wave_res),
             false,
         );
@@ -104,14 +104,14 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
         proxy::recorder::record::record_args(
-            Some("[method]test:host/types/counter@0.1.0.get"),
+            Some("test:host/types/counter@0.1.0.get"),
             &params,
             false,
         );
         let res = self.get();
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
         proxy::recorder::record::record_ret(
-            Some("[method]test:host/types/counter@0.1.0.get"),
+            Some("test:host/types/counter@0.1.0.get"),
             Some(&wave_res),
             false,
         );
@@ -124,13 +124,13 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
         let n = n.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&n)).unwrap());
         proxy::recorder::record::record_args(
-            Some("[method]test:host/types/counter@0.1.0.add"),
+            Some("test:host/types/counter@0.1.0.add"),
             &params,
             false,
         );
         self.add(n);
         proxy::recorder::record::record_ret(
-            Some("[method]test:host/types/counter@0.1.0.add"),
+            Some("test:host/types/counter@0.1.0.add"),
             None,
             false,
         );

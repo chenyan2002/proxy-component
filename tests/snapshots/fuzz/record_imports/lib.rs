@@ -70,11 +70,9 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
         let mut __buf = __params.join(",");
         proxy::util::debug::print(
-            &format!(
-                "import: {}({})", "[constructor]test:host/types/counter@0.1.0.new", __buf
-            ),
+            &format!("import: {}({})", "new test:host/types/counter@0.1.0", __buf),
         );
-        __buf += "[constructor]test:host/types/counter@0.1.0.new";
+        __buf += "new test:host/types/counter@0.1.0";
         let mut u = Unstructured::new(&__buf.as_bytes());
         let res = MockedResource {
             name: "counter".to_string(),
@@ -90,11 +88,9 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         ];
         let mut __buf = __params.join(",");
         proxy::util::debug::print(
-            &format!(
-                "import: {}({})", "[method]test:host/types/counter@0.1.0.get", __buf
-            ),
+            &format!("import: {}({})", "test:host/types/counter@0.1.0.get", __buf),
         );
-        __buf += "[method]test:host/types/counter@0.1.0.get";
+        __buf += "test:host/types/counter@0.1.0.get";
         let mut u = Unstructured::new(&__buf.as_bytes());
         let res = u.arbitrary().unwrap();
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();

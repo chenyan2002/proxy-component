@@ -54,9 +54,8 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         .push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
                     proxy::util::debug::print(
                         &format!(
-                            "export: {}({})",
-                            "[constructor]test:guest/api/session@0.1.0.new", __params
-                            .join(", ")
+                            "export: {}({})", "new test:guest/api/session@0.1.0",
+                            __params.join(", ")
                         ),
                     );
                     let _ = test::guest::api::Session::new(&name);
@@ -109,9 +108,8 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         .push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
                     proxy::util::debug::print(
                         &format!(
-                            "export: {}({})",
-                            "[constructor]test:host/types/counter@0.1.0.new", __params
-                            .join(", ")
+                            "export: {}({})", "new test:host/types/counter@0.1.0",
+                            __params.join(", ")
                         ),
                     );
                     let _ = test::host::types::Counter::new(start);
