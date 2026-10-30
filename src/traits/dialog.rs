@@ -1,21 +1,27 @@
-use crate::codegen::util::{make_path, wit_func_name};
+use crate::codegen::util::make_path;
+use crate::codegen::wit::WitType;
 use crate::traits::Trait;
-use heck::{ToKebabCase, ToSnakeCase};
 use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
 pub struct DialogTrait;
 
 impl Trait for DialogTrait {
-    fn resource_trait(&self, module_path: &[String], resource: &ItemStruct) -> Vec<Item> {
+    fn resource_trait(
+        &self,
+        module_path: &[String],
+        resource: &ItemStruct,
+        wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let resource_path = make_path(module_path, &resource.ident.to_string());
-        let wit_name = resource.ident.to_string().to_kebab_case();
+        let wit_name = &wit.name;
         let in_import = module_path[0] != "exports";
         if in_import {
-            let call =
-                format!("get_mock_{}_{}", module_path.join("_"), resource.ident).to_snake_case();
-            let call: syn::Ident = syn::parse_str(&call).unwrap();
+            let call = wit
+                .conversion
+                .as_ref()
+                .expect("a host resource has a conversion function");
             res.push(parse_quote! {
             impl Dialog for #resource_path {
                 fn read_value(_dep: u32) -> Self {
@@ -73,27 +79,25 @@ impl Trait for DialogTrait {
         }
         res
     }
-    fn struct_trait(&self, module_path: &[String], struct_item: &ItemStruct) -> Vec<Item> {
+    fn struct_trait(
+        &self,
+        module_path: &[String],
+        struct_item: &ItemStruct,
+        wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let struct_name = make_path(module_path, &struct_item.ident.to_string());
-        let struct_wit_name = wit_func_name(module_path, None, &struct_item.ident, None);
+        let struct_wit_name = &wit.qualified_name;
+        let field_wit_names = &wit.members;
+        let field_wit_tys = &wit.field_types;
         let (impl_generics, ty_generics, where_clause) = struct_item.generics.split_for_impl();
-        let (field_names, tys, field_wit_names) = match &struct_item.fields {
-            syn::Fields::Unit => (Vec::new(), Vec::new(), Vec::new()),
-            syn::Fields::Named(fields) => {
-                let field_names: Vec<_> = fields
-                    .named
-                    .iter()
-                    .map(|f| f.ident.clone().unwrap())
-                    .collect();
-                let field_tys = fields.named.iter().map(|f| &f.ty).collect();
-                let field_wit_names = fields
-                    .named
-                    .iter()
-                    .map(|f| f.ident.clone().unwrap().to_string().to_kebab_case())
-                    .collect();
-                (field_names, field_tys, field_wit_names)
-            }
+        let field_names: Vec<_> = match &struct_item.fields {
+            syn::Fields::Unit => Vec::new(),
+            syn::Fields::Named(fields) => fields
+                .named
+                .iter()
+                .map(|f| f.ident.clone().unwrap())
+                .collect(),
             syn::Fields::Unnamed(_) => unreachable!(),
         };
         res.push(parse_quote! {
@@ -101,7 +105,7 @@ impl Trait for DialogTrait {
             fn read_value(dep: u32) -> Self {
                 proxy::util::dialog::print(dep, &format!("provide value for struct {}", #struct_wit_name));
                 #(
-                    proxy::util::dialog::print(dep + 1, &format!("provide value for field {}: {}", #field_wit_names, <#tys as WitName>::name()));
+                    proxy::util::dialog::print(dep + 1, &format!("provide value for field {}: {}", #field_wit_names, #field_wit_tys));
                     let #field_names = Dialog::read_value(dep + 1);
                 )*
                 Self {
@@ -114,14 +118,11 @@ impl Trait for DialogTrait {
         });
         res
     }
-    fn enum_trait(&self, module_path: &[String], enum_item: &ItemEnum) -> Vec<Item> {
+    fn enum_trait(&self, module_path: &[String], enum_item: &ItemEnum, wit: &WitType) -> Vec<Item> {
         let mut res = Vec::new();
         let enum_name = make_path(module_path, &enum_item.ident.to_string());
         let (impl_generics, ty_generics, where_clause) = enum_item.generics.split_for_impl();
-        let tags = enum_item.variants.iter().map(|variant| {
-            let tag = &variant.ident;
-            tag.to_string().to_kebab_case()
-        });
+        let tags = &wit.members;
         let tags = quote! { [#( #tags.to_string() ),*] };
         let arms = enum_item.variants.iter().enumerate().map(|(idx, variant)| {
             let tag = &variant.ident;
@@ -135,7 +136,7 @@ impl Trait for DialogTrait {
                 syn::Fields::Named(_) => unreachable!(),
             }
         });
-        let enum_wit_name = wit_func_name(module_path, None, &enum_item.ident, None);
+        let enum_wit_name = &wit.qualified_name;
         res.push(parse_quote! {
         impl #impl_generics Dialog for #enum_name #ty_generics #where_clause {
             fn read_value(dep: u32) -> Self {
@@ -151,15 +152,17 @@ impl Trait for DialogTrait {
         });
         res
     }
-    fn flag_trait(&self, module_path: &[String], item: &crate::codegen::ItemFlag) -> Vec<Item> {
+    fn flag_trait(
+        &self,
+        module_path: &[String],
+        item: &crate::codegen::ItemFlag,
+        wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let flag_path = make_path(module_path, &item.name.to_string());
-        let flag_wit_name = wit_func_name(module_path, None, &item.name, None);
+        let flag_wit_name = &wit.qualified_name;
         let flags = &item.flags;
-        let flag_names: Vec<_> = flags
-            .iter()
-            .map(|flag| flag.to_string().to_kebab_case())
-            .collect();
+        let flag_names = &wit.members;
         let flag_names = quote! { [#( #flag_names.to_string() ),*] };
         let flags = flags.iter().map(|flag| quote! { #flag_path::#flag });
         let idxs = 0..flags.len();

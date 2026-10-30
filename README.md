@@ -66,21 +66,6 @@ Provide an interactive terminal for users to mock import and export calls.
 This mode requires raw access to terminal, which can only be implemented on the host side for now.
 So the composed binary can only be run with `proxy-component run`, instead of a regular `wasmtime`.
 
-### Generate
-
-Given a `bindings.rs` file generated from `wit-bindgen`. This command can generate code to implement
-all the required traits, based on the following mode:
-
-* `stubs`. Fill in all impl functions with `unimplemented!()`, similar to `wit-bindgen rust --stubs`, but outside of the bindings module.
-* `instrument`. Given an instrument component which imports and exports the same interface, generate code to redirect export interface to call the coressponding import functions.
-* `record`. Given an instrument component, generate the code to redirect the calls and record the arguments and return in WAVE format. 
-* `replay`. Given a vitualized component, generate code to replay an execution based on a recorded WAVE trace.
-* `fuzz`. Given a virtualized component, generate random import values and export values using the `arbitrary` crate.
-
-```
-$ cargo run generate bindings.rs <mode> -o lib.rs
-```
-
 ## Prerequisite
 
 * rustup target add wasm32-unknown-unknown

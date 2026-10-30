@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::path::Path;
 use wit_component::WitPrinter;
-use wit_parser::{PackageId, Resolve};
+use wit_parser::{Resolve, WorldId};
 
 // In record mode, the guest sees a copy of each imported package with its namespace
 // prefixed by `wrapped-` in WIT, which becomes `wrapped_` in the generated Rust modules
@@ -133,15 +133,10 @@ pub fn extract_wit(wasm_file: &Path, out_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Generate Rust bindings from WIT definitions.
-/// Equivalent to `wit-bindgen rust <wit_dir> --world <world_name> --generate-all --merge-structurally-equal-types=true --out-dir <out_dir>`.
-pub fn generate_bindings(wit_dir: &Path, world_name: &str, out_dir: &Path) -> Result<()> {
-    // wit-bindgen may depend on a different wit-parser version than wit-component
-    use wit_bindgen_core::{Files, WorldGenerator, wit_parser::Resolve};
-    let mut resolve = Resolve::default();
-    let (pkg, _) = resolve.push_dir(wit_dir)?;
-    let world = resolve.select_world(&[pkg], Some(world_name))?;
-
+/// Generate Rust bindings for a world, returning the bindings file.
+/// Equivalent to `wit-bindgen rust --generate-all --merge-structurally-equal-types=true`.
+pub fn generate_bindings(resolve: &mut Resolve, world: WorldId) -> Result<String> {
+    use wit_bindgen_core::{Files, WorldGenerator};
     let opts = wit_bindgen_rust::Opts {
         generate_all: true,
         merge_structurally_equal_types: Some(Some(true)),
@@ -149,30 +144,11 @@ pub fn generate_bindings(wit_dir: &Path, world_name: &str, out_dir: &Path) -> Re
     };
     let mut generator = opts.build();
     let mut files = Files::default();
-    generator.generate(&mut resolve, world, &mut files)?;
-
-    std::fs::create_dir_all(out_dir)?;
-    for (name, content) in files.iter() {
-        let path = out_dir.join(name);
-        std::fs::write(&path, content)?;
-    }
-    Ok(())
-}
-
-/// Return the set of package ids that will have version suffix in the wit-bindgen
-/// Use the same logic as in https://github.com/bytecodealliance/wit-bindgen/blob/main/crates/core/src/path.rs
-pub fn package_with_version(resolve: &Resolve) -> BTreeSet<PackageId> {
-    let mut seen: BTreeMap<(String, String), Vec<PackageId>> = BTreeMap::new();
-    for (id, p) in resolve.packages.iter() {
-        seen.entry((p.name.namespace.clone(), p.name.name.clone()))
-            .or_default()
-            .push(id);
-    }
-    let mut res = BTreeSet::new();
-    for (_, ids) in seen {
-        if ids.len() > 1 {
-            res.extend(ids);
-        }
-    }
-    res
+    generator.generate(resolve, world, &mut files)?;
+    // A single file, `{world}.rs`
+    let (_, content) = files
+        .iter()
+        .next()
+        .context("wit-bindgen generated no file")?;
+    Ok(String::from_utf8(content.to_vec())?)
 }

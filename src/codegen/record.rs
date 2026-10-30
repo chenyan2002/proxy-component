@@ -1,25 +1,26 @@
 use super::util::{
     ResourceFuncKind, extract_arg_info, get_return_type, init_params, is_wrapped_module,
-    wit_func_name,
 };
-use super::{GenerateMode, State, get_proxy_path};
+use super::{State, get_proxy_path};
 use quote::quote;
 use syn::{Signature, parse_quote};
 
 impl State {
-    pub fn generate_instrument_func(
+    pub fn generate_record_func(
         &self,
         module_path: &[String],
         sig: &Signature,
         resource: Option<&str>,
     ) -> syn::ImplItemFn {
         let func_name = &sig.ident;
-        let (kind, args) = extract_arg_info(sig);
+        let wit_func = self.expect_wit_func(module_path, resource, func_name);
+        let kind = wit_func.kind;
+        let args = extract_arg_info(sig);
         let import_path = get_proxy_path(module_path);
         let import_sig = self
             .find_function(&import_path, resource, func_name)
             .unwrap();
-        let (_, import_args) = extract_arg_info(import_sig);
+        let import_args = extract_arg_info(import_sig);
         let arg_names = args.iter().map(|arg| &arg.ident);
         let call_args = args
             .iter()
@@ -45,48 +46,37 @@ impl State {
                 quote! { res.to_proxy() },
             ),
         };
-        match &self.mode {
-            GenerateMode::Instrument => parse_quote! {
-                #sig {
-                    let res = #func(#(#call_args.to_proxy()),*);
-                    #res
-                }
-            },
-            GenerateMode::Record => {
-                let init_vec = init_params(kind.as_ref());
-                let is_mut = if args.is_empty() {
-                    quote! {}
-                } else {
-                    quote! { mut }
-                };
-                let display_name = wit_func_name(module_path, resource, func_name, kind.as_ref());
-                let is_export = !is_wrapped_module(&module_path[1]);
-                let record_ret = if get_return_type(&sig.output).is_none() {
-                    quote! {
-                        #func(#(#call_args),*);
-                        proxy::recorder::record::record_ret(Some(#display_name), None, #is_export);
-                    }
-                } else {
-                    quote! {
-                       let res = #func(#(#call_args),*);
-                       let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                       proxy::recorder::record::record_ret(Some(#display_name), Some(&wave_res), #is_export);
-                       #res
-                    }
-                };
-                parse_quote! {
-                    #sig {
-                        let #is_mut params: Vec<String> = #init_vec;
-                        #(
-                            let #arg_names = #arg_names.to_proxy();
-                            params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
-                        )*
-                        proxy::recorder::record::record_args(Some(#display_name), &params, #is_export);
-                        #record_ret
-                    }
-                }
+        let init_vec = init_params(kind.as_ref());
+        let is_mut = if args.is_empty() {
+            quote! {}
+        } else {
+            quote! { mut }
+        };
+        let display_name = &wit_func.display_name;
+        let is_export = !is_wrapped_module(&module_path[1]);
+        let record_ret = if get_return_type(&sig.output).is_none() {
+            quote! {
+                #func(#(#call_args),*);
+                proxy::recorder::record::record_ret(Some(#display_name), None, #is_export);
             }
-            _ => unreachable!(),
+        } else {
+            quote! {
+               let res = #func(#(#call_args),*);
+               let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
+               proxy::recorder::record::record_ret(Some(#display_name), Some(&wave_res), #is_export);
+               #res
+            }
+        };
+        parse_quote! {
+            #sig {
+                let #is_mut params: Vec<String> = #init_vec;
+                #(
+                    let #arg_names = #arg_names.to_proxy();
+                    params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
+                )*
+                proxy::recorder::record::record_args(Some(#display_name), &params, #is_export);
+                #record_ret
+            }
         }
     }
 }

@@ -1,21 +1,27 @@
 use crate::codegen::util::make_path;
+use crate::codegen::wit::WitType;
 use crate::traits::Trait;
-use heck::{ToKebabCase, ToSnakeCase};
 use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
 pub struct FuzzTrait;
 
 impl Trait for FuzzTrait {
-    fn resource_trait(&self, module_path: &[String], resource: &ItemStruct) -> Vec<Item> {
+    fn resource_trait(
+        &self,
+        module_path: &[String],
+        resource: &ItemStruct,
+        wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let resource_path = make_path(module_path, &resource.ident.to_string());
-        let wit_name = resource.ident.to_string().to_kebab_case();
+        let wit_name = &wit.name;
         let in_import = module_path[0] != "exports";
         if in_import {
-            let call =
-                format!("get_mock_{}_{}", module_path.join("_"), resource.ident).to_snake_case();
-            let call: syn::Ident = syn::parse_str(&call).unwrap();
+            let call = wit
+                .conversion
+                .as_ref()
+                .expect("a host resource has a conversion function");
             res.push(parse_quote! {
             impl Arbitrary<'_> for #resource_path {
                 fn arbitrary(_u: &mut Unstructured<'_>) -> Result<Self> {
@@ -61,7 +67,12 @@ impl Trait for FuzzTrait {
         }
         res
     }
-    fn struct_trait(&self, module_path: &[String], struct_item: &ItemStruct) -> Vec<Item> {
+    fn struct_trait(
+        &self,
+        module_path: &[String],
+        struct_item: &ItemStruct,
+        _wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let struct_name = make_path(module_path, &struct_item.ident.to_string());
         let (impl_generics, ty_generics, where_clause) = struct_item.generics.split_for_impl();
@@ -97,7 +108,12 @@ impl Trait for FuzzTrait {
         });
         res
     }
-    fn enum_trait(&self, module_path: &[String], enum_item: &ItemEnum) -> Vec<Item> {
+    fn enum_trait(
+        &self,
+        module_path: &[String],
+        enum_item: &ItemEnum,
+        _wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let enum_name = make_path(module_path, &enum_item.ident.to_string());
         let (impl_generics, ty_generics, where_clause) = enum_item.generics.split_for_impl();
@@ -150,7 +166,12 @@ impl Trait for FuzzTrait {
         });
         res
     }
-    fn flag_trait(&self, module_path: &[String], item: &crate::codegen::ItemFlag) -> Vec<Item> {
+    fn flag_trait(
+        &self,
+        module_path: &[String],
+        item: &crate::codegen::ItemFlag,
+        _wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let flag_path = make_path(module_path, &item.name.to_string());
         let flag_num = item.flags.len() - 1;

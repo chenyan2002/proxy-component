@@ -1,6 +1,4 @@
-use super::util::{
-    constructor_resource_name, extract_arg_info, get_return_type, params_to_wave, wit_func_name,
-};
+use super::util::{extract_arg_info, get_return_type, params_to_wave};
 use super::{ExportFunc, State};
 use quote::quote;
 use syn::{Signature, parse_quote};
@@ -13,20 +11,19 @@ impl State {
         resource: Option<&str>,
     ) -> syn::ImplItemFn {
         let func_name = &sig.ident;
-        let (kind, args) = extract_arg_info(sig);
-        let display_name = wit_func_name(module_path, resource, func_name, kind.as_ref());
+        let wit_func = self.expect_wit_func(module_path, resource, func_name);
+        let kind = wit_func.kind;
+        let display_name = &wit_func.display_name;
+        let args = extract_arg_info(sig);
         let ret_ty = get_return_type(&sig.output);
-        if let Some(ty) = ret_ty {
+        if ret_ty.is_some() {
             let params = params_to_wave(kind.as_ref(), &args);
-            let (ret_name, read_ret) = match constructor_resource_name(resource, kind.as_ref()) {
-                Some(name) => (
-                    quote! { #name },
-                    quote! { MockedResource { name: #name.to_string(), ..Dialog::read_value(0) } },
-                ),
-                None => (
-                    quote! { <#ty as WitName>::name() },
-                    quote! { Dialog::read_value(0) },
-                ),
+            let ret_name = wit_func.result.as_ref().unwrap();
+            let read_ret = match wit_func.constructor_resource() {
+                Some(name) => {
+                    quote! { MockedResource { name: #name.to_string(), ..Dialog::read_value(0) } }
+                }
+                None => quote! { Dialog::read_value(0) },
             };
             parse_quote! {
                 #sig {
@@ -56,6 +53,7 @@ impl State {
                     display_name,
                     func,
                     arg_names,
+                    arg_wit_tys,
                     arg_tys,
                     call_params,
                     ..
@@ -65,7 +63,7 @@ impl State {
                         proxy::util::dialog::print(0, &format!("call export func {}", #display_name));
                         let mut __params: Vec<String> = Vec::new();
                         #(
-                            proxy::util::dialog::print(0, &format!("provide argument for {}: {}", stringify!(#arg_names), <#arg_tys as WitName>::name()));
+                            proxy::util::dialog::print(0, &format!("provide argument for {}: {}", stringify!(#arg_names), #arg_wit_tys));
                             let #arg_names: #arg_tys = Dialog::read_value(0);
                             __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*

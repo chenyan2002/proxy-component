@@ -85,14 +85,15 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     }
     cmd.arg("build")
         .arg("--target=wasm32-unknown-unknown")
+        .arg("--release")
         .current_dir(tmp_dir.as_path());
     let status = cmd.status()?;
     assert!(status.success());
 
     let exports_wasm_path =
-        component_new(&tmp_dir, &wit_dir, "exports", "debug/record_exports.wasm")?;
+        component_new(&tmp_dir, &wit_dir, "exports", "release/record_exports.wasm")?;
     let imports_wasm_path =
-        component_new(&tmp_dir, &wit_dir, "imports", "debug/record_imports.wasm")?;
+        component_new(&tmp_dir, &wit_dir, "imports", "release/record_imports.wasm")?;
     // 7. run wac
     opts.generate_wac(&imports_wasm_path, &exports_wasm_path, &wit_dir)?;
     let output_file = "composed.wasm";
@@ -152,22 +153,11 @@ fn bindgen(
     use_custom_allocator: bool,
 ) -> Result<()> {
     let out_dir = tmp_dir.join(dest_name);
-    crate::wit_util::generate_bindings(wit_dir, world_name, &out_dir)?;
-    let binding_file = out_dir.join(world_name.to_owned() + ".rs");
-    let codegen_mode = match mode {
-        Mode::Record => codegen::GenerateMode::Record,
-        Mode::Replay => codegen::GenerateMode::Replay,
-        Mode::Fuzz => codegen::GenerateMode::Fuzz,
-        Mode::Dialog => codegen::GenerateMode::Dialog,
-    };
-    let codegen_opt = codegen::GenerateArgs {
-        bindings: binding_file.clone(),
-        output_file: out_dir.join("lib.rs"),
-        mode: codegen_mode,
-        use_custom_allocator,
-    };
-    codegen_opt.generate()?;
-    fs::rename(&binding_file, out_dir.join("bindings.rs"))?;
+    let (mut resolve, world) = parse_wit(wit_dir, Some(world_name))?;
+    let bindings = crate::wit_util::generate_bindings(&mut resolve, world)?;
+    fs::write(out_dir.join("bindings.rs"), &bindings)?;
+    let lib = codegen::generate(mode, resolve, world, &bindings, use_custom_allocator)?;
+    fs::write(out_dir.join("lib.rs"), lib)?;
     Ok(())
 }
 fn component_new(

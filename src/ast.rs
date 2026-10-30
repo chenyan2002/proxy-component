@@ -4,6 +4,7 @@ use crate::wit_util::*;
 use anyhow::{Result, bail};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use wit_bindgen_core::name_package_module;
 use wit_bindgen_core::{Files, Source};
 use wit_component::WitPrinter;
 use wit_parser::*;
@@ -218,9 +219,8 @@ impl<'a> Opt<'a> {
     /// Generate the `proxy:conversion` interface for converting resources from
     /// non-main packages between the generated components.
     fn generate_conversion_wit(&self, resolve: &Resolve, main_pkg: PackageId, files: &mut Files) {
-        let has_version = package_with_version(resolve);
         let mut resources = BTreeMap::new();
-        for (_, iface) in resolve.interfaces.iter().filter(|(_, iface)| {
+        for (iface_id, iface) in resolve.interfaces.iter().filter(|(_, iface)| {
             iface.package.is_some_and(|id| id != main_pkg) && iface.name.is_some()
         }) {
             let pkg_id = iface.package.unwrap();
@@ -229,16 +229,13 @@ impl<'a> Opt<'a> {
             for (ty_name, ty_id) in iface.types.iter() {
                 let ty = &resolve.types[*ty_id];
                 if matches!(ty.kind, TypeDefKind::Resource) {
-                    let mut resource =
-                        format!("{}:{}/{}", pkg_name.namespace, pkg_name.name, iface_name);
-                    let mut bindgen_name = format!("{}:{}", pkg_name.namespace, pkg_name.name);
-                    if let Some(ver) = &pkg_name.version {
-                        resource.push_str(&format!("@{ver}"));
-                        if has_version.contains(&pkg_id) {
-                            bindgen_name.push_str(&format!("{ver}"));
-                        }
-                    }
-                    bindgen_name.push_str(&format!("/{}", iface_name));
+                    let resource = resolve.id_of(iface_id).unwrap();
+                    // Unique across versions of a package, like wit-bindgen's module names.
+                    let bindgen_name = format!(
+                        "{}:{}/{iface_name}",
+                        pkg_name.namespace,
+                        name_package_module(resolve, pkg_id)
+                    );
                     assert!(
                         resources
                             .insert(*ty_id, (ty_name, resource, bindgen_name))

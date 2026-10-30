@@ -1,7 +1,10 @@
 use super::util::{FullTypePath, get_resource_from_trait_name};
 use super::{ItemFlag, State, TypeInfo};
-use quote::ToTokens;
+use heck::ToShoutySnakeCase;
+use proc_macro2::TokenTree;
+use quote::{ToTokens, format_ident};
 use syn::{Ident, Item, Signature, Type, Visibility, visit_mut::VisitMut};
+use wit_parser::{TypeDefKind, TypeId};
 
 impl State {
     pub fn find_all_items(&mut self, items: &[Item], current_path: Vec<String>) {
@@ -50,18 +53,15 @@ impl State {
                     self.funcs_mut(&current_path, None)
                         .push(func_item.sig.clone());
                 }
-                // resource and struct types
+                // records and resources. Rust types without a WIT type, e.g. the `XBorrow`
+                // of an exported resource, are skipped.
                 Item::Struct(struct_item) if matches!(struct_item.vis, Visibility::Public(_)) => {
-                    let has_repr_transparent = struct_item.attrs.iter().any(|attr| {
-                        attr.path().is_ident("repr")
-                            && attr.to_token_stream().to_string().contains("transparent")
-                    });
-                    let type_info = if has_repr_transparent {
-                        if struct_item.ident.to_string().ends_with("Borrow")
-                            && current_path[0] == "exports"
-                        {
-                            continue;
-                        }
+                    let Some(id) = self.wit_type_id(&current_path, &struct_item.ident.to_string())
+                    else {
+                        continue;
+                    };
+                    let type_info = if matches!(self.resolve.types[id].kind, TypeDefKind::Resource)
+                    {
                         TypeInfo::Resource(struct_item.clone())
                     } else {
                         let mut struct_item = struct_item.clone();
@@ -71,28 +71,39 @@ impl State {
                         transformer.visit_item_struct_mut(&mut struct_item);
                         TypeInfo::Struct(struct_item)
                     };
-                    self.push_type(&current_path, type_info);
+                    self.push_type(&current_path, id, type_info);
                 }
-                // enum types
+                // variants and enums
                 Item::Enum(enum_item) if matches!(enum_item.vis, Visibility::Public(_)) => {
+                    let Some(id) = self.wit_type_id(&current_path, &enum_item.ident.to_string())
+                    else {
+                        continue;
+                    };
                     let mut enum_item = enum_item.clone();
                     let mut transformer = FullTypePath {
                         module_path: &current_path,
                     };
                     transformer.visit_item_enum_mut(&mut enum_item);
-                    self.push_type(&current_path, TypeInfo::Enum(enum_item));
-                }
-                // type aliases, e.g. the resources used by the conversion interface
-                Item::Type(type_item) if matches!(type_item.vis, Visibility::Public(_)) => {
-                    let mut path = current_path.clone();
-                    path.push(type_item.ident.to_string());
-                    self.type_aliases.insert(path, (*type_item.ty).clone());
+                    self.push_type(&current_path, id, TypeInfo::Enum(enum_item));
                 }
                 // flags
                 Item::Macro(macro_item) => {
-                    if let Some(enum_item) = extract_bitflag(macro_item) {
-                        self.push_type(&current_path, TypeInfo::Flag(enum_item));
-                    }
+                    let Some(name) = bitflags_name(macro_item) else {
+                        continue;
+                    };
+                    let Some(id) = self.wit_type_id(&current_path, &name.to_string()) else {
+                        continue;
+                    };
+                    let TypeDefKind::Flags(flags) = &self.resolve.types[id].kind else {
+                        unreachable!()
+                    };
+                    // wit-bindgen names the constants of flags in SHOUTY_SNAKE_CASE.
+                    let flags = flags
+                        .flags
+                        .iter()
+                        .map(|f| format_ident!("{}", f.name.to_shouty_snake_case()))
+                        .collect();
+                    self.push_type(&current_path, id, TypeInfo::Flag(ItemFlag { name, flags }));
                 }
                 // traverse down the modules
                 Item::Mod(module) if matches!(module.vis, Visibility::Public(_)) => {
@@ -122,11 +133,11 @@ impl State {
             .entry(resource)
             .or_default()
     }
-    fn push_type(&mut self, module_path: &[String], type_info: TypeInfo) {
+    fn push_type(&mut self, module_path: &[String], id: TypeId, type_info: TypeInfo) {
         self.types
             .entry(module_path.to_vec())
             .or_default()
-            .push(type_info);
+            .push((id, type_info));
     }
     pub fn find_function(
         &self,
@@ -143,7 +154,7 @@ impl State {
             Some(types) => types,
             None => return false,
         };
-        for type_info in types {
+        for (_, type_info) in types {
             match type_info {
                 TypeInfo::Resource(struct_item) | TypeInfo::Struct(struct_item) => {
                     if struct_item.ident == name {
@@ -177,33 +188,16 @@ fn has_doc_hidden(attrs: &[syn::Attribute]) -> bool {
     }
     false
 }
-fn extract_bitflag(macro_item: &syn::ItemMacro) -> Option<ItemFlag> {
-    use syn::{Attribute, Token, parse::Parser};
-    if macro_item.mac.path.segments.last()?.ident == "bitflags" {
-        let tokens = macro_item.mac.tokens.clone();
-        let parser = |input: syn::parse::ParseStream| {
-            input.call(Attribute::parse_outer)?;
-            input.parse::<syn::Visibility>()?;
-            input.parse::<Token![struct]>()?;
-            let ident: Ident = input.parse()?;
-            input.parse::<Token![:]>()?;
-            input.parse::<Type>()?;
-            let content;
-            syn::braced!(content in input);
-            let mut flags = vec![];
-            while !content.is_empty() {
-                content.parse::<Token![const]>()?;
-                let flag_ident: Ident = content.parse()?;
-                flags.push(flag_ident);
-                while !content.peek(Token![;]) && !content.is_empty() {
-                    content.parse::<proc_macro2::TokenTree>()?;
-                }
-                content.parse::<Token![;]>()?;
-            }
-            Ok((ident, flags))
-        };
-        let (name, flags) = parser.parse2(tokens).unwrap();
-        return Some(ItemFlag { name, flags });
+/// The name of the type a `bitflags!` macro defines, e.g. `Name` in
+/// `bitflags! { #[attrs] pub struct Name: u8 { const A = 1 << 0; } }`.
+fn bitflags_name(macro_item: &syn::ItemMacro) -> Option<Ident> {
+    if macro_item.mac.path.segments.last()?.ident != "bitflags" {
+        return None;
     }
-    None
+    let mut tokens = macro_item.mac.tokens.clone().into_iter();
+    tokens.find(|t| matches!(t, TokenTree::Ident(ident) if ident == "struct"))?;
+    match tokens.next()? {
+        TokenTree::Ident(name) => Some(name),
+        _ => None,
+    }
 }

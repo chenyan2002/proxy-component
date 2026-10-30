@@ -1,7 +1,7 @@
 use crate::codegen::State;
-use crate::codegen::util::{is_wrapped_module, make_path};
+use crate::codegen::util::make_path;
+use crate::codegen::wit::WitType;
 use crate::traits::Trait;
-use heck::ToSnakeCase;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::{File, Item, ItemEnum, ItemStruct, parse_quote};
@@ -16,7 +16,12 @@ impl<'a> ProxyTrait<'a> {
 }
 
 impl Trait for ProxyTrait<'_> {
-    fn resource_trait(&self, module_path: &[String], resource: &ItemStruct) -> Vec<Item> {
+    fn resource_trait(
+        &self,
+        module_path: &[String],
+        resource: &ItemStruct,
+        _wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let resource_path = make_path(module_path, &resource.ident.to_string());
         let output_path = self.get_proxy_path(module_path);
@@ -25,14 +30,9 @@ impl Trait for ProxyTrait<'_> {
         if in_import {
             let is_import_only = output_path[0] != "exports";
             if is_import_only {
-                let call = if is_wrapped_module(&output_path[0]) {
-                    "get_"
-                } else {
-                    "get_host_"
-                }
-                .to_string()
-                    + &format!("{}_{}", output_path.join("_"), resource.ident).to_snake_case();
-                let call: syn::Path = syn::parse_str(&call).unwrap();
+                let call = self
+                    .state
+                    .conversion_func(&output_path, &resource.ident.to_string());
                 let output_path = make_path(&output_path, &resource.ident.to_string());
                 res.push(parse_quote! {
                     impl ToProxy for #resource_path {
@@ -91,7 +91,12 @@ impl Trait for ProxyTrait<'_> {
         }
         res
     }
-    fn struct_trait(&self, module_path: &[String], struct_item: &ItemStruct) -> Vec<Item> {
+    fn struct_trait(
+        &self,
+        module_path: &[String],
+        struct_item: &ItemStruct,
+        _wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let name = struct_item.ident.to_string();
         let struct_name = make_path(module_path, &name);
@@ -128,7 +133,12 @@ impl Trait for ProxyTrait<'_> {
         });
         res
     }
-    fn enum_trait(&self, module_path: &[String], enum_item: &ItemEnum) -> Vec<Item> {
+    fn enum_trait(
+        &self,
+        module_path: &[String],
+        enum_item: &ItemEnum,
+        _wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let name = enum_item.ident.to_string();
         let enum_name = make_path(module_path, &name);
@@ -169,7 +179,12 @@ impl Trait for ProxyTrait<'_> {
         });
         res
     }
-    fn flag_trait(&self, module_path: &[String], item: &crate::codegen::ItemFlag) -> Vec<Item> {
+    fn flag_trait(
+        &self,
+        module_path: &[String],
+        item: &crate::codegen::ItemFlag,
+        _wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let name = item.name.to_string();
         let flag_name = make_path(module_path, &name);

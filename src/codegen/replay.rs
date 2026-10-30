@@ -1,6 +1,4 @@
-use super::util::{
-    constructor_resource_name, extract_arg_info, get_return_type, params_to_wave, wit_func_name,
-};
+use super::util::{extract_arg_info, get_return_type, params_to_wave};
 use super::{ExportFunc, State};
 use quote::quote;
 use syn::{Signature, parse_quote};
@@ -13,11 +11,13 @@ impl State {
         resource: Option<&str>,
     ) -> syn::ImplItemFn {
         let func_name = &sig.ident;
-        let (kind, args) = extract_arg_info(sig);
-        let display_name = wit_func_name(module_path, resource, func_name, kind.as_ref());
+        let wit_func = self.expect_wit_func(module_path, resource, func_name);
+        let kind = wit_func.kind;
+        let display_name = &wit_func.display_name;
+        let args = extract_arg_info(sig);
         let ret_ty = get_return_type(&sig.output);
         let replay_import = if let Some(ret_ty) = ret_ty {
-            let to_rust = match constructor_resource_name(resource, kind.as_ref()) {
+            let to_rust = match wit_func.constructor_resource() {
                 Some(name) => {
                     quote! { MockedResource { name: #name.to_string(), ..ret.to_rust() } }
                 }
@@ -51,6 +51,7 @@ impl State {
                 arg_tys,
                 call_params,
                 has_ret,
+                ..
             } = func;
             let arg_idx = (0..arg_names.len()).map(|idx| quote! { args[#idx] });
             let assert_ret = if has_ret {

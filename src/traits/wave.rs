@@ -1,6 +1,6 @@
 use crate::codegen::util::make_path;
+use crate::codegen::wit::WitType;
 use crate::traits::Trait;
-use heck::{ToKebabCase, ToSnakeCase};
 use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
@@ -11,10 +11,15 @@ pub struct WaveTrait {
 }
 
 impl Trait for WaveTrait {
-    fn resource_trait(&self, module_path: &[String], resource: &ItemStruct) -> Vec<Item> {
+    fn resource_trait(
+        &self,
+        module_path: &[String],
+        resource: &ItemStruct,
+        wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let resource_path = make_path(module_path, &resource.ident.to_string());
-        let wit_name = resource.ident.to_string().to_kebab_case();
+        let wit_name = &wit.name;
         let in_import = module_path[0] != "exports";
         res.push(parse_quote! {
             impl ValueTyped for #resource_path {
@@ -50,9 +55,10 @@ impl Trait for WaveTrait {
                 });
             }
             if self.to_rust {
-                let call = format!("get_mock_{}_{}", module_path.join("_"), resource.ident)
-                    .to_snake_case();
-                let call: syn::Ident = syn::parse_str(&call).unwrap();
+                let call = wit
+                    .conversion
+                    .as_ref()
+                    .expect("a host resource has a conversion function");
                 res.push(parse_quote! {
                 impl ToRust<#resource_path> for Value {
                     fn to_rust(&self) -> #resource_path {
@@ -162,24 +168,26 @@ impl Trait for WaveTrait {
         }
         res
     }
-    fn struct_trait(&self, module_path: &[String], struct_item: &ItemStruct) -> Vec<Item> {
+    fn struct_trait(
+        &self,
+        module_path: &[String],
+        struct_item: &ItemStruct,
+        wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let struct_name = make_path(module_path, &struct_item.ident.to_string());
         let (impl_generics, ty_generics, where_clause) = struct_item.generics.split_for_impl();
-        let (wit_names, field_names, tys) = match &struct_item.fields {
-            syn::Fields::Unit => (Vec::new(), Vec::new(), Vec::new()),
+        let wit_names = &wit.members;
+        let (field_names, tys) = match &struct_item.fields {
+            syn::Fields::Unit => (Vec::new(), Vec::new()),
             syn::Fields::Named(fields) => {
                 let field_names: Vec<_> = fields
                     .named
                     .iter()
                     .map(|f| f.ident.clone().unwrap())
                     .collect();
-                let wit_names = field_names
-                    .iter()
-                    .map(|f| f.to_string().to_kebab_case())
-                    .collect();
                 let field_tys = fields.named.iter().map(|f| &f.ty).collect();
-                (wit_names, field_names, field_tys)
+                (field_names, field_tys)
             }
             syn::Fields::Unnamed(_) => unreachable!(),
         };
@@ -221,14 +229,15 @@ impl Trait for WaveTrait {
         }
         res
     }
-    fn enum_trait(&self, module_path: &[String], enum_item: &ItemEnum) -> Vec<Item> {
+    fn enum_trait(&self, module_path: &[String], enum_item: &ItemEnum, wit: &WitType) -> Vec<Item> {
         let mut res = Vec::new();
         let enum_name = make_path(module_path, &enum_item.ident.to_string());
         let (impl_generics, ty_generics, where_clause) = enum_item.generics.split_for_impl();
-        let cases = enum_item.variants.iter().map(|variant| {
-            let tag = &variant.ident;
-            let wit_name = tag.to_string().to_kebab_case();
-            match &variant.fields {
+        let cases = enum_item
+            .variants
+            .iter()
+            .zip(&wit.members)
+            .map(|(variant, wit_name)| match &variant.fields {
                 syn::Fields::Unit => quote! { (#wit_name, None) },
                 syn::Fields::Unnamed(f) => {
                     assert!(f.unnamed.len() == 1);
@@ -236,8 +245,7 @@ impl Trait for WaveTrait {
                     quote! { (#wit_name, Some(<#ty as ValueTyped>::value_type())) }
                 }
                 syn::Fields::Named(_) => unreachable!(),
-            }
-        });
+            });
         res.push(parse_quote! {
             impl #impl_generics ValueTyped for #enum_name #ty_generics #where_clause {
                 #[allow(unused_imports)]
@@ -248,9 +256,8 @@ impl Trait for WaveTrait {
             }
         });
         if self.to_value {
-            let arms = enum_item.variants.iter().map(|variant| {
+            let arms = enum_item.variants.iter().zip(&wit.members).map(|(variant, wit_name)| {
                 let tag = &variant.ident;
-                let wit_name = tag.to_string().to_kebab_case();
                 match &variant.fields {
                     syn::Fields::Unit => quote! { Self::#tag => Value::make_variant(&ty, #wit_name, None) },
                     syn::Fields::Unnamed(_) => {
@@ -271,9 +278,8 @@ impl Trait for WaveTrait {
             });
         }
         if self.to_rust {
-            let arms = enum_item.variants.iter().map(|variant| {
+            let arms = enum_item.variants.iter().zip(&wit.members).map(|(variant, wit_name)| {
                 let tag = &variant.ident;
-                let wit_name = tag.to_string().to_kebab_case();
                 match &variant.fields {
                     syn::Fields::Unit => quote! {
                         (ref case, None) if case == #wit_name => #enum_name::#tag
@@ -297,10 +303,15 @@ impl Trait for WaveTrait {
         }
         res
     }
-    fn flag_trait(&self, module_path: &[String], item: &crate::codegen::ItemFlag) -> Vec<Item> {
+    fn flag_trait(
+        &self,
+        module_path: &[String],
+        item: &crate::codegen::ItemFlag,
+        wit: &WitType,
+    ) -> Vec<Item> {
         let mut res = Vec::new();
         let flag_path = make_path(module_path, &item.name.to_string());
-        let wit_flags = item.flags.iter().map(|f| f.to_string().to_kebab_case());
+        let wit_flags = &wit.members;
         res.push(parse_quote! {
             impl ValueTyped for #flag_path {
                 fn value_type() -> Type {
@@ -309,8 +320,7 @@ impl Trait for WaveTrait {
             }
         });
         if self.to_value {
-            let check_flags = item.flags.iter().map(|f| {
-                let wit_name = f.to_string().to_kebab_case();
+            let check_flags = item.flags.iter().zip(&wit.members).map(|(f, wit_name)| {
                 quote! {
                     if *self & Self::#f != Self::empty() {
                         flags.push(#wit_name);
@@ -329,8 +339,7 @@ impl Trait for WaveTrait {
             });
         }
         if self.to_rust {
-            let set_flags = item.flags.iter().map(|f| {
-                let wit_name = f.to_string().to_kebab_case();
+            let set_flags = item.flags.iter().zip(&wit.members).map(|(f, wit_name)| {
                 quote! {
                     if flags.iter().any(|flag| flag == #wit_name) {
                         res |= #flag_path::#f;

@@ -1,4 +1,3 @@
-use heck::ToKebabCase;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{FnArg, Ident, Signature, Type, parse_quote, visit_mut::VisitMut};
@@ -10,6 +9,7 @@ pub struct ArgInfo {
     pub is_borrowed: bool,
     pub ty: Type,
 }
+#[derive(Clone, Copy)]
 pub enum ResourceFuncKind {
     Method,
     Constructor,
@@ -28,48 +28,6 @@ pub fn make_path(module_path: &[String], name: &str) -> syn::Path {
     let path = format!("{}::{}", module_path.join("::"), name);
     syn::parse_str(&path).unwrap()
 }
-pub fn wit_func_name(
-    module_path: &[String],
-    resource: Option<&str>,
-    func_name: &Ident,
-    kind: Option<&ResourceFuncKind>,
-) -> String {
-    assert!(module_path.len() >= 3);
-    let mut module_path = module_path.to_vec();
-    if module_path[0] == "exports" {
-        module_path.remove(0);
-    }
-    assert!(module_path.len() == 3);
-    let mut res = String::new();
-    match kind {
-        Some(ResourceFuncKind::Constructor) => res.push_str("[constructor]"),
-        Some(ResourceFuncKind::Method) => res.push_str("[method]"),
-        _ => {}
-    }
-    res.push_str(&unwrapped_module(&module_path[0]).to_kebab_case());
-    res.push(':');
-    res.push_str(&module_path[1].to_kebab_case());
-    res.push('/');
-    res.push_str(&module_path[2].to_kebab_case());
-    if let Some(name) = resource {
-        res.push_str(&format!("/{}", name.to_kebab_case()));
-    }
-    res.push('.');
-    res.push_str(&func_name.to_string().to_kebab_case());
-    res
-}
-/// In virtualized components, constructors return `Self`, i.e. `MockedResource`, so type-directed
-/// traits like `Dialog` or `Arbitrary` cannot recover the resource name. Returns the WIT name of
-/// the resource to patch into the `MockedResource`, if `kind` is a constructor.
-pub fn constructor_resource_name(
-    resource: Option<&str>,
-    kind: Option<&ResourceFuncKind>,
-) -> Option<String> {
-    match kind {
-        Some(ResourceFuncKind::Constructor) => Some(resource?.to_kebab_case()),
-        _ => None,
-    }
-}
 pub fn get_return_type(ret: &syn::ReturnType) -> Option<Type> {
     match ret {
         syn::ReturnType::Default => None,
@@ -80,36 +38,25 @@ pub fn get_return_type(ret: &syn::ReturnType) -> Option<Type> {
     }
 }
 
-pub fn extract_arg_info(sig: &Signature) -> (Option<ResourceFuncKind>, Vec<ArgInfo>) {
-    let mut kind = None;
-    let mut arg_infos = Vec::new();
-    for arg in sig.inputs.iter() {
-        match arg {
-            FnArg::Receiver(_) => {
-                kind = Some(ResourceFuncKind::Method);
-            }
-            FnArg::Typed(pat_type) => {
-                let ident = match &*pat_type.pat {
-                    syn::Pat::Ident(ident) => ident.ident.clone(),
-                    _ => unreachable!(),
-                };
-                let ty = *pat_type.ty.clone();
-                let is_borrowed = matches!(&*pat_type.ty, Type::Reference(_));
-                arg_infos.push(ArgInfo {
-                    ident,
-                    is_borrowed,
-                    ty,
-                });
-            }
-        }
-    }
-    if sig.ident == "new"
-        && let Some(Type::Path(path)) = get_return_type(&sig.output)
-        && path.path.is_ident("Self")
-    {
-        kind = Some(ResourceFuncKind::Constructor);
-    }
-    (kind, arg_infos)
+/// The typed arguments of a function, without `self`.
+pub fn extract_arg_info(sig: &Signature) -> Vec<ArgInfo> {
+    sig.inputs
+        .iter()
+        .filter_map(|arg| {
+            let FnArg::Typed(pat_type) = arg else {
+                return None;
+            };
+            let ident = match &*pat_type.pat {
+                syn::Pat::Ident(ident) => ident.ident.clone(),
+                _ => unreachable!(),
+            };
+            Some(ArgInfo {
+                ident,
+                is_borrowed: matches!(&*pat_type.ty, Type::Reference(_)),
+                ty: *pat_type.ty.clone(),
+            })
+        })
+        .collect()
 }
 
 const BUILTIN_TYPES: &[&str] = &[
@@ -203,10 +150,6 @@ pub fn get_owned_type(ty: &Type) -> Option<Type> {
 const WRAPPED_RUST: &str = "wrapped_";
 pub fn is_wrapped_module(module: &str) -> bool {
     module.starts_with(WRAPPED_RUST)
-}
-/// Strips the `wrapped_` prefix from a Rust module name if present.
-pub fn unwrapped_module(module: &str) -> &str {
-    module.strip_prefix(WRAPPED_RUST).unwrap_or(module)
 }
 /// Maps a Rust module name between its host and wrapped copy.
 pub fn toggle_wrapped_module(module: &str) -> String {
