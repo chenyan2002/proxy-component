@@ -1,0 +1,5 @@
+package test:mockhost;
+world mockhost {
+  export test:host/types@0.1.0;
+  export test:log/sink@0.1.0;
+}

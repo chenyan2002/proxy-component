@@ -59,6 +59,7 @@ impl<'a> TraitGenerator<'a> {
                     to_value: true,
                     to_rust: false,
                     has_replay_table: false,
+                    wrapped_labels: true,
                 }));
                 traits.push(Box::new(proxy::ProxyTrait::new(state)));
             }
@@ -67,6 +68,7 @@ impl<'a> TraitGenerator<'a> {
                     to_value: true,
                     to_rust: true,
                     has_replay_table: true,
+                    wrapped_labels: false,
                 }));
             }
             Mode::Fuzz => {
@@ -74,6 +76,7 @@ impl<'a> TraitGenerator<'a> {
                     to_value: true,
                     to_rust: false,
                     has_replay_table: true,
+                    wrapped_labels: false,
                 }));
                 traits.push(Box::new(fuzz::FuzzTrait {}));
             }
@@ -82,6 +85,7 @@ impl<'a> TraitGenerator<'a> {
                     to_value: true,
                     to_rust: true,
                     has_replay_table: true,
+                    wrapped_labels: false,
                 }));
                 traits.push(Box::new(dialog::DialogTrait {}));
             }

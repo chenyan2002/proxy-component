@@ -120,17 +120,36 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&a)).unwrap());
         __params.push(wasm_wave::to_string(&ToValue::to_value(&b)).unwrap());
-        let wave = proxy::recorder::replay::replay_import(
-                Some("test:host/types/counter@0.1.0.merge"),
-                Some(&__params),
-            )
-            .unwrap();
-        let ret: Value = wasm_wave::from_str(
-                &<exports::test::host::types::Counter as ValueTyped>::value_type(),
-                &wave,
-            )
-            .unwrap();
-        ret.to_rust()
+        let __ret = {
+            let wave = proxy::recorder::replay::replay_import(
+                    Some("test:host/types/counter@0.1.0.merge"),
+                    Some(&__params),
+                )
+                .unwrap();
+            let ret: Value = wasm_wave::from_str(
+                    &<exports::test::host::types::Counter as ValueTyped>::value_type(),
+                    &wave,
+                )
+                .unwrap();
+            ret.to_rust()
+        };
+        MOVING.with(|moving| moving.set(true));
+        drop((b,));
+        MOVING.with(|moving| moving.set(false));
+        __ret
+    }
+    unsafe fn resource_from_raw_(handle: *mut Option<Self>) -> Option<Self> {
+        if let Some(res) = *unsafe { Box::from_raw(handle) } {
+            if !MOVING.with(|moving| moving.get()) {
+                let params = vec![wasm_wave::to_string(& res.to_value()).unwrap()];
+                let ret = proxy::recorder::replay::replay_import(
+                    Some("drop"),
+                    Some(&params),
+                );
+                assert!(ret.is_none());
+            }
+        }
+        None
     }
 }
 impl exports::test::log0_1_0::sink::Guest for Stub {
@@ -421,4 +440,8 @@ impl ToRust<MockedResource> for Value {
             .expect("invalid handle label");
         MockedResource { handle, name }
     }
+}
+thread_local! {
+    #[allow(dead_code)] static MOVING : std::cell::Cell < bool > = const {
+    std::cell::Cell::new(false) };
 }

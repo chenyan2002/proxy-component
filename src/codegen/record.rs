@@ -79,4 +79,22 @@ impl State {
             }
         }
     }
+    /// Overrides wit-bindgen's `resource_from_raw_`, which the `[dtor]` of an exported resource
+    /// calls, to record the drop of the resource in `module_path` around the actual drop.
+    pub fn generate_record_drop(&self, module_path: &[String]) -> syn::ImplItemFn {
+        let is_export = !is_wrapped_module(&module_path[1]);
+        let drop_name = trace::DROP;
+        parse_quote! {
+            unsafe fn resource_from_raw_(handle: *mut Option<Self>) -> Option<Self> {
+                // `None` if `into_inner` moved the resource out, e.g. to pass it on: not a drop.
+                if let Some(res) = *unsafe { Box::from_raw(handle) } {
+                    let params = vec![wasm_wave::to_string(&res.to_value()).unwrap()];
+                    proxy::recorder::record::record_args(Some(#drop_name), &params, #is_export);
+                    drop(res);
+                    proxy::recorder::record::record_ret(Some(#drop_name), None, #is_export);
+                }
+                None
+            }
+        }
+    }
 }

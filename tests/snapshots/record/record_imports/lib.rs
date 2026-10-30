@@ -13,6 +13,11 @@ impl exports::proxy::conversion::conversion::Guest for Stub {
     ) -> exports::proxy::conversion::conversion::HostTestHostTypesCounter {
         x.to_proxy()
     }
+    fn get_handle_wrapped_test_host_types_counter(
+        x: exports::proxy::conversion::conversion::WrappedTestHostTypesCounterBorrow<'_>,
+    ) -> u32 {
+        x.to_proxy().handle()
+    }
 }
 impl exports::wrapped_test::host::types::Guest for Stub {
     type Counter = test::host::types::Counter;
@@ -157,6 +162,15 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
             false,
         );
         res.to_proxy()
+    }
+    unsafe fn resource_from_raw_(handle: *mut Option<Self>) -> Option<Self> {
+        if let Some(res) = *unsafe { Box::from_raw(handle) } {
+            let params = vec![wasm_wave::to_string(& res.to_value()).unwrap()];
+            proxy::recorder::record::record_args(Some("drop"), &params, false);
+            drop(res);
+            proxy::recorder::record::record_ret(Some("drop"), None, false);
+        }
+        None
     }
 }
 impl exports::wrapped_test::log0_1_0::sink::Guest for Stub {

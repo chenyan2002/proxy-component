@@ -1,13 +1,15 @@
-use crate::codegen::util::make_path;
+use crate::codegen::util::{is_wrapped_module, make_path};
 use crate::codegen::wit::WitType;
 use crate::traits::{Trait, new_mock};
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
 pub struct WaveTrait {
     pub to_value: bool,
     pub to_rust: bool,
     pub has_replay_table: bool,
+    /// Label wrapped host resources by their host handles, see `proxy:conversion`
+    pub wrapped_labels: bool,
 }
 
 impl Trait for WaveTrait {
@@ -37,10 +39,25 @@ impl Trait for WaveTrait {
             }
             });
             if self.to_value {
+                // A wrapped host resource is labeled by its host handle, which the component
+                // wrapping it knows, so that both generated components label it alike.
+                let handle = match &wit.conversion {
+                    Some(conversion)
+                        if self.wrapped_labels && is_wrapped_module(&module_path[0]) =>
+                    {
+                        let conversion = conversion.to_string();
+                        let get_handle = format_ident!(
+                            "get_handle_{}",
+                            conversion.strip_prefix("get_").unwrap()
+                        );
+                        quote! { proxy::conversion::conversion::#get_handle(self) }
+                    }
+                    _ => quote! { self.handle() },
+                };
                 res.push(parse_quote! {
                 impl ToValue for #resource_path {
                     fn to_value(&self) -> Value {
-                        let label = format!("{}-{}", #wit_name, self.handle());
+                        let label = format!("{}-{}", #wit_name, #handle);
                         Value::make_handle(label.into())
                     }
                 }
@@ -48,7 +65,7 @@ impl Trait for WaveTrait {
                 res.push(parse_quote! {
                 impl<'a> ToValue for &'a #resource_path {
                     fn to_value(&self) -> Value {
-                        let label = format!("borrow-{}-{}", #wit_name, self.handle());
+                        let label = format!("borrow-{}-{}", #wit_name, #handle);
                         Value::make_handle(label.into())
                     }
                 }

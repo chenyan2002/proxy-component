@@ -26,8 +26,12 @@ pub struct WitFunc {
     pub resource: Option<String>,
     /// The WIT types of the parameters, without a method's `self`, e.g. `list<u8>`
     pub params: Vec<String>,
+    /// Whether each parameter, without a method's `self`, owns a resource, which the call moves
+    pub params_own: Vec<bool>,
     /// The WIT type of the result
     pub result: Option<String>,
+    /// Whether the result owns a resource
+    pub result_owns: bool,
 }
 impl WitFunc {
     /// In virtualized components, constructors return `Self`, i.e. `MockedResource`, so
@@ -163,6 +167,10 @@ impl State {
         printer.print_type_name(&self.resolve, ty).unwrap();
         printer.output.to_string()
     }
+    /// Whether a value of `ty` owns a resource, e.g. `option<counter>`, but not `borrow<counter>`.
+    fn owns_resource(&self, ty: &Type) -> bool {
+        matches!(ty, Type::Id(id) if self.type_info.get(*id).has_own_handle)
+    }
     /// The WIT type of a Rust type defined in `module_path`.
     pub fn wit_type_id(&self, module_path: &[String], name: &str) -> Option<TypeId> {
         let iface = &self.resolve.interfaces[*self.interfaces.get(module_path)?];
@@ -258,15 +266,21 @@ impl State {
             _ => format!("{callee}.{}", wit_func.item_name()),
         };
         let self_params = matches!(kind, Some(ResourceFuncKind::Method)) as usize;
+        let params = &wit_func.params[self_params..];
         Some(WitFunc {
             kind,
             display_name,
             resource,
-            params: wit_func.params[self_params..]
+            params: params
                 .iter()
                 .map(|param| self.type_name(&param.ty))
                 .collect(),
+            params_own: params
+                .iter()
+                .map(|param| self.owns_resource(&param.ty))
+                .collect(),
             result: wit_func.result.as_ref().map(|ty| self.type_name(ty)),
+            result_owns: wit_func.result.is_some_and(|ty| self.owns_resource(&ty)),
         })
     }
     /// Like `wit_func`, for functions the bindings generate from WIT.

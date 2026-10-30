@@ -53,6 +53,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         Some("test:guest/api@0.1.0.begin"),
                         Some(&wave_res),
                     );
+                    std::mem::forget(res);
                 }
                 "new test:guest/api/session@0.1.0" => {
                     let arg_value: Value = wasm_wave::from_str(
@@ -67,6 +68,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         Some("new test:guest/api/session@0.1.0"),
                         Some(&wave_res),
                     );
+                    std::mem::forget(res);
                 }
                 "test:host/types@0.1.0.make-point" => {
                     let arg_value: Value = wasm_wave::from_str(
@@ -121,6 +123,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         Some("test:host/types@0.1.0.open"),
                         Some(&wave_res),
                     );
+                    std::mem::forget(res);
                 }
                 "new test:host/types/counter@0.1.0" => {
                     let arg_value: Value = wasm_wave::from_str(
@@ -135,6 +138,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         Some("new test:host/types/counter@0.1.0"),
                         Some(&wave_res),
                     );
+                    std::mem::forget(res);
                 }
                 "test:host/types/counter@0.1.0.merge" => {
                     let arg_value: Value = wasm_wave::from_str(
@@ -155,6 +159,26 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         Some("test:host/types/counter@0.1.0.merge"),
                         Some(&wave_res),
                     );
+                    std::mem::forget(res);
+                }
+                "drop" => {
+                    let (name, handle) = args[0]
+                        .strip_prefix('#')
+                        .and_then(|label| label.rsplit_once('-'))
+                        .and_then(|(name, handle)| Some((
+                            name,
+                            handle.parse::<u32>().ok()?,
+                        )))
+                        .expect("invalid handle label");
+                    match name {
+                        "session" => {
+                            drop(unsafe {
+                                test::guest::api::Session::from_handle(handle)
+                            })
+                        }
+                        _ => unreachable!(),
+                    }
+                    proxy::recorder::replay::assert_export_ret(Some("drop"), None);
                 }
                 _ => unreachable!(),
             }
@@ -490,4 +514,8 @@ impl ToRust<MockedResource> for Value {
             .expect("invalid handle label");
         MockedResource { handle, name }
     }
+}
+thread_local! {
+    #[allow(dead_code)] static MOVING : std::cell::Cell < bool > = const {
+    std::cell::Cell::new(false) };
 }

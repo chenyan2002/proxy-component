@@ -105,6 +105,15 @@ impl exports::test::guest::api::GuestSession for wrapped_test::guest::api::Sessi
         );
         res.to_proxy()
     }
+    unsafe fn resource_from_raw_(handle: *mut Option<Self>) -> Option<Self> {
+        if let Some(res) = *unsafe { Box::from_raw(handle) } {
+            let params = vec![wasm_wave::to_string(& res.to_value()).unwrap()];
+            proxy::recorder::record::record_args(Some("drop"), &params, true);
+            drop(res);
+            proxy::recorder::record::record_ret(Some("drop"), None, true);
+        }
+        None
+    }
 }
 impl ValueTyped for exports::test::guest::api::Session {
     fn value_type() -> Type {
@@ -270,13 +279,19 @@ impl<'a> ValueTyped for &'a wrapped_test::host::types::Counter {
 }
 impl ToValue for wrapped_test::host::types::Counter {
     fn to_value(&self) -> Value {
-        let label = format!("{}-{}", "counter", self.handle());
+        let label = format!(
+            "{}-{}", "counter",
+            proxy::conversion::conversion::get_handle_wrapped_test_host_types_counter(self)
+        );
         Value::make_handle(label.into())
     }
 }
 impl<'a> ToValue for &'a wrapped_test::host::types::Counter {
     fn to_value(&self) -> Value {
-        let label = format!("borrow-{}-{}", "counter", self.handle());
+        let label = format!(
+            "borrow-{}-{}", "counter",
+            proxy::conversion::conversion::get_handle_wrapped_test_host_types_counter(self)
+        );
         Value::make_handle(label.into())
     }
 }

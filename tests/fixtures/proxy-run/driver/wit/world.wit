@@ -1,0 +1,6 @@
+package test:driver;
+world driver {
+  import test:guest/api@0.1.0;
+  import test:host/types@0.1.0;
+  export run: func();
+}

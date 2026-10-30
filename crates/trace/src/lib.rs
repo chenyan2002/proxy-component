@@ -22,6 +22,9 @@ pub enum FuncCall {
     },
 }
 
+/// The method of a resource drop, whose only argument is the handle, e.g. `#x-1`.
+pub const DROP: &str = "drop";
+
 pub struct Logger(pub VecDeque<FuncCall>);
 
 impl Logger {
@@ -80,7 +83,7 @@ impl Logger {
         let call = self.0.pop_front()?;
         println!("export call: {}", call.to_string());
         let FuncCall::ExportArgs { method, args } = call else {
-            panic!()
+            panic!("the trace has {call:?}, which the guest didn't call")
         };
         Some((method, args))
     }
@@ -104,6 +107,7 @@ impl Logger {
         from_guest: bool,
     ) -> (bool, Option<String>) {
         let mut exit_called = false;
+        let called = assert_method.clone();
         let mut call = self.0.pop_front().unwrap();
         if let FuncCall::ImportArgs { method, args } = &call {
             if let (Some(method), Some(assert_method)) = (method, assert_method) {
@@ -135,7 +139,10 @@ impl Logger {
         }
         println!("import ret: {}", call.to_string());
         let FuncCall::ImportRet { ret, .. } = call else {
-            panic!()
+            panic!(
+                "the guest called {}, but the trace has {call:?}",
+                called.as_deref().unwrap_or("an import"),
+            )
         };
         (exit_called, ret)
     }
@@ -144,6 +151,14 @@ impl Logger {
 impl FuncCall {
     pub fn to_string(&self) -> String {
         match self {
+            // As component-ui writes drops, e.g. `drop #x-1`
+            FuncCall::ExportArgs { method, args }
+            | FuncCall::ImportArgs {
+                method: Some(method),
+                args,
+            } if method == DROP => {
+                format!("drop {}", args.join(", "))
+            }
             FuncCall::ExportArgs { method, args } => format!("{method}({})", args.join(", ")),
             FuncCall::ImportArgs { method, args } => format!(
                 "{}({})",

@@ -1,4 +1,4 @@
-.PHONY: all build-components build-cli test test-cargo test-record test-fuzz test-dialog run-fuzz run-record run-dialog run-viceroy
+.PHONY: all build-components build-cli test test-cargo test-record test-fixture test-fuzz test-dialog run-fuzz run-record run-dialog run-viceroy
 
 # `make test ONE_BYTE_PAGE=1` tests with 1-byte-page memories
 ifeq ($(ONE_BYTE_PAGE),1)
@@ -20,7 +20,7 @@ build-components:
 	cp target/one-byte-page/wasm32-wasip2/release/debug.wasm assets/debug.one_byte_page.wasm
 	cp target/one-byte-page/wasm32-wasip2/release/recorder.wasm assets/recorder.one_byte_page.wasm
 
-test: test-cargo test-fuzz test-record test-dialog
+test: test-cargo test-fuzz test-record test-fixture test-dialog
 
 # Snapshot tests of the generated sources
 test-cargo:
@@ -46,6 +46,25 @@ test-record:
 	$(INSTRUMENT) -m replay tests/calculator.wasm
 	$(INSTRUMENT) -m record tests/wasi_http.wasm
 	$(INSTRUMENT) -m replay tests/wasi_http.wasm
+
+# Records and replays the main component of tests/fixtures/proxy-run/guest, whose resources are
+# dropped by the guest and by the host, in a composition with a host and a driver (see compose.wac)
+FIXTURE = tests/fixtures/proxy-run
+FIXTURE_OUT = target/fixture
+FIXTURE_WASM = $(FIXTURE_OUT)/wasm32-wasip2/release
+test-fixture:
+	for crate in guest host driver; do \
+		cargo build --manifest-path $(FIXTURE)/$$crate/Cargo.toml --target wasm32-wasip2 --release --target-dir $(FIXTURE_OUT) || exit 1; \
+	done
+	$(INSTRUMENT) -m record $(FIXTURE_WASM)/proxy_guest.wasm
+	wac compose $(FIXTURE)/compose.wac -d test:mockhost=$(FIXTURE_WASM)/proxy_host.wasm -d test:driver=$(FIXTURE_WASM)/proxy_driver.wasm -d test:main=composed.wasm -o $(FIXTURE_OUT)/record.wasm
+	$(WASMTIME) --invoke 'run()' $(FIXTURE_OUT)/record.wasm > $(FIXTURE_OUT)/trace.out
+	# the host's drops of the guest's sessions
+	grep -c '"ExportArgs":{"method":"drop"' $(FIXTURE_OUT)/trace.out | grep -qx 2
+	$(INSTRUMENT) -m replay $(FIXTURE_WASM)/proxy_guest.wasm
+	$(WASMTIME) --invoke 'start()' composed.wasm < $(FIXTURE_OUT)/trace.out
+	$(INSTRUMENT) -m replay --use-host-recorder $(FIXTURE_WASM)/proxy_guest.wasm
+	target/release/proxy-component run composed.wasm --invoke 'start()' --trace $(FIXTURE_OUT)/trace.out
 
 test-dialog:
 	rm tests/composed.wasm || true

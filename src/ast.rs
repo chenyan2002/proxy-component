@@ -274,6 +274,11 @@ impl<'a> Opt<'a> {
                     out.push_str(&format!(
                         "get-host-{func_name}: func(x: {wrapped_func}) -> host-{func_name};\n",
                     ));
+                    // The host handle of a wrapped resource, which labels it in traces, so that
+                    // the generated components label each instance alike.
+                    out.push_str(&format!(
+                        "get-handle-{wrapped_func}: func(x: borrow<{wrapped_func}>) -> u32;\n",
+                    ));
                 }
                 Mode::Replay | Mode::Fuzz | Mode::Dialog => {
                     out.push_str(&format!("\nuse {iface}.{{{resource} as {func_name}}};\n"));

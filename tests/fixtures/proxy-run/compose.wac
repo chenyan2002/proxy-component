@@ -1,0 +1,16 @@
+// The main component of `guest/`, or its instrumented version, between the host of `host/` and
+// the driver of `driver/`, which calls its exports and drops its sessions as a host would.
+package test:fixture;
+
+let host = new test:mockhost { ... };
+let main = new test:main {
+  "test:host/types@0.1.0": host["test:host/types@0.1.0"],
+  "test:log/sink@0.1.0": host["test:log/sink@0.1.0"],
+  ...
+};
+let driver = new test:driver {
+  "test:guest/api@0.1.0": main["test:guest/api@0.1.0"],
+  "test:host/types@0.1.0": host["test:host/types@0.1.0"],
+  ...
+};
+export driver.run;

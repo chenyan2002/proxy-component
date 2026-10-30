@@ -1,0 +1,13 @@
+[package]
+name = "proxy-guest"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "0.63.0", default-features = false, features = ["bitflags", "std", "macros"] }
+
+# Not part of the repository's workspace: it's built for wasm32-wasip2 on its own.
+[workspace]

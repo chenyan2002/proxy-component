@@ -28,6 +28,8 @@ pub struct State {
     pub interfaces: BTreeMap<Vec<String>, InterfaceId>,
     /// The `proxy:conversion` function returning each resource
     pub conversions: BTreeMap<TypeId, String>,
+    /// What each WIT type has, e.g. own handles
+    pub type_info: wit_bindgen_core::Types,
     pub traits: BTreeMap<Vec<String>, Vec<ItemTrait>>,
     pub types: BTreeMap<Vec<String>, Vec<(TypeId, TypeInfo)>>,
     pub funcs: BTreeMap<Vec<String>, BTreeMap<Option<String>, Vec<Signature>>>,
@@ -58,6 +60,8 @@ struct ExportFunc {
     /// Arguments at the call site, borrowed where the function expects a reference
     call_params: Vec<syn::Expr>,
     has_ret: bool,
+    /// Whether the result owns a resource
+    ret_owns: bool,
 }
 
 /// Interface for converting resources between the generated components.
@@ -81,6 +85,10 @@ pub fn generate(
     state.generate_stubs();
     let traits = crate::traits::TraitGenerator::new(&state).generate();
     state.output.extend(traits);
+    if matches!(mode, Mode::Replay) {
+        let defs = state.replay_defs();
+        state.output.extend(defs);
+    }
     let mut file = state.into_output_file();
     if use_custom_allocator {
         // dlmalloc with a memory source that grows by bytes, for `--page-size=1`.
@@ -99,6 +107,11 @@ impl State {
             mode,
             interfaces: wit::interface_modules(&resolve, world),
             conversions: wit::conversion_funcs(&resolve),
+            type_info: {
+                let mut types = wit_bindgen_core::Types::default();
+                types.analyze(&resolve);
+                types
+            },
             resolve,
             traits: BTreeMap::new(),
             types: BTreeMap::new(),
@@ -197,6 +210,13 @@ impl State {
                 _ => (),
             }
         }
+        match (&self.mode, &resource) {
+            (Mode::Record, Some(_)) => {
+                methods.push(syn::ImplItem::Fn(self.generate_record_drop(module_path)))
+            }
+            (Mode::Replay, Some(_)) => methods.push(syn::ImplItem::Fn(self.generate_replay_drop())),
+            _ => (),
+        }
         parse_quote! {
             impl #trait_path for #stub {
                 #(#methods)*
@@ -208,6 +228,8 @@ impl State {
         let func_name = &sig.ident.to_string();
         let body = if func_name.starts_with("get_wrapped_") || func_name.starts_with("get_host_") {
             quote! { x.to_proxy() }
+        } else if func_name.starts_with("get_handle_") {
+            quote! { x.to_proxy().handle() }
         } else if func_name.starts_with("get_mock_") {
             let resource = get_return_type(&sig.output).unwrap();
             let name = self.conversion_resource(&sig.ident);
@@ -262,6 +284,7 @@ impl State {
                         arg_tys,
                         call_params: args.iter().map(|arg| arg.call_param()).collect(),
                         has_ret: get_return_type(&sig.output).is_some(),
+                        ret_owns: wit_func.result_owns,
                     });
                 }
             }
