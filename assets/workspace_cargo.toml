@@ -3,8 +3,10 @@ members = ["record_imports", "record_exports"]
 resolver = "2"
 
 [workspace.dependencies]
-wit-bindgen = { version = "0.63.0", default-features = false, features = ["bitflags", "std"] }
-wasm-wave = { git = "https://github.com/chenyan2002/wasm-tools.git", branch = "extend-wave", version = "0.239.0", default-features = false }
+# The fork makes `FutureReader::handle()` public, which labels futures like resources. It must be
+# the same crate as wasm-wave's, which implements `ToValue` for wit-bindgen's streams and futures.
+wit-bindgen = { git = "https://github.com/chenyan2002/wit-bindgen.git", branch = "fix-async", version = "0.63.0", default-features = false, features = ["bitflags", "std", "async-spawn", "inter-task-wakeup"] }
+wasm-wave = { git = "https://github.com/chenyan2002/wasm-tools.git", branch = "extend-wave-2", version = "0.263.0", default-features = false, features = ["wit-bindgen"] }
 #wasm-wave = { path = "/Users/chenyan/src/bytecodealliance/wasm-tools/crates/wasm-wave", default-features = false }
 arbitrary = "1.4.2"
 dlmalloc = "0.2.14"
