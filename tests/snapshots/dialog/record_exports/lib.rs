@@ -4,7 +4,9 @@ struct Stub;
 bindings::export!(Stub with_types_in bindings);
 impl exports::proxy::recorder::start_replay::Guest for Stub {
     async fn start() -> () {
-        let __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
+        let mut __executor = wit_bindgen::spawn_local(
+            proxy::conversion::executor::run(),
+        );
         loop {
             let idx = proxy::util::dialog::read_select(
                 0,
@@ -53,9 +55,12 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::guest::api::run(&p, &c);
-                    for _ in 0..8 {
-                        wit_bindgen::yield_async().await;
-                    }
+                    join_spawned().await;
+                    proxy::conversion::executor::stop();
+                    __executor.await;
+                    __executor = wit_bindgen::spawn_local(
+                        proxy::conversion::executor::run(),
+                    );
                 }
                 2usize => {
                     proxy::util::dialog::print(
@@ -77,9 +82,12 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::guest::api::classify(&s);
-                    for _ in 0..8 {
-                        wit_bindgen::yield_async().await;
-                    }
+                    join_spawned().await;
+                    proxy::conversion::executor::stop();
+                    __executor.await;
+                    __executor = wit_bindgen::spawn_local(
+                        proxy::conversion::executor::run(),
+                    );
                 }
                 3usize => {
                     proxy::util::dialog::print(
@@ -101,9 +109,12 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::guest::api::begin(c);
-                    for _ in 0..8 {
-                        wit_bindgen::yield_async().await;
-                    }
+                    join_spawned().await;
+                    proxy::conversion::executor::stop();
+                    __executor.await;
+                    __executor = wit_bindgen::spawn_local(
+                        proxy::conversion::executor::run(),
+                    );
                 }
                 4usize => {
                     proxy::util::dialog::print(
@@ -130,9 +141,12 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::guest::api::Session::new(&name);
-                    for _ in 0..8 {
-                        wit_bindgen::yield_async().await;
-                    }
+                    join_spawned().await;
+                    proxy::conversion::executor::stop();
+                    __executor.await;
+                    __executor = wit_bindgen::spawn_local(
+                        proxy::conversion::executor::run(),
+                    );
                 }
                 5usize => {
                     proxy::util::dialog::print(
@@ -162,9 +176,12 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::host::types::make_point(x, y);
-                    for _ in 0..8 {
-                        wit_bindgen::yield_async().await;
-                    }
+                    join_spawned().await;
+                    proxy::conversion::executor::stop();
+                    __executor.await;
+                    __executor = wit_bindgen::spawn_local(
+                        proxy::conversion::executor::run(),
+                    );
                 }
                 6usize => {
                     proxy::util::dialog::print(
@@ -192,9 +209,12 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::host::types::check(p, c);
-                    for _ in 0..8 {
-                        wit_bindgen::yield_async().await;
-                    }
+                    join_spawned().await;
+                    proxy::conversion::executor::stop();
+                    __executor.await;
+                    __executor = wit_bindgen::spawn_local(
+                        proxy::conversion::executor::run(),
+                    );
                 }
                 7usize => {
                     proxy::util::dialog::print(
@@ -219,9 +239,12 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::host::types::open(&name);
-                    for _ in 0..8 {
-                        wit_bindgen::yield_async().await;
-                    }
+                    join_spawned().await;
+                    proxy::conversion::executor::stop();
+                    __executor.await;
+                    __executor = wit_bindgen::spawn_local(
+                        proxy::conversion::executor::run(),
+                    );
                 }
                 8usize => {
                     proxy::util::dialog::print(
@@ -246,9 +269,12 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::host::types::Counter::new(start);
-                    for _ in 0..8 {
-                        wit_bindgen::yield_async().await;
-                    }
+                    join_spawned().await;
+                    proxy::conversion::executor::stop();
+                    __executor.await;
+                    __executor = wit_bindgen::spawn_local(
+                        proxy::conversion::executor::run(),
+                    );
                 }
                 9usize => {
                     proxy::util::dialog::print(
@@ -281,9 +307,12 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::host::types::Counter::merge(&a, b);
-                    for _ in 0..8 {
-                        wit_bindgen::yield_async().await;
-                    }
+                    join_spawned().await;
+                    proxy::conversion::executor::stop();
+                    __executor.await;
+                    __executor = wit_bindgen::spawn_local(
+                        proxy::conversion::executor::run(),
+                    );
                 }
                 _ => unreachable!(),
             }

@@ -23,7 +23,8 @@
 // queued ones, until no more are queued, as a job may spawn another. As the jobs are polled in
 // the task of `run`, a job blocked on a stream or future joins its waitable set, so the guest's
 // side of the copy wakes `run`, which polls them all again: they share one waker. `start` calls
-// `stop` once the exports it called are done, and `run` returns once the jobs are too.
+// `stop` once the exports it called are done, and `run` returns once the jobs are too. In dialog
+// mode, `start` does so after each export call, and calls `run` again for the next one.
 //
 // When a value with a stream or future changes hands, e.g. an export returns a stream, the
 // generated code doesn't await it. It gives it to `consume` (or `fuzz`, for one the host gives),
@@ -31,7 +32,9 @@
 // end, reads a few chunks, or drops it, and with what capacity; in dialog mode, the job asks the
 // user at each step. A job then does it. When it runs is up to cooperative scheduling: first at
 // the next point where its task suspends, e.g. the yields of `start` after each export call, an
-// async call, or at the latest when `start` waits for the jobs at the end. Each read or write
+// async call, or at the latest when `start` waits for the jobs: at the end in fuzz mode, and
+// after each export call in dialog mode, so that the user is done with the streams and futures of
+// a call before choosing the next one. Each read or write
 // completes once the guest does its side. So the host's reads and writes overlap the following
 // export calls, in an order the schedule decides, which is part of what fuzz mode explores.
 // Awaiting the value right after the call instead would hide those orders, and deadlock a guest

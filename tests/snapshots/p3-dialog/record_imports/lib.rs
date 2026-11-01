@@ -20,7 +20,8 @@ impl exports::proxy::conversion::conversion::Guest for Stub {
 }
 impl exports::proxy::conversion::executor::Guest for Stub {
     async fn run() -> () {
-        run_executor().await
+        run_executor().await;
+        EXECUTOR.with_borrow_mut(|e| e.stopped = false);
     }
     fn stop() -> () {
         stop_executor()

@@ -100,11 +100,15 @@ impl State {
                         )*
                         proxy::util::dialog::print(0, &format!("export: {}({})", #display_name, __params.join(", ")));
                         #ret
-                        // Lets the guest, and the host's background work, e.g. writing the streams
-                        // it returned, run before the next call.
-                        for _ in 0..8 {
-                            wit_bindgen::yield_async().await;
-                        }
+                        // The user is done with the streams and futures of this call, e.g. the
+                        // stream it returned, before choosing the next one: the jobs of this
+                        // component, then the imports component's, whose executor runs until then,
+                        // as this component's jobs may need the guest, and the guest the imports
+                        // component's jobs.
+                        join_spawned().await;
+                        proxy::conversion::executor::stop();
+                        __executor.await;
+                        __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
                     }
                 }
             })

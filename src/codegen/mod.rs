@@ -224,7 +224,7 @@ impl State {
                         continue;
                     }
                     if module_full_name == EXECUTOR_MODULE {
-                        methods.push(syn::ImplItem::Fn(generate_executor_func(&sig)));
+                        methods.push(syn::ImplItem::Fn(self.generate_executor_func(&sig)));
                         continue;
                     }
                     let is_start = module_full_name == START_REPLAY_MODULE;
@@ -365,15 +365,40 @@ impl State {
     }
     /// The async `start` function running `body`. The imports component's jobs run in
     /// `proxy:conversion/executor` until the exports `start` called are done, and the jobs of this
-    /// component, which `start` made, on the task of `start` (see `start_spawn_defs`).
+    /// component, which `start` made, on the task of `start` (see `start_spawn_defs`). In dialog
+    /// mode, `body` also waits for them after each export call (see `generate_dialog_start_func`),
+    /// and runs `__executor` again.
     fn generate_start(&self, sig: &Signature, body: TokenStream) -> syn::ImplItemFn {
+        let executor = match self.mode {
+            Mode::Dialog => quote! { mut __executor },
+            _ => quote! { __executor },
+        };
         parse_quote! {
             #sig {
-                let __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
+                let #executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
                 #body
                 join_spawned().await;
                 proxy::conversion::executor::stop();
                 __executor.await;
+            }
+        }
+    }
+    /// The functions of `proxy:conversion/executor`, which the imports component exports, for the
+    /// `start` function of the exports component to run its jobs (see `assets/executor.rs`).
+    fn generate_executor_func(&self, sig: &Signature) -> syn::ImplItemFn {
+        let body = match (sig.ident.to_string().as_str(), &self.mode) {
+            // In dialog mode, `start` runs the executor again after each export call.
+            ("run", Mode::Dialog) => quote! {
+                run_executor().await;
+                EXECUTOR.with_borrow_mut(|e| e.stopped = false);
+            },
+            ("run", _) => quote! { run_executor().await },
+            ("stop", _) => quote! { stop_executor() },
+            (name, _) => unreachable!("unexpected executor function {name}"),
+        };
+        parse_quote! {
+            #sig {
+                #body
             }
         }
     }
@@ -415,21 +440,6 @@ fn start_spawn_defs() -> Vec<Item> {
         }
     };
     file.items
-}
-
-/// The functions of `proxy:conversion/executor`, which the imports component exports, for the
-/// `start` function of the exports component to run its jobs (see `assets/executor.rs`).
-fn generate_executor_func(sig: &Signature) -> syn::ImplItemFn {
-    let body = match sig.ident.to_string().as_str() {
-        "run" => quote! { run_executor().await },
-        "stop" => quote! { stop_executor() },
-        name => unreachable!("unexpected executor function {name}"),
-    };
-    parse_quote! {
-        #sig {
-            #body
-        }
-    }
 }
 
 pub fn get_proxy_path(src_path: &[String]) -> Vec<String> {
