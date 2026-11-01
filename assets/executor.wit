@@ -1,8 +1,10 @@
-package proxy:executor;
+package proxy:conversion;
 
-// Runs the background work of a virtualized host, e.g. writing a stream it returns, which a sync
-// function cannot wait for. The generated `imports` component exports it, and the `start`
-// function of the `exports` component runs it. See `assets/executor.rs`.
+// Runs the jobs of the imports component, which writes and reads the virtualized host's end of
+// streams and futures, e.g. writing the body stream that a mock of the sync `consume-body`
+// returns. Like the generated `conversion` interface of this package, the imports component
+// exports it, for the exports component to call: its `start` function runs it. See
+// `assets/executor.rs`.
 interface executor {
   run: async func();
   stop: func();

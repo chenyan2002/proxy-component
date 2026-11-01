@@ -4,10 +4,7 @@ struct Stub;
 bindings::export!(Stub with_types_in bindings);
 impl exports::proxy::recorder::start_replay::Guest for Stub {
     async fn start() -> () {
-        let __executors = (
-            wit_bindgen::spawn_local(proxy::executor::executor::run()),
-            wit_bindgen::spawn_local(run_executor()),
-        );
+        let __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
         while let Some((method, args)) = proxy::recorder::replay::replay_export() {
             match method.as_str() {
                 "test:guest/api@0.1.0.run" => {
@@ -191,10 +188,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     alloc.borrow_mut().clear();
                 });
         }
-        proxy::executor::executor::stop();
-        stop_executor();
-        __executors.0.await;
-        __executors.1.await;
+        join_spawned().await;
+        proxy::conversion::executor::stop();
+        __executor.await;
     }
 }
 impl ValueTyped for test::guest::api::Session {
@@ -527,62 +523,23 @@ thread_local! {
     #[allow(dead_code)] static MOVING : std::cell::Cell < bool > = const {
     std::cell::Cell::new(false) };
 }
-type Job = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
-#[derive(Default)]
-struct Executor {
-    queue: Vec<Job>,
-    stopped: bool,
-    waker: Option<std::task::Waker>,
-}
 thread_local! {
-    static EXECUTOR : std::cell::RefCell < Executor > =
-    std::cell::RefCell::new(Executor::default());
+    static SPAWNED : std::cell::RefCell < Vec < wit_bindgen::JoinHandle < () >> > = const
+    { std::cell::RefCell::new(Vec::new()) };
 }
-/// Queues `job`, from any function, sync or async.
 #[allow(dead_code)]
 fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
-    EXECUTOR
-        .with_borrow_mut(|e| {
-            e.queue.push(Box::pin(job));
-            if let Some(waker) = e.waker.take() {
-                waker.wake();
-            }
-        });
+    let handle = wit_bindgen::spawn_local(job);
+    SPAWNED.with_borrow_mut(|spawned| spawned.push(handle));
 }
-/// Polls the queued jobs until `stop_executor` is called and they are all done.
-#[allow(dead_code)]
-async fn run_executor() {
-    let mut running: Vec<Job> = Vec::new();
-    std::future::poll_fn(|cx| {
-            running.retain_mut(|job| job.as_mut().poll(cx).is_pending());
-            loop {
-                let mut queued = EXECUTOR
-                    .with_borrow_mut(|e| std::mem::take(&mut e.queue));
-                if queued.is_empty() {
-                    break;
-                }
-                queued.retain_mut(|job| job.as_mut().poll(cx).is_pending());
-                running.append(&mut queued);
-            }
-            EXECUTOR
-                .with_borrow_mut(|e| {
-                    if e.stopped && running.is_empty() {
-                        std::task::Poll::Ready(())
-                    } else {
-                        e.waker = Some(cx.waker().clone());
-                        std::task::Poll::Pending
-                    }
-                })
-        })
-        .await
-}
-#[allow(dead_code)]
-fn stop_executor() {
-    EXECUTOR
-        .with_borrow_mut(|e| {
-            e.stopped = true;
-            if let Some(waker) = e.waker.take() {
-                waker.wake();
-            }
-        });
+async fn join_spawned() {
+    loop {
+        let spawned = SPAWNED.with_borrow_mut(std::mem::take);
+        if spawned.is_empty() {
+            break;
+        }
+        for handle in spawned {
+            handle.await;
+        }
+    }
 }

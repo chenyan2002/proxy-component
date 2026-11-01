@@ -76,7 +76,8 @@ test-fixture:
 # Dialog mode has no streams or futures yet, which the p3 component has.
 test-dialog:
 	rm tests/composed.wasm || true
-	for wasm in $(filter-out tests/wasi_http_p3.wasm,$(wildcard tests/*.wasm)); do \
+	for wasm in tests/*.wasm; do \
+		[ $$wasm = tests/wasi_http_p3.wasm ] && continue; \
 		$(MAKE) run-dialog WASM=$$wasm || exit 1; \
 	done
 

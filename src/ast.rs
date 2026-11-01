@@ -44,7 +44,7 @@ impl<'a> Opt<'a> {
         }
     }
     /// Whether the main component's exports are driven by the generated `start`, rather than
-    /// by the host, which also runs `proxy:executor`.
+    /// by the host, which also runs `proxy:conversion/executor`.
     fn has_start(&self) -> bool {
         matches!(self.mode, Mode::Replay | Mode::Fuzz | Mode::Dialog)
     }
@@ -73,7 +73,7 @@ impl<'a> Opt<'a> {
         self.push_mode_imports(&mut out);
         out.push_str("export proxy:conversion/conversion;\n");
         if self.has_start() {
-            out.push_str("export proxy:executor/executor;\n");
+            out.push_str("export proxy:conversion/executor;\n");
         }
         for name in interface_names(resolve, &world.imports)? {
             // Don't virtualize util imports
@@ -127,7 +127,7 @@ impl<'a> Opt<'a> {
         self.push_mode_imports(&mut out);
         out.push_str("import proxy:conversion/conversion;\n");
         if self.has_start() {
-            out.push_str("import proxy:executor/executor;\n");
+            out.push_str("import proxy:conversion/executor;\n");
         }
         for name in interface_names(resolve, &world.imports)? {
             out.push_str(&format!("import {name};\n"));
@@ -225,8 +225,10 @@ impl<'a> Opt<'a> {
             "deps/util.wit",
             include_str!("../assets/util.wit").as_bytes(),
         );
+        // The `executor` interface of `proxy:conversion`, which `generate_conversion_wit` writes
+        // the rest of, in the same package directory.
         files.push(
-            "deps/executor.wit",
+            "deps/conversion/executor.wit",
             include_str!("../assets/executor.wit").as_bytes(),
         );
         Ok(())
@@ -311,7 +313,7 @@ impl<'a> Opt<'a> {
             }
         }
         out.push_str("}\n");
-        files.push("deps/conversion.wit", out.as_bytes());
+        files.push("deps/conversion/conversion.wit", out.as_bytes());
     }
     fn load_imports(&mut self, file: &Path) -> Result<()> {
         for name in import_names(file)? {
@@ -335,7 +337,7 @@ impl<'a> Opt<'a> {
                     self.need_debug = true;
                     LinkType::Debug
                 }
-                "proxy:conversion/conversion" | "proxy:executor/executor" => LinkType::Imports,
+                "proxy:conversion/conversion" | "proxy:conversion/executor" => LinkType::Imports,
                 "proxy:util/dialog" => LinkType::Host,
                 name if name.starts_with("proxy:recorder/") => LinkType::Recorder,
                 name if matches!(self.mode, Mode::Record) => match strip_wrapped(name) {

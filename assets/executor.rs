@@ -1,5 +1,6 @@
-// The background work of the virtualized host, e.g. writing a stream it returns, or reading one
-// the guest gives it.
+// The executor of the imports component, which writes and reads the virtualized host's end of
+// streams and futures, e.g. writing the body stream that a mock of the sync `consume-body`
+// returns, or reading the body a mock of the sync `response.new` receives.
 //
 // Streams and futures themselves are not virtualized: `stream.new`, `stream.read` and the like
 // are canonical built-ins, which the runtime implements, not imports. What the virtualized host
@@ -11,9 +12,11 @@
 // stopping partway; replay the recorded chunks; observe what the guest writes; and put mocked
 // resources in the values, e.g. the `fields` of a `future<result<option<trailers>, error-code>>`.
 //
-// A sync function can neither wait for a stream or future, nor spawn a task, so `spawn` queues
-// the work, and `run_executor` polls it from an async task, which lives for the whole run: the
-// `proxy:executor/executor.run` export, which the generated `start` calls, or `start` itself.
+// A sync function can't block or spawn a task, so it queues the work with `spawn` instead, and
+// `run_executor` runs it in an async task, which lives for the whole run: the
+// `proxy:conversion/executor.run` export, which the `start` function of the exports component
+// calls. The exports component needs no executor: its work is only made by `start`, which is
+// async, so its `spawn` spawns the work on the task of `start` (see `generate_start`).
 type Job = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
 #[derive(Default)]
 struct Executor {

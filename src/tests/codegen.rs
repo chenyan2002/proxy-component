@@ -13,7 +13,7 @@ const SNAPSHOTS: &str = "tests/snapshots";
 /// The generated files to compare, relative to the generation directory.
 const OUTPUTS: &[&str] = &[
     "wit/component.wit",
-    "wit/deps/conversion.wit",
+    "wit/deps/conversion/conversion.wit",
     "record_imports/lib.rs",
     "record_exports/lib.rs",
 ];

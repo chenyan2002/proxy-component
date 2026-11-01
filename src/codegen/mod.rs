@@ -78,7 +78,7 @@ const CONVERSION_MODULE: &str = "exports::proxy::conversion::conversion";
 /// Interface whose `start` function drives the main component's exports in virtualized modes.
 const START_REPLAY_MODULE: &str = "exports::proxy::recorder::start_replay";
 /// Interface running the background work of the virtualized host, see `assets/executor.rs`.
-const EXECUTOR_MODULE: &str = "exports::proxy::executor::executor";
+const EXECUTOR_MODULE: &str = "exports::proxy::conversion::executor";
 
 /// Generates the `lib.rs` implementing the traits of `bindings`, which wit-bindgen generated
 /// from `world` of `resolve`.
@@ -104,11 +104,15 @@ pub fn generate(
         let defs = state.mock_defs();
         state.output.extend(defs);
     }
-    let has_executor = state.has_executor();
+    let exports_executor = state.exports_executor();
+    let imports_executor = state.imports_executor();
     let mut file = state.into_output_file();
-    if has_executor {
+    if exports_executor {
         let executor = syn::parse_file(include_str!("../../assets/executor.rs"))?;
         file.items.extend(executor.items);
+    }
+    if imports_executor {
+        file.items.extend(start_spawn_defs());
     }
     if use_custom_allocator {
         // dlmalloc with a memory source that grows by bytes, for `--page-size=1`.
@@ -345,28 +349,31 @@ impl State {
         }
         res
     }
-    /// Whether the component runs `proxy:executor`: the imports component exports it, and the
-    /// exports component imports it.
-    fn has_executor(&self) -> bool {
+    /// Whether this is the imports component, which exports `proxy:conversion/executor` to run its
+    /// jobs.
+    fn exports_executor(&self) -> bool {
+        self.module_paths
+            .iter()
+            .any(|path| path.join("::") == EXECUTOR_MODULE)
+    }
+    /// Whether this is the exports component, whose `start` runs `proxy:conversion/executor`.
+    fn imports_executor(&self) -> bool {
         let import = EXECUTOR_MODULE.strip_prefix("exports::").unwrap();
         self.module_paths
             .iter()
-            .any(|path| [EXECUTOR_MODULE, import].contains(&path.join("::").as_str()))
+            .any(|path| path.join("::") == import)
     }
-    /// The async `start` function running `body`, along with the background work of both
-    /// generated components (see `assets/executor.rs`), until the exports it called are done.
+    /// The async `start` function running `body`. The imports component's jobs run in
+    /// `proxy:conversion/executor` until the exports `start` called are done, and the jobs of this
+    /// component, which `start` made, on the task of `start` (see `start_spawn_defs`).
     fn generate_start(&self, sig: &Signature, body: TokenStream) -> syn::ImplItemFn {
         parse_quote! {
             #sig {
-                let __executors = (
-                    wit_bindgen::spawn_local(proxy::executor::executor::run()),
-                    wit_bindgen::spawn_local(run_executor()),
-                );
+                let __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
                 #body
-                proxy::executor::executor::stop();
-                stop_executor();
-                __executors.0.await;
-                __executors.1.await;
+                join_spawned().await;
+                proxy::conversion::executor::stop();
+                __executor.await;
             }
         }
     }
@@ -379,7 +386,38 @@ impl State {
     }
 }
 
-/// The functions of `proxy:executor/executor`, which the imports component exports, for the
+/// `spawn` of the exports component, whose jobs, e.g. reading a stream an export returned, are
+/// only made by `start`, which is async: it spawns them on the task of `start`, which awaits them
+/// with `join_spawned`. The imports component's `spawn` queues them instead, as sync functions
+/// make them (see `assets/executor.rs`).
+fn start_spawn_defs() -> Vec<Item> {
+    let file: File = parse_quote! {
+        thread_local! {
+            static SPAWNED: std::cell::RefCell<Vec<wit_bindgen::JoinHandle<()>>> =
+                const { std::cell::RefCell::new(Vec::new()) };
+        }
+        #[allow(dead_code)]
+        fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
+            let handle = wit_bindgen::spawn_local(job);
+            SPAWNED.with_borrow_mut(|spawned| spawned.push(handle));
+        }
+        // Awaits the spawned jobs, including those they spawn.
+        async fn join_spawned() {
+            loop {
+                let spawned = SPAWNED.with_borrow_mut(std::mem::take);
+                if spawned.is_empty() {
+                    break;
+                }
+                for handle in spawned {
+                    handle.await;
+                }
+            }
+        }
+    };
+    file.items
+}
+
+/// The functions of `proxy:conversion/executor`, which the imports component exports, for the
 /// `start` function of the exports component to run its jobs (see `assets/executor.rs`).
 fn generate_executor_func(sig: &Signature) -> syn::ImplItemFn {
     let body = match sig.ident.to_string().as_str() {

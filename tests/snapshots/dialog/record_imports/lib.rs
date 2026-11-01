@@ -18,7 +18,7 @@ impl exports::proxy::conversion::conversion::Guest for Stub {
         x.get::<MockedResource>().handle
     }
 }
-impl exports::proxy::executor::executor::Guest for Stub {
+impl exports::proxy::conversion::executor::Guest for Stub {
     async fn run() -> () {
         run_executor().await
     }

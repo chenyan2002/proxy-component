@@ -12,7 +12,7 @@ interface replay {
 }
 
 // Async, so that it can await the main component's async exports, and run the jobs of
-// `proxy:executor`.
+// `proxy:conversion/executor`.
 interface start-replay {
   start: async func();
 }

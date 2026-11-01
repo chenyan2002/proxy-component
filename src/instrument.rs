@@ -111,6 +111,8 @@ pub fn generate_sources<'a>(args: &'a InstrumentArgs, dir: &Path) -> Result<crat
     // 4. Write generated files to the temp directory.
     for (name, content) in files.iter() {
         let path = wit_dir.as_path().join(name);
+        // e.g. the `deps/conversion` directory of the `proxy:conversion` package
+        fs::create_dir_all(path.parent().unwrap())?;
         std::fs::write(&path, content)?;
     }
     // Re-generate exports world to bring in extra imports
@@ -119,6 +121,7 @@ pub fn generate_sources<'a>(args: &'a InstrumentArgs, dir: &Path) -> Result<crat
     for (name, content) in files.iter() {
         let path = wit_dir.as_path().join(name);
         eprintln!("Generating: {}", path.display());
+        fs::create_dir_all(path.parent().unwrap())?;
         std::fs::write(&path, content)?;
     }
 
