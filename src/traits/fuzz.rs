@@ -271,7 +271,11 @@ impl FuzzTrait {
                   // Writes fuzzed chunks, then ends the stream.
                   fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
                       let (mut writer, reader) = wit_stream::new::<T>();
-                      let label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
+                      // The host keeps the writer, so it labels the stream for its lifetime; the
+                      // reader moves on to the guest, which frees its handle.
+                      let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
+                      let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
+                      proxy::util::debug::print(&format!("new (writer: {label}, reader: {reader_label})"));
                       let chunks: Vec<Vec<T>> = Fuzz::fuzz(u)?;
                       spawn(async move {
                           for chunk in chunks.into_iter().filter(|chunk| !chunk.is_empty()) {
@@ -326,7 +330,10 @@ impl FuzzTrait {
                       let value = T::fuzz(u)?;
                       let (writer, reader) =
                           wit_future::new::<T>(|| unreachable!("the value is always written"));
-                      let label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
+                      // As for streams, the host keeps the writer, which labels the future.
+                      let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
+                      let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
+                      proxy::util::debug::print(&format!("new (writer: {label}, reader: {reader_label})"));
                       let wave = wasm_wave::to_string(&value.to_value()).unwrap();
                       spawn(async move {
                           if writer.write(value).await.is_ok() {

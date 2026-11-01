@@ -2113,7 +2113,7 @@ dependencies = [
 [[package]]
 name = "wasm-wave"
 version = "0.263.0"
-source = "git+https://github.com/chenyan2002/wasm-tools.git?branch=extend-wave-2#7b107fc6879530c68e8c6a30f9aacc078de311b4"
+source = "git+https://github.com/chenyan2002/wasm-tools.git?branch=extend-wave-2#1578e5afb7dd45cfeff6e42eed6dc49e058b28c5"
 dependencies = [
  "logos 0.16.1",
  "thiserror 2.0.21",

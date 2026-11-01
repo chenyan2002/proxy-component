@@ -469,7 +469,12 @@ where
 {
     fn read_value(_dep: u32) -> Self {
         let (mut writer, reader) = wit_stream::new::<T>();
-        let label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
+        let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
+        let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
+        proxy::util::dialog::print(
+            0,
+            &format!("new (writer: {label}, reader: {reader_label})"),
+        );
         spawn(async move {
             let choices = ["write a chunk".to_string(), "end the stream".to_string()];
             loop {
@@ -518,7 +523,12 @@ where
         let (writer, reader) = wit_future::new::<
             T,
         >(|| unreachable!("the value is always written"));
-        let label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
+        let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
+        let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
+        proxy::util::dialog::print(
+            0,
+            &format!("new (writer: {label}, reader: {reader_label})"),
+        );
         spawn(async move {
             proxy::util::dialog::print(0, &format!("The host writes {label}"));
             let value: T = Dialog::read_value(1);
