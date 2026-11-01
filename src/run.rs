@@ -79,6 +79,7 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         .wasm_custom_page_sizes(true)
         // The generated `start` is async, and WASI p3 components have async exports and imports.
         .wasm_component_model_async(true)
+        .wasm_component_model_error_context(true)
         .concurrency_support(true)
         //.debug_info(true)
         .wasm_backtrace_details(WasmBacktraceDetails::Enable);

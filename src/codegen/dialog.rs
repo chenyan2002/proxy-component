@@ -16,8 +16,20 @@ impl State {
         let display_name = &wit_func.display_name;
         let args = extract_arg_info(sig);
         let ret_ty = get_return_type(&sig.output);
+        // The streams and futures the guest gives the host, whose reading the user decides.
+        let consumed: Vec<_> = args
+            .iter()
+            .zip(&wit_func.params_async)
+            .filter(|(arg, is_async)| **is_async && !arg.is_borrowed)
+            .map(|(arg, _)| &arg.ident)
+            .collect();
+        let params = params_to_wave(kind.as_ref(), &args);
+        let preamble = quote! {
+            #params
+            proxy::util::dialog::print(0, &format!("import: {}({})", #display_name, __params.join(", ")));
+            #(Dialog::consume(#consumed, 0);)*
+        };
         if ret_ty.is_some() {
-            let params = params_to_wave(kind.as_ref(), &args);
             let ret_name = wit_func.result.as_ref().unwrap();
             // A constructor's mock has no handle yet, so `_resource_new` prints its `ret`.
             let (read_ret, print_ret) = match wit_func.constructor_resource() {
@@ -34,12 +46,18 @@ impl State {
             };
             parse_quote! {
                 #sig {
-                    #params
-                    proxy::util::dialog::print(0, &format!("import: {}({})", #display_name, __params.join(", ")));
+                    #preamble
                     proxy::util::dialog::print(0, &format!("return type: {}", #ret_name));
                     let ret = #read_ret;
                     #print_ret
                     ret
+                }
+            }
+        } else if !consumed.is_empty() || wit_func.is_async {
+            // Async imports return at once.
+            parse_quote! {
+                #sig {
+                    #preamble
                 }
             }
         } else {
@@ -62,8 +80,15 @@ impl State {
                     arg_names,
                     arg_wit_tys,
                     arg_tys,
+                    ret_async,
                     ..
                 } = func;
+                // The streams and futures the guest returns, whose reading the user decides.
+                let ret = if *ret_async {
+                    quote! { Dialog::consume(#call, 0); }
+                } else {
+                    quote! { let _ = #call; }
+                };
                 quote! {
                     {
                         proxy::util::dialog::print(0, &format!("call export func {}", #display_name));
@@ -74,7 +99,12 @@ impl State {
                             __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*
                         proxy::util::dialog::print(0, &format!("export: {}({})", #display_name, __params.join(", ")));
-                        let _ = #call;
+                        #ret
+                        // Lets the guest, and the host's background work, e.g. writing the streams
+                        // it returned, run before the next call.
+                        for _ in 0..8 {
+                            wit_bindgen::yield_async().await;
+                        }
                     }
                 }
             })

@@ -22,6 +22,13 @@ pub struct InstrumentArgs {
     #[arg(long)]
     pub one_byte_page_size: bool,
 }
+impl InstrumentArgs {
+    /// Whether the composition has the bundled recorder component: only record and replay
+    /// modes use it, unless the host implements it.
+    pub fn bundles_recorder(&self) -> bool {
+        matches!(self.mode, Mode::Record | Mode::Replay) && !self.use_host_recorder
+    }
+}
 
 const DEBUG_WASM: &[u8] = include_bytes!("../assets/debug.wasm");
 const RECORDER_WASM: &[u8] = include_bytes!("../assets/recorder.wasm");
@@ -86,7 +93,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         .arg(&wac_path)
         .arg("-o")
         .arg(output_file);
-    if !args.use_host_recorder {
+    if args.bundles_recorder() {
         let wasm_path = tmp_dir.join("recorder.wasm");
         fs::write(&wasm_path, recorder_wasm)?;
         let recorder = format!("import:recorder={}", wasm_path.display());

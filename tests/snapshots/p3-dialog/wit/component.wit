@@ -1,0 +1,19 @@
+package component:proxy;
+world imports {
+  import proxy:util/dialog;
+  export proxy:conversion/conversion;
+  export proxy:conversion/executor;
+  export test:p3/host@0.1.0;
+}
+world tmp-exports {
+  import test:p3/api@0.1.0;
+  export proxy:recorder/start-replay@0.1.0;
+}
+world exports {
+  import proxy:util/dialog;
+  import proxy:conversion/conversion;
+  import proxy:conversion/executor;
+  import test:p3/host@0.1.0;
+  import test:p3/api@0.1.0;
+  export proxy:recorder/start-replay@0.1.0;
+}

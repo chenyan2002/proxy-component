@@ -152,7 +152,7 @@ impl<'a> Opt<'a> {
         if self.need_debug {
             out.push_str("let debug = new import:debug { ... };\n");
         }
-        if !self.args.use_host_recorder {
+        if self.args.bundles_recorder() {
             out.push_str("let recorder = new import:recorder { ... };\n");
         }
         out.push_str("let imports = new import:proxy {\n");
@@ -197,7 +197,7 @@ impl<'a> Opt<'a> {
     fn push_external_link(&self, out: &mut Source, name: &str, link_type: &LinkType) -> bool {
         match link_type {
             LinkType::Debug => push_link(out, name, "debug", name),
-            LinkType::Recorder if !self.args.use_host_recorder => {
+            LinkType::Recorder if self.args.bundles_recorder() => {
                 push_link(out, name, "recorder", name)
             }
             LinkType::Recorder | LinkType::Host => return true,

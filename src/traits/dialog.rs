@@ -4,7 +4,12 @@ use crate::traits::{Trait, new_mock};
 use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
-pub struct DialogTrait;
+pub struct DialogTrait {
+    /// Whether the bindings have streams, whose `Dialog` impl needs their `wit_stream` module
+    pub has_streams: bool,
+    /// Whether the bindings have futures, whose `Dialog` impl needs their `wit_future` module
+    pub has_futures: bool,
+}
 
 impl Trait for DialogTrait {
     fn resource_trait(
@@ -168,8 +173,13 @@ impl Trait for DialogTrait {
     }
     fn trait_defs(&self) -> Vec<Item> {
         let ast: syn::File = parse_quote! {
-          trait Dialog {
+          trait Dialog: Sized {
+            // A value the virtualized host gives the guest, which the user enters.
             fn read_value(dep: u32) -> Self;
+            // What the virtualized host does with a value the guest gives it: by default, drop it.
+            // Only streams and futures override it, which p2 worlds don't have.
+            #[allow(dead_code)]
+            fn consume(self, _dep: u32) {}
           }
           impl Dialog for () {
               fn read_value(_dep: u32) -> Self {
@@ -183,6 +193,11 @@ impl Trait for DialogTrait {
                       None
                   } else {
                       Some(Dialog::read_value(dep + 1))
+                  }
+              }
+              fn consume(self, dep: u32) {
+                  if let Some(x) = self {
+                      x.consume(dep);
                   }
               }
           }
@@ -200,6 +215,11 @@ impl Trait for DialogTrait {
                   (0..len).map(|_| Dialog::read_value(dep + 1)).collect()
                 }
               }
+              fn consume(self, dep: u32) {
+                  for x in self {
+                      x.consume(dep);
+                  }
+              }
           }
           impl <O: Dialog, E: Dialog> Dialog for Result<O, E> {
               fn read_value(dep: u32) -> Self {
@@ -208,6 +228,12 @@ impl Trait for DialogTrait {
                       Ok(Dialog::read_value(dep + 1))
                   } else {
                       Err(Dialog::read_value(dep + 1))
+                  }
+              }
+              fn consume(self, dep: u32) {
+                  match self {
+                      Ok(x) => x.consume(dep),
+                      Err(x) => x.consume(dep),
                   }
               }
           }
@@ -254,6 +280,11 @@ impl Trait for DialogTrait {
                       fn read_value(dep: u32) -> Self {
                           ($($T::read_value(dep + 1),)+)
                       }
+                      #[allow(non_snake_case)]
+                      fn consume(self, dep: u32) {
+                          let ($($T,)+) = self;
+                          $($T.consume(dep);)+
+                      }
                   }
               };
           }
@@ -266,6 +297,120 @@ impl Trait for DialogTrait {
           impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7);
           impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
         };
-        ast.items
+        let mut items = ast.items;
+        items.extend(self.async_defs());
+        items
+    }
+}
+
+impl DialogTrait {
+    /// `Dialog` for streams, futures and error-contexts. The bindings only have the `wit_stream`
+    /// and `wit_future` modules for them if the world has streams or futures.
+    ///
+    /// The virtualized host writes the streams and futures it gives the guest, and reads those
+    /// the guest gives it, in jobs of `assets/executor.rs`, which ask the user, one chunk at a
+    /// time, what to write, or whether to keep reading.
+    fn async_defs(&self) -> Vec<Item> {
+        let mut items = Vec::new();
+        if self.has_streams {
+            let ast: syn::File = parse_quote! {
+              impl<T> Dialog for wit_bindgen::StreamReader<T>
+              where
+                  T: Dialog + ToValue + ValueTyped + wit_stream::StreamPayload + 'static,
+              {
+                  fn read_value(_dep: u32) -> Self {
+                      let (mut writer, reader) = wit_stream::new::<T>();
+                      let label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
+                      spawn(async move {
+                          let choices = ["write a chunk".to_string(), "end the stream".to_string()];
+                          loop {
+                              let prompt = format!("The host writes {label}");
+                              if proxy::util::dialog::read_select(0, &prompt, &choices) == 1 {
+                                  proxy::util::dialog::print(0, &format!("{label}.read() = dropped"));
+                                  return;
+                              }
+                              let chunk: Vec<T> = Dialog::read_value(1);
+                              let items = wasm_wave::to_string(&chunk.to_value()).unwrap();
+                              if !writer.write_all(chunk).await.is_empty() {
+                                  proxy::util::dialog::print(0, &format!("{label} dropped by guest"));
+                                  return;
+                              }
+                              proxy::util::dialog::print(0, &format!("{label}.read() = {items}"));
+                          }
+                      });
+                      reader
+                  }
+                  fn consume(mut self, _dep: u32) {
+                      let label = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+                      spawn(async move {
+                          let choices = ["read a chunk".to_string(), "drop the stream".to_string()];
+                          loop {
+                              let prompt = format!("The host reads {label}");
+                              if proxy::util::dialog::read_select(0, &prompt, &choices) == 1 {
+                                  proxy::util::dialog::print(0, &format!("{label} dropped by host"));
+                                  return;
+                              }
+                              let (result, items) = self.read(Vec::with_capacity(4096)).await;
+                              if let wit_bindgen::StreamResult::Dropped = result {
+                                  proxy::util::dialog::print(0, &format!("{label} -> dropped"));
+                                  return;
+                              }
+                              let items = wasm_wave::to_string(&items.to_value()).unwrap();
+                              proxy::util::dialog::print(0, &format!("{label} -> {items}"));
+                          }
+                      });
+                  }
+              }
+            };
+            items.extend(ast.items);
+        }
+        if self.has_futures {
+            let ast: syn::File = parse_quote! {
+              impl<T> Dialog for wit_bindgen::FutureReader<T>
+              where
+                  T: Dialog + ToValue + ValueTyped + wit_future::FuturePayload,
+              {
+                  fn read_value(_dep: u32) -> Self {
+                      let (writer, reader) =
+                          wit_future::new::<T>(|| unreachable!("the value is always written"));
+                      let label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
+                      spawn(async move {
+                          proxy::util::dialog::print(0, &format!("The host writes {label}"));
+                          let value: T = Dialog::read_value(1);
+                          let wave = wasm_wave::to_string(&value.to_value()).unwrap();
+                          if writer.write(value).await.is_ok() {
+                              proxy::util::dialog::print(0, &format!("{label}.read() = {wave}"));
+                          } else {
+                              proxy::util::dialog::print(0, &format!("{label} dropped by guest"));
+                          }
+                      });
+                      reader
+                  }
+                  fn consume(self, _dep: u32) {
+                      let label = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+                      spawn(async move {
+                          let choices = ["read the value".to_string(), "drop the future".to_string()];
+                          let prompt = format!("The host reads {label}");
+                          if proxy::util::dialog::read_select(0, &prompt, &choices) == 1 {
+                              drop(self);
+                              proxy::util::dialog::print(0, &format!("{label} dropped by host"));
+                              return;
+                          }
+                          let value = wasm_wave::to_string(&self.await.to_value()).unwrap();
+                          proxy::util::dialog::print(0, &format!("{label} -> {value}"));
+                      });
+                  }
+              }
+            };
+            items.extend(ast.items);
+        }
+        items.push(parse_quote! {
+          impl Dialog for wit_bindgen::rt::async_support::ErrorContext {
+              fn read_value(dep: u32) -> Self {
+                  Self::new(&proxy::util::dialog::read_raw_string(dep, "Enter the message of an error-context"))
+              }
+          }
+        });
+        items
     }
 }

@@ -94,7 +94,10 @@ impl<'a> TraitGenerator<'a> {
                     wrapped_labels: false,
                     mock_labels: true,
                 }));
-                traits.push(Box::new(dialog::DialogTrait {}));
+                traits.push(Box::new(dialog::DialogTrait {
+                    has_streams: state.has_streams,
+                    has_futures: state.has_futures,
+                }));
             }
         }
         TraitGenerator { state, traits }

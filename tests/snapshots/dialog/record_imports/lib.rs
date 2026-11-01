@@ -573,8 +573,10 @@ impl<'a> Dialog for exports::test::host::types::CounterBorrow<'a> {
         unreachable!()
     }
 }
-trait Dialog {
+trait Dialog: Sized {
     fn read_value(dep: u32) -> Self;
+    #[allow(dead_code)]
+    fn consume(self, _dep: u32) {}
 }
 impl Dialog for () {
     fn read_value(_dep: u32) -> Self {
@@ -589,6 +591,11 @@ impl<T: Dialog> Dialog for Option<T> {
             &["none".to_string(), "some".to_string()],
         );
         if selection == 0 { None } else { Some(Dialog::read_value(dep + 1)) }
+    }
+    fn consume(self, dep: u32) {
+        if let Some(x) = self {
+            x.consume(dep);
+        }
     }
 }
 impl<T: Dialog + 'static> Dialog for Vec<T> {
@@ -606,6 +613,11 @@ impl<T: Dialog + 'static> Dialog for Vec<T> {
             (0..len).map(|_| Dialog::read_value(dep + 1)).collect()
         }
     }
+    fn consume(self, dep: u32) {
+        for x in self {
+            x.consume(dep);
+        }
+    }
 }
 impl<O: Dialog, E: Dialog> Dialog for Result<O, E> {
     fn read_value(dep: u32) -> Self {
@@ -618,6 +630,12 @@ impl<O: Dialog, E: Dialog> Dialog for Result<O, E> {
             Ok(Dialog::read_value(dep + 1))
         } else {
             Err(Dialog::read_value(dep + 1))
+        }
+    }
+    fn consume(self, dep: u32) {
+        match self {
+            Ok(x) => x.consume(dep),
+            Err(x) => x.consume(dep),
         }
     }
 }
@@ -644,7 +662,8 @@ impl_dialog_primitive! {
 macro_rules! impl_dialog_tuple {
     ($($T:ident),+) => {
         impl < $($T : Dialog),+ > Dialog for ($($T,)+) { fn read_value(dep : u32) -> Self
-        { ($($T ::read_value(dep + 1),)+) } }
+        { ($($T ::read_value(dep + 1),)+) } #[allow(non_snake_case)] fn consume(self, dep
+        : u32) { let ($($T,)+) = self; $($T .consume(dep);)+ } }
     };
 }
 impl_dialog_tuple!(T1);
@@ -655,6 +674,16 @@ impl_dialog_tuple!(T1, T2, T3, T4, T5);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
+impl Dialog for wit_bindgen::rt::async_support::ErrorContext {
+    fn read_value(dep: u32) -> Self {
+        Self::new(
+            &proxy::util::dialog::read_raw_string(
+                dep,
+                "Enter the message of an error-context",
+            ),
+        )
+    }
+}
 thread_local! {
     #[allow(dead_code)] static PENDING_RET : std::cell::Cell < bool > = const {
     std::cell::Cell::new(false) };

@@ -73,13 +73,13 @@ test-fixture:
 	$(INSTRUMENT) -m replay --use-host-recorder $(FIXTURE_WASM)/proxy_guest.wasm
 	target/release/proxy-component run composed.wasm --invoke 'start()' --trace $(FIXTURE_OUT)/trace.out
 
-# Dialog mode has no streams or futures yet, which the p3 component has.
 test-dialog:
 	rm tests/composed.wasm || true
 	for wasm in tests/*.wasm; do \
-		[ $$wasm = tests/wasi_http_p3.wasm ] && continue; \
 		$(MAKE) run-dialog WASM=$$wasm || exit 1; \
 	done
+	cargo build --manifest-path $(P3_GUEST)/Cargo.toml --target wasm32-wasip2 --release --target-dir $(P3_GUEST_OUT)
+	$(MAKE) run-dialog WASM=$(P3_GUEST_WASM)
 
 run-fuzz:
 	$(INSTRUMENT) -m fuzz $(WASM)

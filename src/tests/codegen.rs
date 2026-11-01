@@ -110,3 +110,7 @@ fn dialog() {
 fn p3_fuzz() {
     snapshot(P3_FIXTURE, "p3-fuzz", Mode::Fuzz);
 }
+#[test]
+fn p3_dialog() {
+    snapshot(P3_FIXTURE, "p3-dialog", Mode::Dialog);
+}

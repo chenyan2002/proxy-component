@@ -1,0 +1,6 @@
+package proxy:conversion;
+interface conversion {
+  use test:p3/host@0.1.0.{body as test-p3-host-body};
+  get-mock-test-p3-host-body: func(handle: u32) -> test-p3-host-body;
+  get-handle-mock-test-p3-host-body: func(x: borrow<test-p3-host-body>) -> u32;
+}

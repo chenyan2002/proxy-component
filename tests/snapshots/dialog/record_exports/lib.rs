@@ -53,6 +53,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::guest::api::run(&p, &c);
+                    for _ in 0..8 {
+                        wit_bindgen::yield_async().await;
+                    }
                 }
                 2usize => {
                     proxy::util::dialog::print(
@@ -74,6 +77,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::guest::api::classify(&s);
+                    for _ in 0..8 {
+                        wit_bindgen::yield_async().await;
+                    }
                 }
                 3usize => {
                     proxy::util::dialog::print(
@@ -95,6 +101,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::guest::api::begin(c);
+                    for _ in 0..8 {
+                        wit_bindgen::yield_async().await;
+                    }
                 }
                 4usize => {
                     proxy::util::dialog::print(
@@ -121,6 +130,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::guest::api::Session::new(&name);
+                    for _ in 0..8 {
+                        wit_bindgen::yield_async().await;
+                    }
                 }
                 5usize => {
                     proxy::util::dialog::print(
@@ -150,6 +162,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::host::types::make_point(x, y);
+                    for _ in 0..8 {
+                        wit_bindgen::yield_async().await;
+                    }
                 }
                 6usize => {
                     proxy::util::dialog::print(
@@ -177,6 +192,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::host::types::check(p, c);
+                    for _ in 0..8 {
+                        wit_bindgen::yield_async().await;
+                    }
                 }
                 7usize => {
                     proxy::util::dialog::print(
@@ -201,6 +219,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::host::types::open(&name);
+                    for _ in 0..8 {
+                        wit_bindgen::yield_async().await;
+                    }
                 }
                 8usize => {
                     proxy::util::dialog::print(
@@ -225,6 +246,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::host::types::Counter::new(start);
+                    for _ in 0..8 {
+                        wit_bindgen::yield_async().await;
+                    }
                 }
                 9usize => {
                     proxy::util::dialog::print(
@@ -257,6 +281,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         ),
                     );
                     let _ = test::host::types::Counter::merge(&a, b);
+                    for _ in 0..8 {
+                        wit_bindgen::yield_async().await;
+                    }
                 }
                 _ => unreachable!(),
             }
@@ -729,8 +756,10 @@ impl<'a> Dialog for &'a test::host::types::Counter {
             })
     }
 }
-trait Dialog {
+trait Dialog: Sized {
     fn read_value(dep: u32) -> Self;
+    #[allow(dead_code)]
+    fn consume(self, _dep: u32) {}
 }
 impl Dialog for () {
     fn read_value(_dep: u32) -> Self {
@@ -745,6 +774,11 @@ impl<T: Dialog> Dialog for Option<T> {
             &["none".to_string(), "some".to_string()],
         );
         if selection == 0 { None } else { Some(Dialog::read_value(dep + 1)) }
+    }
+    fn consume(self, dep: u32) {
+        if let Some(x) = self {
+            x.consume(dep);
+        }
     }
 }
 impl<T: Dialog + 'static> Dialog for Vec<T> {
@@ -762,6 +796,11 @@ impl<T: Dialog + 'static> Dialog for Vec<T> {
             (0..len).map(|_| Dialog::read_value(dep + 1)).collect()
         }
     }
+    fn consume(self, dep: u32) {
+        for x in self {
+            x.consume(dep);
+        }
+    }
 }
 impl<O: Dialog, E: Dialog> Dialog for Result<O, E> {
     fn read_value(dep: u32) -> Self {
@@ -774,6 +813,12 @@ impl<O: Dialog, E: Dialog> Dialog for Result<O, E> {
             Ok(Dialog::read_value(dep + 1))
         } else {
             Err(Dialog::read_value(dep + 1))
+        }
+    }
+    fn consume(self, dep: u32) {
+        match self {
+            Ok(x) => x.consume(dep),
+            Err(x) => x.consume(dep),
         }
     }
 }
@@ -800,7 +845,8 @@ impl_dialog_primitive! {
 macro_rules! impl_dialog_tuple {
     ($($T:ident),+) => {
         impl < $($T : Dialog),+ > Dialog for ($($T,)+) { fn read_value(dep : u32) -> Self
-        { ($($T ::read_value(dep + 1),)+) } }
+        { ($($T ::read_value(dep + 1),)+) } #[allow(non_snake_case)] fn consume(self, dep
+        : u32) { let ($($T,)+) = self; $($T .consume(dep);)+ } }
     };
 }
 impl_dialog_tuple!(T1);
@@ -811,6 +857,16 @@ impl_dialog_tuple!(T1, T2, T3, T4, T5);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
+impl Dialog for wit_bindgen::rt::async_support::ErrorContext {
+    fn read_value(dep: u32) -> Self {
+        Self::new(
+            &proxy::util::dialog::read_raw_string(
+                dep,
+                "Enter the message of an error-context",
+            ),
+        )
+    }
+}
 thread_local! {
     #[allow(dead_code)] static PENDING_RET : std::cell::Cell < bool > = const {
     std::cell::Cell::new(false) };
