@@ -6,10 +6,24 @@ impl exports::proxy::conversion::conversion::Guest for Stub {
     fn get_mock_test_host_types_counter(
         handle: u32,
     ) -> exports::proxy::conversion::conversion::TestHostTypesCounter {
+        let _ = handle;
         exports::proxy::conversion::conversion::TestHostTypesCounter::new(MockedResource {
-            handle,
+            handle: 0,
             name: "counter".to_string(),
         })
+    }
+    fn get_handle_mock_test_host_types_counter(
+        x: exports::proxy::conversion::conversion::TestHostTypesCounterBorrow<'_>,
+    ) -> u32 {
+        x.get::<MockedResource>().handle
+    }
+}
+impl exports::proxy::executor::executor::Guest for Stub {
+    async fn run() -> () {
+        run_executor().await
+    }
+    fn stop() -> () {
+        stop_executor()
     }
 }
 impl exports::test::host::types::Guest for Stub {
@@ -99,12 +113,7 @@ impl exports::test::host::types::GuestCounter for MockedResource {
             name: "counter".to_string(),
             ..Dialog::read_value(0)
         };
-        proxy::util::dialog::print(
-            0,
-            &format!(
-                "ret: {}", wasm_wave::to_string(& ToValue::to_value(& ret)).unwrap()
-            ),
-        );
+        PENDING_RET.with(|pending| pending.set(true));
         ret
     }
     fn get(&self) -> u32 {
@@ -153,6 +162,30 @@ impl exports::test::host::types::GuestCounter for MockedResource {
             ),
         );
         ret
+    }
+    unsafe fn _resource_new(val: *mut u8) -> u32 {
+        #[cfg(target_arch = "wasm32")]
+        #[link(wasm_import_module = "[export]test:host/types@0.1.0")]
+        unsafe extern "C" {
+            #[link_name = "[resource-new]counter"]
+            fn new(_: *mut u8) -> i32;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        unsafe extern "C" fn new(_: *mut u8) -> i32 {
+            unreachable!()
+        }
+        let handle = unsafe { new(val) } as u32;
+        let mock = unsafe { &mut *(val as *mut Option<MockedResource>) }
+            .as_mut()
+            .unwrap();
+        mock.handle = handle;
+        if PENDING_RET.with(|pending| pending.take()) {
+            let ret = format!(
+                "ret: {}", wasm_wave::to_string(& mock.to_value()).unwrap()
+            );
+            proxy::util::dialog::print(0, &ret);
+        }
+        handle
     }
 }
 impl exports::test::log0_1_0::sink::Guest for Stub {
@@ -529,15 +562,8 @@ impl Dialog for exports::test::host::types::Perms {
 }
 impl Dialog for exports::test::host::types::Counter {
     fn read_value(_dep: u32) -> Self {
-        let handle = HANDLE_ID
-            .with(|id| {
-                let mut id = id.borrow_mut();
-                let current_id = *id;
-                *id += 1;
-                current_id
-            });
         exports::test::host::types::Counter::new(MockedResource {
-            handle,
+            handle: 0,
             name: "counter".to_string(),
         })
     }
@@ -549,9 +575,6 @@ impl<'a> Dialog for exports::test::host::types::CounterBorrow<'a> {
 }
 trait Dialog {
     fn read_value(dep: u32) -> Self;
-}
-thread_local! {
-    static HANDLE_ID : std::cell::RefCell < u32 > = std::cell::RefCell::new(1);
 }
 impl Dialog for () {
     fn read_value(_dep: u32) -> Self {
@@ -600,15 +623,8 @@ impl<O: Dialog, E: Dialog> Dialog for Result<O, E> {
 }
 impl Dialog for MockedResource {
     fn read_value(_dep: u32) -> Self {
-        let handle = HANDLE_ID
-            .with(|id| {
-                let mut id = id.borrow_mut();
-                let current_id = *id;
-                *id += 1;
-                current_id
-            });
         Self {
-            handle,
+            handle: 0,
             name: "mocked-resource".to_string(),
         }
     }
@@ -639,3 +655,66 @@ impl_dialog_tuple!(T1, T2, T3, T4, T5);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
+thread_local! {
+    #[allow(dead_code)] static PENDING_RET : std::cell::Cell < bool > = const {
+    std::cell::Cell::new(false) };
+}
+type Job = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
+#[derive(Default)]
+struct Executor {
+    queue: Vec<Job>,
+    stopped: bool,
+    waker: Option<std::task::Waker>,
+}
+thread_local! {
+    static EXECUTOR : std::cell::RefCell < Executor > =
+    std::cell::RefCell::new(Executor::default());
+}
+/// Queues `job`, from any function, sync or async.
+#[allow(dead_code)]
+fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
+    EXECUTOR
+        .with_borrow_mut(|e| {
+            e.queue.push(Box::pin(job));
+            if let Some(waker) = e.waker.take() {
+                waker.wake();
+            }
+        });
+}
+/// Polls the queued jobs until `stop_executor` is called and they are all done.
+#[allow(dead_code)]
+async fn run_executor() {
+    let mut running: Vec<Job> = Vec::new();
+    std::future::poll_fn(|cx| {
+            running.retain_mut(|job| job.as_mut().poll(cx).is_pending());
+            loop {
+                let mut queued = EXECUTOR
+                    .with_borrow_mut(|e| std::mem::take(&mut e.queue));
+                if queued.is_empty() {
+                    break;
+                }
+                queued.retain_mut(|job| job.as_mut().poll(cx).is_pending());
+                running.append(&mut queued);
+            }
+            EXECUTOR
+                .with_borrow_mut(|e| {
+                    if e.stopped && running.is_empty() {
+                        std::task::Poll::Ready(())
+                    } else {
+                        e.waker = Some(cx.waker().clone());
+                        std::task::Poll::Pending
+                    }
+                })
+        })
+        .await
+}
+#[allow(dead_code)]
+fn stop_executor() {
+    EXECUTOR
+        .with_borrow_mut(|e| {
+            e.stopped = true;
+            if let Some(waker) = e.waker.take() {
+                waker.wake();
+            }
+        });
+}

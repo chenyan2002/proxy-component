@@ -1,0 +1,7 @@
+// The WIT of a WASI p3 main component, as `extract_wit` writes it; see `tests/fixtures/proxy`.
+package root:component;
+
+world root {
+  import test:p3/host@0.1.0;
+  export test:p3/api@0.1.0;
+}

@@ -141,12 +141,11 @@ impl State {
     }
     pub fn generate_replay_start_func(&self, sig: &Signature) -> syn::ImplItemFn {
         let arms = self.export_funcs().into_iter().map(|func| {
+            let call = func.call();
             let ExportFunc {
                 display_name,
-                func,
                 arg_names,
                 arg_tys,
-                call_params,
                 has_ret,
                 ret_owns,
                 ..
@@ -175,15 +174,16 @@ impl State {
                         let arg_value: Value = wasm_wave::from_str(&<#arg_tys as ValueTyped>::value_type(), &#arg_idx).unwrap();
                         let #arg_names: #arg_tys = arg_value.to_rust();
                     )*
-                    let res = #func(#(#call_params),*);
+                    let res = #call;
                     #assert_ret
                     #keep_ret
                 }
             }
         });
         let drop_arm = self.replay_export_drop();
-        parse_quote! {
-            #sig {
+        self.generate_start(
+            sig,
+            quote! {
                 while let Some((method, args)) = proxy::recorder::replay::replay_export() {
                     match method.as_str() {
                         #(#arms)*
@@ -195,7 +195,7 @@ impl State {
                         alloc.borrow_mut().clear();
                     });
                 }
-            }
-        }
+            },
+        )
     }
 }

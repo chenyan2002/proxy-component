@@ -4,7 +4,7 @@
 //! applying wit-bindgen's naming to the WIT items, never by recovering WIT names from Rust ones.
 use super::State;
 use super::util::ResourceFuncKind;
-use crate::wit_util::strip_wrapped;
+use crate::wit_util::{has_async_value, strip_wrapped};
 use heck::ToUpperCamelCase;
 use std::collections::BTreeMap;
 use syn::Ident;
@@ -32,6 +32,12 @@ pub struct WitFunc {
     pub result: Option<String>,
     /// Whether the result owns a resource
     pub result_owns: bool,
+    /// Whether the function is `async`
+    pub is_async: bool,
+    /// Whether each parameter, without a method's `self`, has a stream or future
+    pub params_async: Vec<bool>,
+    /// Whether the result has a stream or future
+    pub result_async: bool,
 }
 impl WitFunc {
     /// In virtualized components, constructors return `Self`, i.e. `MockedResource`, so
@@ -281,6 +287,14 @@ impl State {
                 .collect(),
             result: wit_func.result.as_ref().map(|ty| self.type_name(ty)),
             result_owns: wit_func.result.is_some_and(|ty| self.owns_resource(&ty)),
+            is_async: wit_func.kind.is_async(),
+            params_async: params
+                .iter()
+                .map(|param| has_async_value(&self.resolve, &param.ty))
+                .collect(),
+            result_async: wit_func
+                .result
+                .is_some_and(|ty| has_async_value(&self.resolve, &ty)),
         })
     }
     /// Like `wit_func`, for functions the bindings generate from WIT.

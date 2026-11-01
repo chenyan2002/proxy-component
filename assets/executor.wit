@@ -1,0 +1,9 @@
+package proxy:executor;
+
+// Runs the background work of a virtualized host, e.g. writing a stream it returns, which a sync
+// function cannot wait for. The generated `imports` component exports it, and the `start`
+// function of the `exports` component runs it. See `assets/executor.rs`.
+interface executor {
+  run: async func();
+  stop: func();
+}

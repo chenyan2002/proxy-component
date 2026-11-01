@@ -18,16 +18,11 @@ impl Trait for DialogTrait {
         let wit_name = &wit.name;
         let in_import = module_path[0] != "exports";
         if in_import {
-            let mock = new_mock(wit, quote! { handle });
+            // The imports component, which makes the mock, labels it by its handle.
+            let mock = new_mock(wit, quote! { 0 });
             res.push(parse_quote! {
             impl Dialog for #resource_path {
                 fn read_value(_dep: u32) -> Self {
-                    let handle = HANDLE_ID.with(|id| {
-                        let mut id = id.borrow_mut();
-                        let current_id = *id;
-                        *id += 1;
-                        current_id
-                    });
                     #mock
                 }
             }
@@ -35,12 +30,6 @@ impl Trait for DialogTrait {
             res.push(parse_quote! {
             impl<'a> Dialog for &'a #resource_path {
                 fn read_value(_dep: u32) -> Self {
-                    let handle = HANDLE_ID.with(|id| {
-                        let mut id = id.borrow_mut();
-                        let current_id = *id;
-                        *id += 1;
-                        current_id
-                    });
                     SCOPED_ALLOC.with(|alloc| {
                         let mut alloc = alloc.borrow_mut();
                         alloc.alloc(#mock)
@@ -53,14 +42,9 @@ impl Trait for DialogTrait {
             res.push(parse_quote! {
             impl Dialog for #resource_path {
                 fn read_value(_dep: u32) -> Self {
-                    let handle = HANDLE_ID.with(|id| {
-                        let mut id = id.borrow_mut();
-                        let current_id = *id;
-                        *id += 1;
-                        current_id
-                    });
+                    // `_resource_new` gives it its handle.
                     #resource_path::new(MockedResource {
-                        handle,
+                        handle: 0,
                         name: #wit_name.to_string(),
                     })
                 }
@@ -187,9 +171,6 @@ impl Trait for DialogTrait {
           trait Dialog {
             fn read_value(dep: u32) -> Self;
           }
-          thread_local! {
-            static HANDLE_ID: std::cell::RefCell<u32> = std::cell::RefCell::new(1);
-          }
           impl Dialog for () {
               fn read_value(_dep: u32) -> Self {
                   ()
@@ -232,14 +213,9 @@ impl Trait for DialogTrait {
           }
           impl Dialog for MockedResource {
               fn read_value(_dep: u32) -> Self {
-                  let handle = HANDLE_ID.with(|id| {
-                        let mut id = id.borrow_mut();
-                        let current_id = *id;
-                        *id += 1;
-                        current_id
-                  });
+                  // A constructor's, which `_resource_new` gives its handle.
                   Self {
-                      handle,
+                      handle: 0,
                       name: "mocked-resource".to_string(),
                   }
               }

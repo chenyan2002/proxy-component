@@ -2,6 +2,7 @@ package component:proxy;
 world imports {
   import proxy:recorder/replay@0.1.0;
   export proxy:conversion/conversion;
+  export proxy:executor/executor;
   export test:host/types@0.1.0;
   export test:log/sink@0.1.0;
   export test:log/sink@0.2.0;
@@ -13,6 +14,7 @@ world tmp-exports {
 world exports {
   import proxy:recorder/replay@0.1.0;
   import proxy:conversion/conversion;
+  import proxy:executor/executor;
   import test:host/types@0.1.0;
   import test:guest/api@0.1.0;
   export proxy:recorder/start-replay@0.1.0;

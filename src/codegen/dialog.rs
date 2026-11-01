@@ -19,11 +19,18 @@ impl State {
         if ret_ty.is_some() {
             let params = params_to_wave(kind.as_ref(), &args);
             let ret_name = wit_func.result.as_ref().unwrap();
-            let read_ret = match wit_func.constructor_resource() {
-                Some(name) => {
-                    quote! { MockedResource { name: #name.to_string(), ..Dialog::read_value(0) } }
-                }
-                None => quote! { Dialog::read_value(0) },
+            // A constructor's mock has no handle yet, so `_resource_new` prints its `ret`.
+            let (read_ret, print_ret) = match wit_func.constructor_resource() {
+                Some(name) => (
+                    quote! { MockedResource { name: #name.to_string(), ..Dialog::read_value(0) } },
+                    quote! { PENDING_RET.with(|pending| pending.set(true)); },
+                ),
+                None => (
+                    quote! { Dialog::read_value(0) },
+                    quote! {
+                        proxy::util::dialog::print(0, &format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&ret)).unwrap()));
+                    },
+                ),
             };
             parse_quote! {
                 #sig {
@@ -31,7 +38,7 @@ impl State {
                     proxy::util::dialog::print(0, &format!("import: {}({})", #display_name, __params.join(", ")));
                     proxy::util::dialog::print(0, &format!("return type: {}", #ret_name));
                     let ret = #read_ret;
-                    proxy::util::dialog::print(0, &format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&ret)).unwrap()));
+                    #print_ret
                     ret
                 }
             }
@@ -49,13 +56,12 @@ impl State {
         let arms: Vec<_> = funcs
             .iter()
             .map(|func| {
+                let call = func.call();
                 let ExportFunc {
                     display_name,
-                    func,
                     arg_names,
                     arg_wit_tys,
                     arg_tys,
-                    call_params,
                     ..
                 } = func;
                 quote! {
@@ -68,28 +74,29 @@ impl State {
                             __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*
                         proxy::util::dialog::print(0, &format!("export: {}({})", #display_name, __params.join(", ")));
-                        let _ = #func(#(#call_params),*);
+                        let _ = #call;
                     }
                 }
             })
             .collect();
         let func_len = arms.len();
         let idxs = 1..=func_len;
-        parse_quote! {
-          #sig {
-            loop {
-              let idx = proxy::util::dialog::read_select(0, "Select an export function to call", &#display_names) as usize;
-              match idx {
-                      0 => break,
-                      #(#idxs => #arms)*
-                      _ => unreachable!(),
+        self.generate_start(
+            sig,
+            quote! {
+              loop {
+                let idx = proxy::util::dialog::read_select(0, "Select an export function to call", &#display_names) as usize;
+                match idx {
+                        0 => break,
+                        #(#idxs => #arms)*
+                        _ => unreachable!(),
+                }
+                // clean up borrowed resources from input args
+                SCOPED_ALLOC.with(|alloc| {
+                        alloc.borrow_mut().clear();
+                });
               }
-              // clean up borrowed resources from input args
-              SCOPED_ALLOC.with(|alloc| {
-                      alloc.borrow_mut().clear();
-              });
-            }
-          }
-        }
+            },
+        )
     }
 }

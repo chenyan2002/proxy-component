@@ -43,6 +43,11 @@ impl<'a> Opt<'a> {
             need_debug: false,
         }
     }
+    /// Whether the main component's exports are driven by the generated `start`, rather than
+    /// by the host, which also runs `proxy:executor`.
+    fn has_start(&self) -> bool {
+        matches!(self.mode, Mode::Replay | Mode::Fuzz | Mode::Dialog)
+    }
     fn push_mode_imports(&self, out: &mut Source) {
         match self.mode {
             Mode::Record | Mode::Replay => {
@@ -67,6 +72,9 @@ impl<'a> Opt<'a> {
         out.push_str("world imports {\n");
         self.push_mode_imports(&mut out);
         out.push_str("export proxy:conversion/conversion;\n");
+        if self.has_start() {
+            out.push_str("export proxy:executor/executor;\n");
+        }
         for name in interface_names(resolve, &world.imports)? {
             // Don't virtualize util imports
             if name.starts_with("proxy:util/") {
@@ -100,7 +108,7 @@ impl<'a> Opt<'a> {
             }
             self.main_exports.insert(name);
         }
-        if matches!(self.mode, Mode::Replay | Mode::Fuzz | Mode::Dialog) {
+        if self.has_start() {
             out.push_str("export proxy:recorder/start-replay@0.1.0;\n")
         }
         out.push_str("}\n");
@@ -118,6 +126,9 @@ impl<'a> Opt<'a> {
         out.push_str("world exports {\n");
         self.push_mode_imports(&mut out);
         out.push_str("import proxy:conversion/conversion;\n");
+        if self.has_start() {
+            out.push_str("import proxy:executor/executor;\n");
+        }
         for name in interface_names(resolve, &world.imports)? {
             out.push_str(&format!("import {name};\n"));
         }
@@ -214,6 +225,10 @@ impl<'a> Opt<'a> {
             "deps/util.wit",
             include_str!("../assets/util.wit").as_bytes(),
         );
+        files.push(
+            "deps/executor.wit",
+            include_str!("../assets/executor.wit").as_bytes(),
+        );
         Ok(())
     }
     /// Generate the `proxy:conversion` interface for converting the resources of the interfaces
@@ -285,6 +300,13 @@ impl<'a> Opt<'a> {
                     out.push_str(&format!(
                         "get-mock-{func_name}: func(handle: u32) -> {func_name};\n"
                     ));
+                    // The handle of a mock in the component that made it, which labels it in
+                    // both generated components.
+                    if matches!(self.mode, Mode::Fuzz | Mode::Dialog) {
+                        out.push_str(&format!(
+                            "get-handle-mock-{func_name}: func(x: borrow<{func_name}>) -> u32;\n"
+                        ));
+                    }
                 }
             }
         }
@@ -313,7 +335,7 @@ impl<'a> Opt<'a> {
                     self.need_debug = true;
                     LinkType::Debug
                 }
-                "proxy:conversion/conversion" => LinkType::Imports,
+                "proxy:conversion/conversion" | "proxy:executor/executor" => LinkType::Imports,
                 "proxy:util/dialog" => LinkType::Host,
                 name if name.starts_with("proxy:recorder/") => LinkType::Recorder,
                 name if matches!(self.mode, Mode::Record) => match strip_wrapped(name) {

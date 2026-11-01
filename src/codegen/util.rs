@@ -60,9 +60,33 @@ pub fn extract_arg_info(sig: &Signature) -> Vec<ArgInfo> {
 }
 
 const BUILTIN_TYPES: &[&str] = &[
-    "Self", "Result", "Option", "Vec", "Box", "Rc", "Arc", "String", "str", "u8", "u16", "u32",
-    "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "f32", "f64", "bool",
-    "char", "_rt",
+    "Self",
+    "Result",
+    "Option",
+    "Vec",
+    "Box",
+    "Rc",
+    "Arc",
+    "String",
+    "str",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "u128",
+    "usize",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "i128",
+    "isize",
+    "f32",
+    "f64",
+    "bool",
+    "char",
+    "_rt",
+    "wit_bindgen",
 ];
 impl<'a> VisitMut for FullTypePath<'a> {
     fn visit_type_path_mut(&mut self, ty: &mut syn::TypePath) {

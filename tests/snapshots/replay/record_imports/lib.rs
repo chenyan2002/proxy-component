@@ -12,6 +12,14 @@ impl exports::proxy::conversion::conversion::Guest for Stub {
         })
     }
 }
+impl exports::proxy::executor::executor::Guest for Stub {
+    async fn run() -> () {
+        run_executor().await
+    }
+    fn stop() -> () {
+        stop_executor()
+    }
+}
 impl exports::test::host::types::Guest for Stub {
     type Counter = MockedResource;
     fn make_point(x: i32, y: i32) -> exports::test::host::types::Point {
@@ -444,4 +452,63 @@ impl ToRust<MockedResource> for Value {
 thread_local! {
     #[allow(dead_code)] static MOVING : std::cell::Cell < bool > = const {
     std::cell::Cell::new(false) };
+}
+type Job = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
+#[derive(Default)]
+struct Executor {
+    queue: Vec<Job>,
+    stopped: bool,
+    waker: Option<std::task::Waker>,
+}
+thread_local! {
+    static EXECUTOR : std::cell::RefCell < Executor > =
+    std::cell::RefCell::new(Executor::default());
+}
+/// Queues `job`, from any function, sync or async.
+#[allow(dead_code)]
+fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
+    EXECUTOR
+        .with_borrow_mut(|e| {
+            e.queue.push(Box::pin(job));
+            if let Some(waker) = e.waker.take() {
+                waker.wake();
+            }
+        });
+}
+/// Polls the queued jobs until `stop_executor` is called and they are all done.
+#[allow(dead_code)]
+async fn run_executor() {
+    let mut running: Vec<Job> = Vec::new();
+    std::future::poll_fn(|cx| {
+            running.retain_mut(|job| job.as_mut().poll(cx).is_pending());
+            loop {
+                let mut queued = EXECUTOR
+                    .with_borrow_mut(|e| std::mem::take(&mut e.queue));
+                if queued.is_empty() {
+                    break;
+                }
+                queued.retain_mut(|job| job.as_mut().poll(cx).is_pending());
+                running.append(&mut queued);
+            }
+            EXECUTOR
+                .with_borrow_mut(|e| {
+                    if e.stopped && running.is_empty() {
+                        std::task::Poll::Ready(())
+                    } else {
+                        e.waker = Some(cx.waker().clone());
+                        std::task::Poll::Pending
+                    }
+                })
+        })
+        .await
+}
+#[allow(dead_code)]
+fn stop_executor() {
+    EXECUTOR
+        .with_borrow_mut(|e| {
+            e.stopped = true;
+            if let Some(waker) = e.waker.take() {
+                waker.wake();
+            }
+        });
 }

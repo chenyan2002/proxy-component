@@ -26,9 +26,16 @@ test: test-cargo test-fuzz test-record test-fixture test-dialog
 test-cargo:
 	cargo test
 
+# A WASI p3 main component of tests/fixtures/proxy-p3, which uses error-context
+P3_GUEST = tests/fixtures/proxy-p3-run/guest
+P3_GUEST_OUT = target/fixture-p3
+P3_GUEST_WASM = $(P3_GUEST_OUT)/wasm32-wasip2/release/proxy_p3_guest.wasm
 test-fuzz:
 	$(MAKE) run-fuzz WASM=tests/calculator.wasm
 	$(MAKE) run-fuzz WASM=tests/wasi_http.wasm
+	$(MAKE) run-fuzz WASM=tests/wasi_http_p3.wasm
+	cargo build --manifest-path $(P3_GUEST)/Cargo.toml --target wasm32-wasip2 --release --target-dir $(P3_GUEST_OUT)
+	$(MAKE) run-fuzz WASM=$(P3_GUEST_WASM) WASMTIME_FLAGS="$(WASMTIME_FLAGS) -W component-model-error-context=y"
 	# build-only test
 	$(INSTRUMENT) -m fuzz tests/rust.wasm
 	$(INSTRUMENT) -m fuzz tests/go.wasm
@@ -66,10 +73,11 @@ test-fixture:
 	$(INSTRUMENT) -m replay --use-host-recorder $(FIXTURE_WASM)/proxy_guest.wasm
 	target/release/proxy-component run composed.wasm --invoke 'start()' --trace $(FIXTURE_OUT)/trace.out
 
+# Dialog mode has no streams or futures yet, which the p3 component has.
 test-dialog:
 	rm tests/composed.wasm || true
-	for wasm in tests/*.wasm; do \
-		$(MAKE) run-dialog WASM=$$wasm; \
+	for wasm in $(filter-out tests/wasi_http_p3.wasm,$(wildcard tests/*.wasm)); do \
+		$(MAKE) run-dialog WASM=$$wasm || exit 1; \
 	done
 
 run-fuzz:

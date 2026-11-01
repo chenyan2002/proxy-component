@@ -1,5 +1,6 @@
 use crate::Mode;
 use anyhow::Result;
+use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::{BTreeMap, BTreeSet};
 use syn::{
@@ -14,6 +15,7 @@ use wit_parser::{InterfaceId, Resolve, TypeId, WorldId};
 
 mod dialog;
 mod fuzz;
+mod mock;
 mod parse;
 mod record;
 mod replay;
@@ -34,6 +36,10 @@ pub struct State {
     pub types: BTreeMap<Vec<String>, Vec<(TypeId, TypeInfo)>>,
     pub funcs: BTreeMap<Vec<String>, BTreeMap<Option<String>, Vec<Signature>>>,
     pub module_paths: BTreeSet<Vec<String>>,
+    /// Whether the bindings have streams, i.e. the `wit_stream` module
+    pub has_streams: bool,
+    /// Whether the bindings have futures, i.e. the `wit_future` module
+    pub has_futures: bool,
     pub output: Vec<Item>,
 }
 pub enum TypeInfo {
@@ -62,12 +68,17 @@ struct ExportFunc {
     has_ret: bool,
     /// Whether the result owns a resource
     ret_owns: bool,
+    is_async: bool,
+    /// Whether the result has a stream or future
+    ret_async: bool,
 }
 
 /// Interface for converting resources between the generated components.
 const CONVERSION_MODULE: &str = "exports::proxy::conversion::conversion";
 /// Interface whose `start` function drives the main component's exports in virtualized modes.
 const START_REPLAY_MODULE: &str = "exports::proxy::recorder::start_replay";
+/// Interface running the background work of the virtualized host, see `assets/executor.rs`.
+const EXECUTOR_MODULE: &str = "exports::proxy::executor::executor";
 
 /// Generates the `lib.rs` implementing the traits of `bindings`, which wit-bindgen generated
 /// from `world` of `resolve`.
@@ -89,7 +100,16 @@ pub fn generate(
         let defs = state.replay_defs();
         state.output.extend(defs);
     }
+    if matches!(mode, Mode::Fuzz | Mode::Dialog) {
+        let defs = state.mock_defs();
+        state.output.extend(defs);
+    }
+    let has_executor = state.has_executor();
     let mut file = state.into_output_file();
+    if has_executor {
+        let executor = syn::parse_file(include_str!("../../assets/executor.rs"))?;
+        file.items.extend(executor.items);
+    }
     if use_custom_allocator {
         // dlmalloc with a memory source that grows by bytes, for `--page-size=1`.
         let alloc = syn::parse_file(include_str!("../../assets/one_byte_page_alloc.rs"))?;
@@ -101,12 +121,27 @@ pub fn generate(
     }
     Ok(prettyplease::unparse(&file))
 }
+impl ExportFunc {
+    /// The call of the export, awaited if it's async.
+    fn call(&self) -> TokenStream {
+        let ExportFunc {
+            func, call_params, ..
+        } = self;
+        if self.is_async {
+            quote! { #func(#(#call_params),*).await }
+        } else {
+            quote! { #func(#(#call_params),*) }
+        }
+    }
+}
 impl State {
     fn new(mode: Mode, resolve: Resolve, world: WorldId) -> Self {
         State {
             mode,
             interfaces: wit::interface_modules(&resolve, world),
             conversions: wit::conversion_funcs(&resolve),
+            has_streams: false,
+            has_futures: false,
             type_info: {
                 let mut types = wit_bindgen_core::Types::default();
                 types.analyze(&resolve);
@@ -184,6 +219,10 @@ impl State {
                         methods.push(syn::ImplItem::Fn(stub_impl));
                         continue;
                     }
+                    if module_full_name == EXECUTOR_MODULE {
+                        methods.push(syn::ImplItem::Fn(generate_executor_func(&sig)));
+                        continue;
+                    }
                     let is_start = module_full_name == START_REPLAY_MODULE;
                     if is_start {
                         assert!(sig.ident == "start");
@@ -215,6 +254,9 @@ impl State {
                 methods.push(syn::ImplItem::Fn(self.generate_record_drop(module_path)))
             }
             (Mode::Replay, Some(_)) => methods.push(syn::ImplItem::Fn(self.generate_replay_drop())),
+            (Mode::Fuzz | Mode::Dialog, Some(resource)) => methods.push(syn::ImplItem::Fn(
+                self.generate_mock_resource_new(module_path, resource),
+            )),
             _ => (),
         }
         parse_quote! {
@@ -228,13 +270,23 @@ impl State {
         let func_name = &sig.ident.to_string();
         let body = if func_name.starts_with("get_wrapped_") || func_name.starts_with("get_host_") {
             quote! { x.to_proxy() }
+        } else if func_name.starts_with("get_handle_mock_") {
+            quote! { x.get::<MockedResource>().handle }
         } else if func_name.starts_with("get_handle_") {
             quote! { x.to_proxy().handle() }
         } else if func_name.starts_with("get_mock_") {
             let resource = get_return_type(&sig.output).unwrap();
             let name = self.conversion_resource(&sig.ident);
-            quote! {
-                #resource::new(MockedResource { handle, name: #name.to_string() })
+            // In fuzz and dialog modes, `_resource_new` labels the mock by its handle (see
+            // `generate_mock_resource_new`); in replay mode, by the handle in the trace.
+            match self.mode {
+                Mode::Fuzz | Mode::Dialog => quote! {
+                    let _ = handle;
+                    #resource::new(MockedResource { handle: 0, name: #name.to_string() })
+                },
+                _ => quote! {
+                    #resource::new(MockedResource { handle, name: #name.to_string() })
+                },
             }
         } else {
             unreachable!()
@@ -285,17 +337,59 @@ impl State {
                         call_params: args.iter().map(|arg| arg.call_param()).collect(),
                         has_ret: get_return_type(&sig.output).is_some(),
                         ret_owns: wit_func.result_owns,
+                        is_async: wit_func.is_async,
+                        ret_async: wit_func.result_async,
                     });
                 }
             }
         }
         res
     }
+    /// Whether the component runs `proxy:executor`: the imports component exports it, and the
+    /// exports component imports it.
+    fn has_executor(&self) -> bool {
+        let import = EXECUTOR_MODULE.strip_prefix("exports::").unwrap();
+        self.module_paths
+            .iter()
+            .any(|path| [EXECUTOR_MODULE, import].contains(&path.join("::").as_str()))
+    }
+    /// The async `start` function running `body`, along with the background work of both
+    /// generated components (see `assets/executor.rs`), until the exports it called are done.
+    fn generate_start(&self, sig: &Signature, body: TokenStream) -> syn::ImplItemFn {
+        parse_quote! {
+            #sig {
+                let __executors = (
+                    wit_bindgen::spawn_local(proxy::executor::executor::run()),
+                    wit_bindgen::spawn_local(run_executor()),
+                );
+                #body
+                proxy::executor::executor::stop();
+                stop_executor();
+                __executors.0.await;
+                __executors.1.await;
+            }
+        }
+    }
     fn into_output_file(self) -> File {
         File {
             items: self.output,
             shebang: None,
             attrs: Vec::new(),
+        }
+    }
+}
+
+/// The functions of `proxy:executor/executor`, which the imports component exports, for the
+/// `start` function of the exports component to run its jobs (see `assets/executor.rs`).
+fn generate_executor_func(sig: &Signature) -> syn::ImplItemFn {
+    let body = match sig.ident.to_string().as_str() {
+        "run" => quote! { run_executor().await },
+        "stop" => quote! { stop_executor() },
+        name => unreachable!("unexpected executor function {name}"),
+    };
+    parse_quote! {
+        #sig {
+            #body
         }
     }
 }

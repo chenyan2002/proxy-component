@@ -10,6 +10,9 @@ pub struct WaveTrait {
     pub has_replay_table: bool,
     /// Label wrapped host resources by their host handles, see `proxy:conversion`
     pub wrapped_labels: bool,
+    /// Label mocked host resources by the ids the imports component gives them, see
+    /// `proxy:conversion`
+    pub mock_labels: bool,
 }
 
 impl Trait for WaveTrait {
@@ -40,10 +43,12 @@ impl Trait for WaveTrait {
             });
             if self.to_value {
                 // A wrapped host resource is labeled by its host handle, which the component
-                // wrapping it knows, so that both generated components label it alike.
+                // wrapping it knows, and a mock by its id, which the component mocking it knows,
+                // so that both generated components label it alike.
                 let handle = match &wit.conversion {
                     Some(conversion)
-                        if self.wrapped_labels && is_wrapped_module(&module_path[0]) =>
+                        if self.mock_labels
+                            || (self.wrapped_labels && is_wrapped_module(&module_path[0])) =>
                     {
                         let conversion = conversion.to_string();
                         let get_handle = format_ident!(

@@ -6,7 +6,8 @@ use wasmtime::component::types::{ComponentExtern, ComponentFunc, ComponentItem a
 use wasmtime::component::wasm_wave::{untyped::UntypedFuncCall, wasm::WasmFunc};
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable, Val};
 use wasmtime::*;
-use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView, p2::add_to_linker_sync};
+use wasmtime_wasi::runtime::in_tokio;
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView, p2::add_to_linker_async};
 
 #[derive(Parser)]
 pub struct RunArgs {
@@ -76,12 +77,16 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
     config
         .consume_fuel(true)
         .wasm_custom_page_sizes(true)
+        // The generated `start` is async, and WASI p3 components have async exports and imports.
+        .wasm_component_model_async(true)
+        .concurrency_support(true)
         //.debug_info(true)
         .wasm_backtrace_details(WasmBacktraceDetails::Enable);
     let engine = Engine::new(&config)?;
 
     let mut linker = Linker::<State>::new(&engine);
-    add_to_linker_sync(&mut linker)?;
+    // The WASI p2 host functions are async ones, as the store runs async exports.
+    add_to_linker_async(&mut linker)?;
     let wasi = WasiCtxBuilder::new().inherit_stdio().inherit_args().build();
     let mut state = State {
         wasi_ctx: wasi,
@@ -123,14 +128,14 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
                 component.get_export_index(instance.as_ref(), name)
             })
             .unwrap();
-        let instance = linker.instantiate(&mut store, &component)?;
+        let instance = in_tokio(linker.instantiate_async(&mut store, &component))?;
 
         let param_types = WasmFunc::params(&func_type).collect::<Vec<_>>();
         let params = untyped_call.to_wasm_params(&param_types)?;
         let func = instance.get_func(&mut store, export).unwrap();
         let mut results = vec![Val::Bool(false); func_type.results().len()];
         // A replayed `wasi:cli/exit` traps the guest on purpose.
-        func.call(&mut store, &params, &mut results).or_else(|e| {
+        in_tokio(func.call_async(&mut store, &params, &mut results)).or_else(|e| {
             if store.data().exit_called {
                 Ok(())
             } else {

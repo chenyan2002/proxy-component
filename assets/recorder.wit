@@ -11,8 +11,10 @@ interface replay {
   replay-import: func(method: option<string>, args: option<list<string>>) -> option<string>;
 }
 
+// Async, so that it can await the main component's async exports, and run the jobs of
+// `proxy:executor`.
 interface start-replay {
-  start: func();
+  start: async func();
 }
 
 world host {

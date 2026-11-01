@@ -3,7 +3,11 @@ use bindings::*;
 struct Stub;
 bindings::export!(Stub with_types_in bindings);
 impl exports::proxy::recorder::start_replay::Guest for Stub {
-    fn start() -> () {
+    async fn start() -> () {
+        let __executors = (
+            wit_bindgen::spawn_local(proxy::executor::executor::run()),
+            wit_bindgen::spawn_local(run_executor()),
+        );
         loop {
             let idx = proxy::util::dialog::read_select(
                 0,
@@ -264,6 +268,10 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     alloc.borrow_mut().clear();
                 });
         }
+        proxy::executor::executor::stop();
+        stop_executor();
+        __executors.0.await;
+        __executors.1.await;
     }
 }
 impl ValueTyped for test::guest::api::Session {
@@ -477,13 +485,19 @@ impl<'a> ValueTyped for &'a test::host::types::Counter {
 }
 impl ToValue for test::host::types::Counter {
     fn to_value(&self) -> Value {
-        let label = format!("{}-{}", "counter", self.handle());
+        let label = format!(
+            "{}-{}", "counter",
+            proxy::conversion::conversion::get_handle_mock_test_host_types_counter(self)
+        );
         Value::make_handle(label.into())
     }
 }
 impl<'a> ToValue for &'a test::host::types::Counter {
     fn to_value(&self) -> Value {
-        let label = format!("borrow-{}-{}", "counter", self.handle());
+        let label = format!(
+            "borrow-{}-{}", "counter",
+            proxy::conversion::conversion::get_handle_mock_test_host_types_counter(self)
+        );
         Value::make_handle(label.into())
     }
 }
@@ -594,31 +608,17 @@ impl ToRust<MockedResource> for Value {
 }
 impl Dialog for test::guest::api::Session {
     fn read_value(_dep: u32) -> Self {
-        let handle = HANDLE_ID
-            .with(|id| {
-                let mut id = id.borrow_mut();
-                let current_id = *id;
-                *id += 1;
-                current_id
-            });
         {
             fn cannot_mock<T>() -> T {
                 unimplemented!("cannot mock `session`, a resource of the main component")
             }
-            let _ = handle;
+            let _ = 0;
             cannot_mock()
         }
     }
 }
 impl<'a> Dialog for &'a test::guest::api::Session {
     fn read_value(_dep: u32) -> Self {
-        let handle = HANDLE_ID
-            .with(|id| {
-                let mut id = id.borrow_mut();
-                let current_id = *id;
-                *id += 1;
-                current_id
-            });
         SCOPED_ALLOC
             .with(|alloc| {
                 let mut alloc = alloc.borrow_mut();
@@ -629,7 +629,7 @@ impl<'a> Dialog for &'a test::guest::api::Session {
                                 "cannot mock `session`, a resource of the main component"
                             )
                         }
-                        let _ = handle;
+                        let _ = 0;
                         cannot_mock()
                     })
             })
@@ -716,32 +716,18 @@ impl Dialog for test::host::types::Perms {
 }
 impl Dialog for test::host::types::Counter {
     fn read_value(_dep: u32) -> Self {
-        let handle = HANDLE_ID
-            .with(|id| {
-                let mut id = id.borrow_mut();
-                let current_id = *id;
-                *id += 1;
-                current_id
-            });
-        proxy::conversion::conversion::get_mock_test_host_types_counter(handle)
+        proxy::conversion::conversion::get_mock_test_host_types_counter(0)
     }
 }
 impl<'a> Dialog for &'a test::host::types::Counter {
     fn read_value(_dep: u32) -> Self {
-        let handle = HANDLE_ID
-            .with(|id| {
-                let mut id = id.borrow_mut();
-                let current_id = *id;
-                *id += 1;
-                current_id
-            });
         SCOPED_ALLOC
             .with(|alloc| {
                 let mut alloc = alloc.borrow_mut();
                 alloc
                     .alloc(
                         proxy::conversion::conversion::get_mock_test_host_types_counter(
-                            handle,
+                            0,
                         ),
                     )
             })
@@ -749,9 +735,6 @@ impl<'a> Dialog for &'a test::host::types::Counter {
 }
 trait Dialog {
     fn read_value(dep: u32) -> Self;
-}
-thread_local! {
-    static HANDLE_ID : std::cell::RefCell < u32 > = std::cell::RefCell::new(1);
 }
 impl Dialog for () {
     fn read_value(_dep: u32) -> Self {
@@ -800,15 +783,8 @@ impl<O: Dialog, E: Dialog> Dialog for Result<O, E> {
 }
 impl Dialog for MockedResource {
     fn read_value(_dep: u32) -> Self {
-        let handle = HANDLE_ID
-            .with(|id| {
-                let mut id = id.borrow_mut();
-                let current_id = *id;
-                *id += 1;
-                current_id
-            });
         Self {
-            handle,
+            handle: 0,
             name: "mocked-resource".to_string(),
         }
     }
@@ -839,3 +815,66 @@ impl_dialog_tuple!(T1, T2, T3, T4, T5);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
+thread_local! {
+    #[allow(dead_code)] static PENDING_RET : std::cell::Cell < bool > = const {
+    std::cell::Cell::new(false) };
+}
+type Job = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
+#[derive(Default)]
+struct Executor {
+    queue: Vec<Job>,
+    stopped: bool,
+    waker: Option<std::task::Waker>,
+}
+thread_local! {
+    static EXECUTOR : std::cell::RefCell < Executor > =
+    std::cell::RefCell::new(Executor::default());
+}
+/// Queues `job`, from any function, sync or async.
+#[allow(dead_code)]
+fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
+    EXECUTOR
+        .with_borrow_mut(|e| {
+            e.queue.push(Box::pin(job));
+            if let Some(waker) = e.waker.take() {
+                waker.wake();
+            }
+        });
+}
+/// Polls the queued jobs until `stop_executor` is called and they are all done.
+#[allow(dead_code)]
+async fn run_executor() {
+    let mut running: Vec<Job> = Vec::new();
+    std::future::poll_fn(|cx| {
+            running.retain_mut(|job| job.as_mut().poll(cx).is_pending());
+            loop {
+                let mut queued = EXECUTOR
+                    .with_borrow_mut(|e| std::mem::take(&mut e.queue));
+                if queued.is_empty() {
+                    break;
+                }
+                queued.retain_mut(|job| job.as_mut().poll(cx).is_pending());
+                running.append(&mut queued);
+            }
+            EXECUTOR
+                .with_borrow_mut(|e| {
+                    if e.stopped && running.is_empty() {
+                        std::task::Poll::Ready(())
+                    } else {
+                        e.waker = Some(cx.waker().clone());
+                        std::task::Poll::Pending
+                    }
+                })
+        })
+        .await
+}
+#[allow(dead_code)]
+fn stop_executor() {
+    EXECUTOR
+        .with_borrow_mut(|e| {
+            e.stopped = true;
+            if let Some(waker) = e.waker.take() {
+                waker.wake();
+            }
+        });
+}

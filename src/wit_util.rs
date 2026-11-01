@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::Path;
 use wit_component::WitPrinter;
-use wit_parser::{Resolve, WorldId};
+use wit_parser::{Resolve, Type, TypeDefKind, WorldId};
 
 // In record mode, the guest sees a copy of each imported package with its namespace
 // prefixed by `wrapped-` in WIT, which becomes `wrapped_` in the generated Rust modules
@@ -76,6 +76,35 @@ fn is_keyword(name: &str) -> bool {
             | "error-context"
             | "async"
     )
+}
+
+/// Whether a value of `ty` has a stream or future, which the host reads or writes.
+pub fn has_async_value(resolve: &Resolve, ty: &Type) -> bool {
+    let Type::Id(id) = ty else {
+        return false;
+    };
+    let any =
+        |mut tys: Box<dyn Iterator<Item = &Type> + '_>| tys.any(|ty| has_async_value(resolve, ty));
+    match &resolve.types[*id].kind {
+        TypeDefKind::Stream(_) | TypeDefKind::Future(_) => true,
+        TypeDefKind::Record(record) => any(Box::new(record.fields.iter().map(|f| &f.ty))),
+        TypeDefKind::Tuple(tuple) => any(Box::new(tuple.types.iter())),
+        TypeDefKind::Variant(variant) => {
+            any(Box::new(variant.cases.iter().filter_map(|c| c.ty.as_ref())))
+        }
+        TypeDefKind::Result(result) => any(Box::new(result.ok.iter().chain(result.err.iter()))),
+        TypeDefKind::Map(key, value) => any(Box::new([key, value].into_iter())),
+        TypeDefKind::Option(ty)
+        | TypeDefKind::List(ty)
+        | TypeDefKind::FixedLengthList(ty, _)
+        | TypeDefKind::Type(ty) => has_async_value(resolve, ty),
+        // Handles don't contain the resource's values.
+        TypeDefKind::Resource
+        | TypeDefKind::Handle(_)
+        | TypeDefKind::Flags(_)
+        | TypeDefKind::Enum(_)
+        | TypeDefKind::Unknown => false,
+    }
 }
 
 /// Extract WIT definitions from a wasm component and write them to `out_dir`.
