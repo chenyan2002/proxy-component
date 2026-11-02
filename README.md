@@ -30,6 +30,12 @@ Run `composed.wasm` in the host runtime which the original wasm is supposed to r
 
 The host runtime can also choose to implement the [`record` interface](https://github.com/chenyan2002/proxy-component/blob/main/assets/recorder.wit#L3). Then we can use the `--use-host-recorder` flag to skip composing the guest-side record implementation.
 
+Note that the recorded handle id is not an exact match with the handle id the main component sees. Each
+component instance has its own handle table, and the main component can allocate handles in it
+that the proxy never sees, e.g., its own resources and streams. Each of those
+shifts the main component's handle ids, so the imports component's handle ids, from its own table,
+can't match them exactly.
+
 ### Replay
 
 Assuming the trace captured from the record phase is stored in `trace.out`. We can run the following to replay the trace.
