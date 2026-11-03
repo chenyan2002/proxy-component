@@ -415,11 +415,16 @@ The proxy puts a hop, its own task, between the host and the guest. With deliver
 | several host results pending at one guest wait | possible, as nothing holds them back. A wit-bindgen guest still takes them one per wakeup, the lowest waitable first, with or without the proxy: its callback receives one event at a time, and its futures don't see the others until their own events |
 | a new export call | preserved: forwarded in the same task |
 | a guest read or write that completes at once, as the host had data or was reading | only if the pump [reads ahead](#read-ahead-in-pumps); otherwise it blocks first |
-| a host result arriving before the guest's next wait | may arrive after it instead, as the proxy's task needs a turn: a slower host, which is legal |
+| a host result arriving before the guest's next wait | may arrive after it instead, as the executor needs a turn to pass it on: a slower host, which is legal. [Read-ahead](#read-ahead-in-pumps) doesn't help: an async import's result has nothing to read ahead, and a stream's data that arrives just before the wait still waits for the pump. A wit-bindgen guest, whose callback gets one event per wakeup, can't tell the difference when this is the only event, but can when another is pending at the same wait: without the proxy, the lowest waitable of the two comes first, with it, the other one. A guest that calls `waitable-set.poll` also finds nothing pending |
 
 Whatever schedule happens is recorded completely. Not every timing the unproxied component could
 have is reachable while recording, as the proxy only makes the host look slower, or, with
 read-ahead, eagerer. Covering other schedules is exploration, which fuzz mode does.
+
+Only removing the hop would close the gap of a host result arriving late: the proxy would pass the
+host's subtasks and stream ends straight through, and see nothing of them, so recording would have
+to observe from inside the guest, as the [core-level shim](#portability) does, which sees what each
+of the guest's waits returns. Replay would still mock the imports in the proxy.
 
 ### Read-ahead in pumps
 
