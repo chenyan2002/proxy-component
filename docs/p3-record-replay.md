@@ -518,6 +518,70 @@ executor runs both.
   Waiting for a step is the executor's, not the recorder's. The bundled recorder
   (`assets/recorder*.wasm`) and the host recorder of `run` (`--use-host-recorder`) implement them.
 
+## Correctness
+
+Two questions, of which only the first can be guaranteed:
+
+1. **Soundness**: every run that recording sees replays exactly.
+2. **Coverage**: recording sees every schedule the composition could have. It doesn't; see
+   [What recording can't reach](#what-recording-cant-reach). Replay only has to reproduce what was
+   recorded, and covering other schedules is exploration.
+
+### Soundness, by induction on steps
+
+A run is a function of its trace if the composition is deterministic apart from the inputs the
+trace records: the classic condition for deterministic replay, that every nondeterministic choice
+is recorded. Here it is an induction on steps: if record and replay are in the same state when
+step `n` begins, and step `n` performs the same host lines, they are in the same state when step
+`n + 1` begins. Between steps, the guest's lines are checked, and its calls answered by the lines
+without an `at`. The induction holds under four assumptions, none of them proven yet:
+
+- **The executor is the only way in.** Every host event reaches the guest in a run of the
+  executor; see [Recording](#the-executor-delivers-and-records-host-events).
+- **Between steps, everything is deterministic.** The runtime's choices are fixed, and nothing
+  suspends where the proxy can't see it: no host components, no blocking WASI 0.2 calls. The
+  component model doesn't guarantee this (`Concurrency.md` allows nondeterminism); wasmtime 49
+  happens to, which is why replay in another runtime needs [the profile or the
+  shim](#portability).
+- **The same executor in record and replay**, whose work in a step depends only on its state and
+  the trace's lines for that step.
+- **The trace holds every input**: the values, RETURNED or STARTED, and the step of each host
+  line.
+
+### Fork-join program
+
+In a fork-join program without determinacy races, every schedule gives the same result (the
+result behind Feng and Leiserson's SP-bags), so for such a guest, recording the values would be
+enough, without steps. A component model async guest isn't one in general: it can observe the
+order in which completions arrive, as the spike's guest does, joining results in the order its
+wakeups receive them, and as a `select` does. That is a nondeterministic merge, outside fork-join's
+determinacy, and it is what steps record. The theory tells which guests need steps, not that steps
+are enough.
+
+For coverage, the theory to use is systematic concurrency testing: stateless model checking with
+partial-order reduction (DPOR, as in CHESS), which, for a bounded program, visits every class of
+schedules that differ only in the order of independent steps. The trace's partial order fits it,
+but deciding which steps are independent needs caller identity on import calls, which only [the
+shim](#portability) could provide; see No guest task on import calls, in
+[Trace format](#trace-format).
+
+### Checking the implementation
+
+- **Replay checks itself, for each trace.** It checks every guest line, so a wrong replay shows up
+  as a divergence or a stall, not silently. It can miss only what the trace doesn't record, such
+  as guest-internal streams, or what the guest's waits returned, which the shim could record.
+- **A fixpoint test**: record a run, replay it while recording, and require the two traces to be
+  equal. The spike does this, for its scenarios.
+- **Enumerated scenarios**: for small guests, every placement of host completions across steps,
+  rather than random delays; guests that merge nondeterministically, which are the ones steps
+  exist for; and schedules that fuzz mode generates, recorded and replayed.
+- **The assumptions, checked at run time**: in record mode, a host event that the guest observes
+  outside a step; in replay, a step count that differs from the recording's.
+- **A model of the spec.** The canonical ABI's reference, `definitions.py`, is executable, and
+  marks its nondeterministic choices. Modeling the guest, the proxy and the scheduler there, and
+  checking exhaustively, for small programs, that replay at the recorded steps gives the same run,
+  would test the design independently of wasmtime: the closest to a proof, short of writing one.
+
 ## Portability
 
 **Replay in the runtime that recorded needs no change to anything.** It needs the runtime's
@@ -561,7 +625,8 @@ depend on runtime patches. wasmtime 49 has the start of its own record and repla
 1. **Spike, in wasmtime**: done, see [Spike results](#spike-results).
 2. **Trace format** in `crates/trace`, and the recorder interface.
 3. **Replay**, tested on traces that fuzz mode writes in this format, as its executor can count
-   steps too, and its mocks can label streams as record does.
+   steps too, and its mocks can label streams as record does, with the checks of
+   [Correctness](#checking-the-implementation).
 4. **Record**, with the executor and its pumps, under `wasmtime serve` and `run`.
 5. **Portability across runtimes**: the profile proposal, or the shim.
 
