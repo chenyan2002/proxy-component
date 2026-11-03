@@ -310,9 +310,28 @@ these rules keep it from doing:
 - **No blocking WASI 0.2 calls during a run.** A sync WASI 0.2 function such as
   `blocking-write-and-flush`, which `println!` calls, can suspend the instance in the middle of the
   call, while it stays entered: other tasks run, and calls into the instance wait, which changes
-  the schedule, and which the proxy can't record. The proxy, and the bundled recorder, which
-  today prints each line as it is recorded, must buffer the trace, write it through a WASI 0.3
-  `stream<u8>`, whose copies are async, or leave it to a host recorder.
+  the schedule, and which the proxy can't record. So the proxy, the bundled recorder, which today
+  prints each line as it is recorded, and the debug component, whose prints fuzz mode and a
+  guest's debug builds use, must buffer their output and write it once the run is over, as the
+  spike does, or leave the trace to a host recorder. A buffer is lost if the run traps, and a run
+  that doesn't end, e.g. under `wasmtime serve`, has no end to write it at.
+- **No epoch deadlines that yield.** wasmtime's epoch interruption ends a guest's time slice at a
+  point set by a timer thread, wherever the guest is.
+  - **A deadline that traps**, as `wasmtime -W timeout=…` sets, only ends the run, and the trace
+    with it. A run that finished before its deadline replays; one that hit it stops at a point
+    replay has no timer for, so replay goes on past the end of the trace.
+  - **A deadline that yields** (`epoch_deadline_async_yield_and_update`), as embedders use to
+    time-slice guests, suspends the guest in the middle of its computation, while its instance
+    stays entered. The executor can then run a step, and deliver a host event H, before the
+    guest's next wait W. Replay can't interrupt the guest, so it runs that step only once the
+    guest waits at W. Step numbers stay the same; what moves is where the step falls relative to
+    the guest's computation. The guest sees the difference when another event E is pending at W:
+    in record, H and E are both pending, and the runtime returns the lower waitable, say H; in
+    replay, only E is.
+
+  A p2 guest isn't affected: it is sequential, and sees the host only through calls, so pausing it
+  changes nothing it can observe. [The shim](#portability) would lift this requirement, as it
+  positions host events by the guest's waits rather than by the executor's steps.
 
 ### Steps
 
@@ -400,7 +419,7 @@ trace, the two results could reach the guest before or after a different one of 
   job that waits for a later step makes the executor yield, and come back as the next step.
   wasmtime runs the ready tasks first, as it did before the host's completion in the recording.
 - **No suspension the proxy can't see**: no calls to other components where the recording calls
-  the host, and no blocking WASI 0.2 calls, as above.
+  the host, no blocking WASI 0.2 calls, and no epoch deadlines that yield, as above.
 - **One clock for both components.** The host calls exports through the exports component, not
   the executor, so each arrival takes a step from the same counter, through `step` on
   `proxy:conversion/executor`, as [Steps](#steps) describes.
@@ -539,7 +558,8 @@ without an `at`. The induction holds under four assumptions, none of them proven
 - **The executor is the only way in.** Every host event reaches the guest in a run of the
   executor; see [Recording](#the-executor-delivers-and-records-host-events).
 - **Between steps, everything is deterministic.** The runtime's choices are fixed, and nothing
-  suspends where the proxy can't see it: no host components, no blocking WASI 0.2 calls. The
+  suspends where the proxy can't see it: no host components, no blocking WASI 0.2 calls, no epoch
+  deadlines that yield. The
   component model doesn't guarantee this (`Concurrency.md` allows nondeterminism); wasmtime 49
   happens to, which is why replay in another runtime needs [the profile or the
   shim](#portability).
@@ -614,7 +634,11 @@ and the same executor in record and replay.
    component; the shim reports each observation (the event a wait returned, a copy that blocked)
    through a new import, e.g. `proxy:sched/hook`, composed with the proxy. Replay then releases
    exactly what each recorded wait saw. The shim observes; replacing the built-ins would mean
-   reimplementing the component model's async runtime inside the guest.
+   reimplementing the component model's async runtime inside the guest. Positions by the guest's
+   waits, rather than by the executor's steps, also hold when the guest is suspended where the
+   proxy can't see it, e.g. by an epoch deadline that yields, or a blocking WASI 0.2 call: replay
+   releases each host event so that every wait finds the same events pending as in the
+   recording.
 
 Patching the runtime, e.g. a scheduling hook in wasmtime, would also work, but replay must not
 depend on runtime patches. wasmtime 49 has the start of its own record and replay
@@ -645,5 +669,5 @@ depend on runtime patches. wasmtime 49 has the start of its own record and repla
    reproduce the component host's suspensions.
 6. **Guests that see several events at once**: bindings that drain pending events, or call
    `waitable-set.poll`, unlike wit-bindgen's; the spike covers only wit-bindgen guests.
-7. **The recorder's output**: buffering it to the end, a WASI 0.3 stream, or only a host
-   recorder.
+7. **The recorder's output**: buffering it to the end, or only a host recorder; and where to
+   write a buffer when the run traps, or doesn't end, as under `wasmtime serve`.
