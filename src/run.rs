@@ -1,7 +1,7 @@
 use anyhow::Context;
 use clap::Parser;
 use std::path::PathBuf;
-use trace::Logger;
+use trace::{Replay, Trace};
 use wasmtime::component::types::{ComponentExtern, ComponentFunc, ComponentItem as CItem};
 use wasmtime::component::wasm_wave::{untyped::UntypedFuncCall, wasm::WasmFunc};
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable, Val};
@@ -25,43 +25,58 @@ mod bindings {
     wasmtime::component::bindgen!({
         path: "assets/recorder.wit",
         world: "host",
+        // To convert the lines to `crates/trace`'s types, which serialize alike (`trace::convert`).
+        additional_derives: [serde::Serialize, serde::Deserialize],
     });
 }
+
+use bindings::proxy::recorder::types::Line;
 
 pub struct State {
     wasi_ctx: WasiCtx,
     resource_table: ResourceTable,
-    logger: Logger,
+    // The lines recorded, which `run` writes to `trace.out` at the end.
+    recorded: Vec<trace::Line>,
+    replay: Option<Replay>,
     exit_called: bool,
 }
+impl bindings::proxy::recorder::types::Host for State {}
 impl bindings::proxy::recorder::record::Host for State {
-    fn record_args(&mut self, method: Option<String>, args: Vec<String>, is_export: bool) {
-        let call = self.logger.record_args(method, args, is_export);
-        println!("call: {}", call.to_string());
-    }
-    fn record_ret(&mut self, method: Option<String>, ret: Option<String>, is_export: bool) {
-        let call = self.logger.record_ret(method, ret, is_export);
-        println!("ret: {}", call.to_string());
+    fn record(&mut self, line: Line) {
+        let line: trace::Line = trace::convert(line);
+        println!("{line}");
+        self.recorded.push(line);
     }
 }
 impl bindings::proxy::recorder::replay::Host for State {
-    fn replay_export(&mut self) -> Option<(String, Vec<String>)> {
-        self.logger.replay_export()
+    fn next_host_line(&mut self) -> Option<Line> {
+        let line = self.replay.as_mut().unwrap().next_host_line()?;
+        println!("{line}");
+        Some(trace::convert(line))
     }
-    fn assert_export_ret(&mut self, assert_method: Option<String>, assert_ret: Option<String>) {
-        self.logger.assert_export_ret(assert_method, assert_ret);
-    }
-    fn replay_import(
-        &mut self,
-        assert_method: Option<String>,
-        assert_args: Option<Vec<String>>,
-    ) -> Option<String> {
-        let (exit_called, ret) = self.logger.replay_import(assert_method, assert_args, false);
-        if exit_called {
-            self.exit_called = exit_called;
-            return Some("Something that can crash".to_string());
+    fn check(&mut self, line: Line) -> Vec<Line> {
+        let line: trace::Line = trace::convert(line);
+        println!("{line}");
+        let mut answers = self.replay.as_mut().unwrap().check(&line);
+        for answer in &answers {
+            println!("{answer}");
         }
-        ret
+        // A replayed `wasi:cli/exit` traps the guest on purpose: the import has no result, so
+        // the mock traps on one.
+        if line.exit_status().is_some() {
+            self.exit_called = true;
+            let id = line.event.task().unwrap();
+            let crash = trace::Event::Return(trace::ReturnValue {
+                id,
+                value: Some("Something that can crash".to_string()),
+            });
+            answers = vec![trace::Line {
+                by: trace::Party::Host,
+                at: None,
+                event: crash,
+            }];
+        }
+        trace::convert(answers)
     }
 }
 
@@ -92,7 +107,8 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
     let mut state = State {
         wasi_ctx: wasi,
         resource_table: ResourceTable::new(),
-        logger: Logger::new(),
+        recorded: Vec::new(),
+        replay: None,
         exit_called: false,
     };
     dialog_bindings::proxy::util::dialog::add_to_linker::<State, HasSelf<State>>(
@@ -104,7 +120,7 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
             state
         })?;
         let trace = std::fs::read_to_string(path)?;
-        state.logger.load_trace(&trace);
+        state.replay = Some(Replay::new(Trace::parse(&trace)));
     } else {
         bindings::proxy::recorder::record::add_to_linker::<State, HasSelf<State>>(
             &mut linker,
@@ -144,8 +160,8 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
             }
         })?;
         if args.trace.is_none() {
-            let trace = store.data().logger.dump_trace();
-            std::fs::write("trace.out", &trace)?;
+            let lines: Vec<_> = store.data().recorded.iter().map(trace::Line::to_json).collect();
+            std::fs::write("trace.out", lines.join("\n"))?;
         }
     }
     let fuel = MAX_FUEL - store.get_fuel()?;

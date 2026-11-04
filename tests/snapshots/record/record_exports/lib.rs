@@ -8,109 +8,113 @@ impl exports::test::guest::api::Guest for Stub {
         p: exports::test::guest::api::Point,
         c: &exports::test::guest::api::Counter,
     ) -> Vec<u8> {
+        let __id = trace_task_id(Table::Exports);
         let mut params: Vec<String> = Vec::new();
         let p = p.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
         let c = c.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
-        proxy::recorder::record::record_args(
-            Some("test:guest/api@0.1.0.run"),
-            &params,
-            true,
+        proxy::recorder::record::record(
+            &trace_call(Party::Host, __id, "test:guest/api@0.1.0.run", false, params),
         );
         let res = wrapped_test::guest::api::run(&p, &c);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-        proxy::recorder::record::record_ret(
-            Some("test:guest/api@0.1.0.run"),
-            Some(&wave_res),
-            true,
+        proxy::recorder::record::record(
+            &trace_return(Party::Guest, __id, Some(wave_res)),
         );
         res.to_proxy()
     }
     fn classify(
         s: exports::test::guest::api::Shape,
     ) -> ::core::option::Option<exports::test::guest::api::Point> {
+        let __id = trace_task_id(Table::Exports);
         let mut params: Vec<String> = Vec::new();
         let s = s.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&s)).unwrap());
-        proxy::recorder::record::record_args(
-            Some("test:guest/api@0.1.0.classify"),
-            &params,
-            true,
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Host,
+                __id,
+                "test:guest/api@0.1.0.classify",
+                false,
+                params,
+            ),
         );
         let res = wrapped_test::guest::api::classify(&s);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-        proxy::recorder::record::record_ret(
-            Some("test:guest/api@0.1.0.classify"),
-            Some(&wave_res),
-            true,
+        proxy::recorder::record::record(
+            &trace_return(Party::Guest, __id, Some(wave_res)),
         );
         res.to_proxy()
     }
     fn begin(
         c: exports::test::guest::api::Counter,
     ) -> exports::test::guest::api::Session {
+        let __id = trace_task_id(Table::Exports);
         let mut params: Vec<String> = Vec::new();
         let c = c.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
-        proxy::recorder::record::record_args(
-            Some("test:guest/api@0.1.0.begin"),
-            &params,
-            true,
+        proxy::recorder::record::record(
+            &trace_call(Party::Host, __id, "test:guest/api@0.1.0.begin", false, params),
         );
         let res = wrapped_test::guest::api::begin(c);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-        proxy::recorder::record::record_ret(
-            Some("test:guest/api@0.1.0.begin"),
-            Some(&wave_res),
-            true,
+        proxy::recorder::record::record(
+            &trace_return(Party::Guest, __id, Some(wave_res)),
         );
         res.to_proxy()
     }
 }
 impl exports::test::guest::api::GuestSession for wrapped_test::guest::api::Session {
     fn new(name: String) -> Self {
+        let __id = trace_task_id(Table::Exports);
         let mut params: Vec<String> = Vec::new();
         let name = name.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
-        proxy::recorder::record::record_args(
-            Some("new test:guest/api/session@0.1.0"),
-            &params,
-            true,
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Host,
+                __id,
+                "new test:guest/api/session@0.1.0",
+                false,
+                params,
+            ),
         );
         let res = Self::new(&name);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-        proxy::recorder::record::record_ret(
-            Some("new test:guest/api/session@0.1.0"),
-            Some(&wave_res),
-            true,
+        proxy::recorder::record::record(
+            &trace_return(Party::Guest, __id, Some(wave_res)),
         );
         res
     }
     fn name(&self) -> String {
+        let __id = trace_task_id(Table::Exports);
         let params: Vec<String> = vec![
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
-        proxy::recorder::record::record_args(
-            Some("test:guest/api/session@0.1.0.name"),
-            &params,
-            true,
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Host,
+                __id,
+                "test:guest/api/session@0.1.0.name",
+                false,
+                params,
+            ),
         );
         let res = self.name();
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-        proxy::recorder::record::record_ret(
-            Some("test:guest/api/session@0.1.0.name"),
-            Some(&wave_res),
-            true,
+        proxy::recorder::record::record(
+            &trace_return(Party::Guest, __id, Some(wave_res)),
         );
         res.to_proxy()
     }
     unsafe fn resource_from_raw_(handle: *mut Option<Self>) -> Option<Self> {
         if let Some(res) = *unsafe { Box::from_raw(handle) } {
-            let params = vec![wasm_wave::to_string(& res.to_value()).unwrap()];
-            proxy::recorder::record::record_args(Some("drop"), &params, true);
+            let name = wasm_wave::to_string(&res.to_value()).unwrap();
+            proxy::recorder::record::record(
+                &trace_drop(Party::Host, Table::Exports, name),
+            );
             drop(res);
-            proxy::recorder::record::record_ret(Some("drop"), None, true);
         }
         None
     }
@@ -1256,4 +1260,66 @@ impl<
         >(x) else { unreachable!() };
         Ok(x)
     }
+}
+use bindings::proxy::recorder::types::*;
+thread_local! {
+    static TASK_ID : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+}
+#[allow(dead_code)]
+fn trace_task_id(table: Table) -> TaskId {
+    let id = TASK_ID
+        .with(|id| {
+            id.set(id.get() + 1);
+            id.get()
+        });
+    TaskId { table, id }
+}
+#[allow(dead_code)]
+fn trace_call(
+    by: Party,
+    id: TaskId,
+    func: &str,
+    is_async: bool,
+    args: Vec<String>,
+) -> Line {
+    let call = Call {
+        id,
+        is_async,
+        func: func.to_string(),
+        args,
+    };
+    Line {
+        by,
+        at: None,
+        event: Event::Call(call),
+    }
+}
+#[allow(dead_code)]
+fn trace_return(by: Party, id: TaskId, value: Option<String>) -> Line {
+    let ret = ReturnValue { id, value };
+    Line {
+        by,
+        at: None,
+        event: Event::Return(ret),
+    }
+}
+#[allow(dead_code)]
+fn trace_drop(by: Party, table: Table, name: String) -> Line {
+    let label = Label { table, name };
+    Line {
+        by,
+        at: None,
+        event: Event::Drop(label),
+    }
+}
+/// The value of the `return` among the host's answers to a call.
+#[allow(dead_code)]
+fn trace_return_value(answers: Vec<Line>) -> Option<String> {
+    answers
+        .into_iter()
+        .find_map(|line| match line.event {
+            Event::Return(ret) => Some(ret.value),
+            _ => None,
+        })
+        .expect("the trace doesn't answer the call")
 }

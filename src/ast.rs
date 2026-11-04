@@ -323,6 +323,8 @@ impl<'a> Opt<'a> {
                     LinkType::Debug
                 }
                 "proxy:util/dialog" => LinkType::Host,
+                // Only types, which no instance has to provide.
+                name if name.starts_with("proxy:recorder/types@") => LinkType::Host,
                 name if name.starts_with("proxy:recorder/") => LinkType::Recorder,
                 _ => LinkType::Host,
             };
@@ -339,6 +341,8 @@ impl<'a> Opt<'a> {
                 }
                 "proxy:conversion/conversion" | "proxy:conversion/executor" => LinkType::Imports,
                 "proxy:util/dialog" => LinkType::Host,
+                // Only types, which no instance has to provide.
+                name if name.starts_with("proxy:recorder/types@") => LinkType::Host,
                 name if name.starts_with("proxy:recorder/") => LinkType::Recorder,
                 name if matches!(self.mode, Mode::Record) => match strip_wrapped(name) {
                     Some(stripped) if self.main_exports.contains(stripped) => LinkType::Main,

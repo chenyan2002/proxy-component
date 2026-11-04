@@ -8,6 +8,11 @@ use wit_parser::{TypeDefKind, TypeId};
 
 impl State {
     pub fn find_all_items(&mut self, items: &[Item], current_path: Vec<String>) {
+        // The recorder's imports, e.g. the lines of `proxy:recorder/types`, are the proxy's own,
+        // which the generated code calls, rather than interfaces of the main component.
+        if current_path.starts_with(&["proxy".to_string(), "recorder".to_string()]) {
+            return;
+        }
         for item in items {
             match item {
                 // export functions

@@ -96,6 +96,9 @@ pub fn generate(
     state.generate_stubs();
     let traits = crate::traits::TraitGenerator::new(&state).generate();
     state.output.extend(traits);
+    if matches!(mode, Mode::Record | Mode::Replay) {
+        state.output.extend(trace_defs());
+    }
     if matches!(mode, Mode::Replay) {
         let defs = state.replay_defs();
         state.output.extend(defs);
@@ -409,6 +412,55 @@ impl State {
             attrs: Vec::new(),
         }
     }
+}
+
+/// Helpers of record and replay modes, which make the lines of `proxy:recorder/types`. Each
+/// component numbers the calls it sees with its own counter: the exports component the host's
+/// calls of exports, and the imports component the guest's calls of imports (see
+/// `crates/trace`).
+fn trace_defs() -> Vec<Item> {
+    let file: File = parse_quote! {
+        use bindings::proxy::recorder::types::*;
+        thread_local! {
+            // The number of the last call this component saw.
+            static TASK_ID: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+        }
+        #[allow(dead_code)]
+        fn trace_task_id(table: Table) -> TaskId {
+            let id = TASK_ID.with(|id| {
+                id.set(id.get() + 1);
+                id.get()
+            });
+            TaskId { table, id }
+        }
+        #[allow(dead_code)]
+        fn trace_call(by: Party, id: TaskId, func: &str, is_async: bool, args: Vec<String>) -> Line {
+            let call = Call { id, is_async, func: func.to_string(), args };
+            Line { by, at: None, event: Event::Call(call) }
+        }
+        #[allow(dead_code)]
+        fn trace_return(by: Party, id: TaskId, value: Option<String>) -> Line {
+            let ret = ReturnValue { id, value };
+            Line { by, at: None, event: Event::Return(ret) }
+        }
+        #[allow(dead_code)]
+        fn trace_drop(by: Party, table: Table, name: String) -> Line {
+            let label = Label { table, name };
+            Line { by, at: None, event: Event::Drop(label) }
+        }
+        /// The value of the `return` among the host's answers to a call.
+        #[allow(dead_code)]
+        fn trace_return_value(answers: Vec<Line>) -> Option<String> {
+            answers
+                .into_iter()
+                .find_map(|line| match line.event {
+                    Event::Return(ret) => Some(ret.value),
+                    _ => None,
+                })
+                .expect("the trace doesn't answer the call")
+        }
+    };
+    file.items
 }
 
 /// `spawn` of the exports component, whose jobs, e.g. reading a stream an export returned, are

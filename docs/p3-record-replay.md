@@ -29,8 +29,9 @@ dialog support for p3.
   `new (writer: #stream-7, reader: #stream-5)` line, which goes away once fuzz and dialog label
   streams as record does; see [Labels](#labels).
 
-Record and replay modes reject nothing up front, but they don't handle streams, futures or async
-functions yet.
+- **Record and replay modes write and read this trace format** (`crates/trace`), through the
+  recorder interface (`assets/recorder.wit`), for p2 components. They reject nothing up front,
+  but they don't handle streams, futures or async functions yet.
 
 ## Where nondeterminism comes from
 
@@ -54,79 +55,65 @@ in component-ui's `docs/p3.md`.
 ## Trace format
 
 Backward compatibility with p2 traces is not a goal; the format is redesigned. A trace is the list
-of lines the proxy observed, in the order it observed them, defined by the Rust types below, in
-`crates/trace`. Replay relies on only part of that order; see Order, below. How a trace is stored is
-up to the implementation.
+of lines the proxy observed, in the order it observed them. Replay relies on only part of that
+order; see Order, below. How a trace is stored is up to the implementation.
 
-```rust
-/// The lines the proxy observed, in the order it observed them.
-pub struct Trace(pub Vec<Line>);
+The format is defined once, as the WIT interface `proxy:recorder/types`
+([`assets/recorder.wit`](../assets/recorder.wit)), which the generated components use to record
+and check lines. `crates/trace` generates its Rust types from it, and the recorders use those:
+the bundled recorder maps the interface to them, and the host recorder of `run` converts its own
+bindings' types to them. Values are WAVE text, e.g. `ok(#response-3)`, whose type comes from
+where they appear: a function's parameter or result, or a stream's or future's payload.
 
-/// One event, who did it, and, for a host line the guest observes outside its calls, the step in
-/// which it happened; see [Steps](#steps).
-pub struct Line {
-    pub by: Party,
-    pub at: Option<Step>,
-    pub event: Event,
+```wit
+enum party { host, guest }
+
+// A generated component, which numbers handles and tasks: the imports component, whose handle
+// table holds the ends that cross at the main component's imports, and which numbers the guest's
+// calls of imports, and the exports component, for its exports.
+enum table { imports, exports }
+
+// A call, numbered in order by the generated component that sees it, its `table`: the exports
+// component numbers the host's calls of exports, written `t1, t2, …`, and the imports component
+// the guest's calls of imports, written `c1, c2, …`. Sync calls are numbered too.
+record task-id { table: table, id: u32 }
+
+// A handle: the table its number is in, and its name as WAVE writes it, its type and its number,
+// e.g. `#stream-7` or `#fields-3`; see Labels.
+record label { table: table, name: string }
+
+record call { id: task-id, is-async: bool, %func: string, args: list<string> }
+// The callee's result, `none` for a function without one.
+record return-value { id: task-id, value: option<string> }
+// The items one copy of a stream moved.
+record chunk { %stream: label, items: string }
+record future-value { %future: label, value: string }
+
+variant event {
+  // `by` is the caller: the host for an export, the guest for an import.
+  call(call),
+  // The callee blocked before returning, so the caller got a subtask. Only for an async call.
+  started(task-id),
+  %return(return-value),
+  // The caller asked to cancel a pending call. The callee answers with `cancelled`, or with a
+  // `return`, if it returns anyway.
+  cancel(task-id),
+  // The callee acknowledged a cancellation instead of returning.
+  cancelled(task-id),
+  // A copy: the host wrote the items, which the guest read.
+  write(chunk),
+  // A copy: the host read the items, which the guest wrote.
+  read(chunk),
+  // A future's value was taken by its reader; `by` is the writer.
+  value(future-value),
+  // A stream or future end, or a resource, was dropped; `by` is who dropped it.
+  drop(label),
 }
 
-pub enum Party {
-    Host,
-    Guest,
-}
-
-/// A run of the imports component's executor, or an export call's arrival, counted from 1; see
-/// [Steps](#steps).
-pub struct Step(pub u32);
-
-/// A call, numbered in order by the generated component that sees it, its `table`: the exports
-/// component numbers the host's calls of exports, written `t1, t2, …`, and the imports component
-/// the guest's calls of imports, written `c1, c2, …`. Sync calls are numbered too.
-pub struct TaskId {
-    pub table: Table,
-    pub id: u32,
-}
-
-/// A handle: the table its number is in, and its name as WAVE writes it, its type and its number,
-/// e.g. `#stream-7` or `#fields-3`; see [Labels](#labels).
-pub struct Label {
-    pub table: Table,
-    pub name: String,
-}
-
-/// A generated component, which numbers handles and tasks: the imports component, whose handle
-/// table holds the ends that cross at the main component's imports, and which numbers the guest's
-/// calls of imports, and the exports component, for its exports.
-pub enum Table {
-    Imports,
-    Exports,
-}
-
-/// A value in WAVE, e.g. `ok(#response-3)`, whose type comes from where it appears: a function's
-/// parameter or result, or a stream's or future's payload.
-pub struct Wave(pub String);
-
-pub enum Event {
-    /// `by` is the caller: the host for an export, the guest for an import.
-    Call { id: TaskId, is_async: bool, func: String, args: Vec<Wave> },
-    /// The callee blocked before returning, so the caller got a subtask. Only for an async call.
-    Started { id: TaskId },
-    /// The callee's result, `None` for a function without one.
-    Return { id: TaskId, value: Option<Wave> },
-    /// The caller asked to cancel a pending call. The callee answers with `Cancelled`, or with a
-    /// `Return`, if it returns anyway.
-    Cancel { id: TaskId },
-    /// The callee acknowledged a cancellation instead of returning.
-    Cancelled { id: TaskId },
-    /// A copy: the host wrote `items`, which the guest read.
-    Write { stream: Label, items: Wave },
-    /// A copy: the host read `items`, which the guest wrote.
-    Read { stream: Label, items: Wave },
-    /// A future's value was taken by its reader; `by` is the writer.
-    Value { future: Label, value: Wave },
-    /// A stream or future end, or a resource, was dropped; `by` is who dropped it.
-    Drop { handle: Label },
-}
+// One event, who did it, and, for a host line the guest observes outside its calls, the step in
+// which it happened: a run of the imports component's executor, or an export call's arrival,
+// counted from 1; see Steps.
+record line { by: party, at: option<u32>, event: event }
 ```
 
 What the types don't enforce:
@@ -164,7 +151,7 @@ What the types don't enforce:
 - **Labels** are handles in the two generated components' tables, and tasks are numbered by the
   two components' counters, so the `table` of a label or a `TaskId` is part of what it names. A
   handle's number is reused only after its handle has ended, which an earlier line records. A
-  label inside a `Wave` is written by its name alone; see [Labels](#labels) for its table.
+  label inside a value is written by its name alone; see [Labels](#labels) for its table.
 - **Positions.** `at` is the step of a host line the guest observes outside its calls, including
   an export call's arrival; other lines have none. See [Steps](#steps).
 - **Copies.** A copy completes once, when both sides have acted, so it is one line. Copies are
@@ -216,10 +203,12 @@ the guest dropping `#future-7`, which `response.new` returned.
 A label names a handle by its table and its name, as WAVE writes it: its type and the handle's
 number in that table, e.g. `#fields-3` or `#stream-7`.
 
-- **Resources** are in the imports table, which holds them for both components. In record mode,
-  a host resource is labeled by the handle the imports component keeps for it, which the exports
-  component gets through `get-handle-*`; in fuzz and dialog modes, a mock by its handle, which
-  `_resource_new` gives it; in replay, a mock carries the trace's label.
+- **Resources** of the host are in the imports table, which holds them for both components. In
+  record mode, a host resource is labeled by the handle the imports component keeps for it, which
+  the exports component gets through `get-handle-*`; in fuzz and dialog modes, a mock by its
+  handle, which `_resource_new` gives it; in replay, a mock carries the trace's label. A resource
+  of the guest, which the exports component wraps, is in the exports table, e.g. the host's drop
+  of a session, `drop #session-1 (exports)`.
 - **Streams and futures** are labeled by the handle of the end the proxy received, which it keeps
   for the stream's lifetime: the host's reader in an import's result or an export's arguments, the
   guest's in an import's arguments or an export's result. The proxy pumps it through a pair of its
@@ -533,9 +522,13 @@ executor runs both.
   with the expected and the actual line.
 - **Divergence** can also show up as a stall, when nothing can reach the next line; wasmtime then
   traps with "deadlock detected", and the recorder prints the line it was waiting for.
-- **Recorder interface.** `proxy:recorder` gets functions to record and read the new lines.
-  Waiting for a step is the executor's, not the recorder's. The bundled recorder
-  (`assets/recorder*.wasm`) and the host recorder of `run` (`--use-host-recorder`) implement them.
+- **Recorder interface** (`assets/recorder.wit`): `types` mirrors the Rust types; `record`
+  records a line; `replay` has `next-host-line`, the next line the host performs on its own, e.g.
+  an export call, and `check`, which checks a guest line, and returns the host lines that answer
+  it at once, e.g. an import's `Return`. Waiting for a step is the executor's, not the recorder's;
+  phase 3 adds a way for the executor's jobs to take the host lines of their task or handle. The
+  bundled recorder (`assets/recorder*.wasm`) and the host recorder of `run`
+  (`--use-host-recorder`) implement it, with `Replay` of `crates/trace`.
 
 ## Correctness
 
@@ -647,7 +640,8 @@ depend on runtime patches. wasmtime 49 has the start of its own record and repla
 ## Phases
 
 1. **Spike, in wasmtime**: done, see [Spike results](#spike-results).
-2. **Trace format** in `crates/trace`, and the recorder interface.
+2. **Trace format** in `crates/trace`, and the recorder interface: done, for p2 record and
+   replay.
 3. **Replay**, tested on traces that fuzz mode writes in this format, as its executor can count
    steps too, and its mocks can label streams as record does, with the checks of
    [Correctness](#checking-the-implementation).

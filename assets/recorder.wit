@@ -1,14 +1,62 @@
 package proxy:recorder@0.1.0;
 
+// The lines of a trace, as `crates/trace` defines them (see `docs/p3-record-replay.md`, Trace
+// format). Values are WAVE text, e.g. `ok(#response-3)`.
+interface types {
+  enum party { host, guest }
+
+  // The generated component that numbers a handle or a task.
+  enum table { imports, exports }
+
+  // A call, numbered in order by the component that sees it.
+  record task-id { table: table, id: u32 }
+
+  // A handle, by its name as WAVE writes it, e.g. `#stream-7`.
+  record label { table: table, name: string }
+
+  record call { id: task-id, is-async: bool, %func: string, args: list<string> }
+  record return-value { id: task-id, value: option<string> }
+  record chunk { %stream: label, items: string }
+  record future-value { %future: label, value: string }
+
+  variant event {
+    // `by` is the caller.
+    call(call),
+    // The callee blocked before returning, so the caller got a subtask.
+    started(task-id),
+    %return(return-value),
+    cancel(task-id),
+    cancelled(task-id),
+    // The host wrote `items`, which the guest read.
+    write(chunk),
+    // The host read `items`, which the guest wrote.
+    read(chunk),
+    // A future's value was taken by its reader; `by` is the writer.
+    value(future-value),
+    // `by` is who dropped it.
+    drop(label),
+  }
+
+  // `at` is the step of a host line the guest observes outside its calls.
+  record line { by: party, at: option<u32>, event: event }
+}
+
 interface %record {
-  record-args: func(method: option<string>, args: list<string>, is-export: bool);
-  record-ret: func(method: option<string>, ret: option<string>, is-export: bool);
+  use types.{line};
+  // Records a line, in the order the proxy observes it.
+  %record: func(line: line);
 }
 
 interface replay {
-  replay-export: func() -> option<tuple<string, list<string>>>;
-  assert-export-ret: func(method: option<string>, ret: option<string>);
-  replay-import: func(method: option<string>, args: option<list<string>>) -> option<string>;
+  use types.{line};
+  // The next line the host performs on its own: in trace order, the first host line that doesn't
+  // answer a guest call, e.g. an export call, or the host's drop of a guest resource. `none` at
+  // the end of the trace. Traps if a guest line the guest hasn't done comes before it.
+  next-host-line: func() -> option<line>;
+  // Checks a guest line against the trace, and returns the host lines that answer it at once,
+  // e.g. the `return` of an import call. Traps on a mismatch, with the expected and the actual
+  // line.
+  check: func(line: line) -> list<line>;
 }
 
 // Async, so that it can await the main component's async exports, and run the jobs of
@@ -20,6 +68,11 @@ interface start-replay {
 world host {
   import %record;
   import replay;
+}
+
+// The types alone, which `crates/trace` generates its Rust types from.
+world trace {
+  import types;
 }
 
 world guest {

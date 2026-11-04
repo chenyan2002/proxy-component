@@ -431,14 +431,13 @@ impl ProxyTrait<'_> {
     fn get_proxy_path(&self, src_path: &[String]) -> Vec<String> {
         let from_export = src_path[0] == "exports";
         let mut res = crate::codegen::get_proxy_path(src_path);
-        if from_export {
-            assert!(self.state.module_paths.contains(&res));
-        } else if !self.state.module_paths.contains(&res) {
+        if !from_export && !self.state.module_paths.contains(&res) {
             res.remove(0);
-            assert!(self.state.module_paths.contains(&res));
-        } else {
-            assert!(self.state.module_paths.contains(&res));
-        };
+        }
+        assert!(
+            self.state.module_paths.contains(&res),
+            "no module {res:?} for the types of {src_path:?}"
+        );
         res
     }
 }

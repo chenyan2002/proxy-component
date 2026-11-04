@@ -26,14 +26,18 @@ impl exports::test::host::types::Guest for Stub {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&x)).unwrap());
         __params.push(wasm_wave::to_string(&ToValue::to_value(&y)).unwrap());
-        let wave = proxy::recorder::replay::replay_import(
-                Some("test:host/types@0.1.0.make-point"),
-                Some(&__params),
-            )
-            .unwrap();
+        let __id = trace_task_id(Table::Imports);
+        let __call = trace_call(
+            Party::Guest,
+            __id,
+            "test:host/types@0.1.0.make-point",
+            false,
+            __params,
+        );
+        let wave = trace_return_value(proxy::recorder::replay::check(&__call));
         let ret: Value = wasm_wave::from_str(
                 &<exports::test::host::types::Point as ValueTyped>::value_type(),
-                &wave,
+                &wave.unwrap(),
             )
             .unwrap();
         ret.to_rust()
@@ -45,17 +49,21 @@ impl exports::test::host::types::Guest for Stub {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
         __params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
-        let wave = proxy::recorder::replay::replay_import(
-                Some("test:host/types@0.1.0.check"),
-                Some(&__params),
-            )
-            .unwrap();
+        let __id = trace_task_id(Table::Imports);
+        let __call = trace_call(
+            Party::Guest,
+            __id,
+            "test:host/types@0.1.0.check",
+            false,
+            __params,
+        );
+        let wave = trace_return_value(proxy::recorder::replay::check(&__call));
         let ret: Value = wasm_wave::from_str(
                 &<::core::result::Result<
                     exports::test::host::types::Shape,
                     String,
                 > as ValueTyped>::value_type(),
-                &wave,
+                &wave.unwrap(),
             )
             .unwrap();
         ret.to_rust()
@@ -65,17 +73,21 @@ impl exports::test::host::types::Guest for Stub {
     ) -> ::core::result::Result<exports::test::host::types::Counter, String> {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
-        let wave = proxy::recorder::replay::replay_import(
-                Some("test:host/types@0.1.0.open"),
-                Some(&__params),
-            )
-            .unwrap();
+        let __id = trace_task_id(Table::Imports);
+        let __call = trace_call(
+            Party::Guest,
+            __id,
+            "test:host/types@0.1.0.open",
+            false,
+            __params,
+        );
+        let wave = trace_return_value(proxy::recorder::replay::check(&__call));
         let ret: Value = wasm_wave::from_str(
                 &<::core::result::Result<
                     exports::test::host::types::Counter,
                     String,
                 > as ValueTyped>::value_type(),
-                &wave,
+                &wave.unwrap(),
             )
             .unwrap();
         ret.to_rust()
@@ -85,12 +97,19 @@ impl exports::test::host::types::GuestCounter for MockedResource {
     fn new(start: u32) -> Self {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
-        let wave = proxy::recorder::replay::replay_import(
-                Some("new test:host/types/counter@0.1.0"),
-                Some(&__params),
+        let __id = trace_task_id(Table::Imports);
+        let __call = trace_call(
+            Party::Guest,
+            __id,
+            "new test:host/types/counter@0.1.0",
+            false,
+            __params,
+        );
+        let wave = trace_return_value(proxy::recorder::replay::check(&__call));
+        let ret: Value = wasm_wave::from_str(
+                &<Self as ValueTyped>::value_type(),
+                &wave.unwrap(),
             )
-            .unwrap();
-        let ret: Value = wasm_wave::from_str(&<Self as ValueTyped>::value_type(), &wave)
             .unwrap();
         MockedResource {
             name: "counter".to_string(),
@@ -101,12 +120,19 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         let mut __params: Vec<String> = vec![
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
-        let wave = proxy::recorder::replay::replay_import(
-                Some("test:host/types/counter@0.1.0.get"),
-                Some(&__params),
+        let __id = trace_task_id(Table::Imports);
+        let __call = trace_call(
+            Party::Guest,
+            __id,
+            "test:host/types/counter@0.1.0.get",
+            false,
+            __params,
+        );
+        let wave = trace_return_value(proxy::recorder::replay::check(&__call));
+        let ret: Value = wasm_wave::from_str(
+                &<u32 as ValueTyped>::value_type(),
+                &wave.unwrap(),
             )
-            .unwrap();
-        let ret: Value = wasm_wave::from_str(&<u32 as ValueTyped>::value_type(), &wave)
             .unwrap();
         ret.to_rust()
     }
@@ -115,10 +141,15 @@ impl exports::test::host::types::GuestCounter for MockedResource {
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
         __params.push(wasm_wave::to_string(&ToValue::to_value(&n)).unwrap());
-        let wave = proxy::recorder::replay::replay_import(
-            Some("test:host/types/counter@0.1.0.add"),
-            Some(&__params),
+        let __id = trace_task_id(Table::Imports);
+        let __call = trace_call(
+            Party::Guest,
+            __id,
+            "test:host/types/counter@0.1.0.add",
+            false,
+            __params,
         );
+        let wave = trace_return_value(proxy::recorder::replay::check(&__call));
         assert!(wave.is_none());
     }
     fn merge(
@@ -129,14 +160,18 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         __params.push(wasm_wave::to_string(&ToValue::to_value(&a)).unwrap());
         __params.push(wasm_wave::to_string(&ToValue::to_value(&b)).unwrap());
         let __ret = {
-            let wave = proxy::recorder::replay::replay_import(
-                    Some("test:host/types/counter@0.1.0.merge"),
-                    Some(&__params),
-                )
-                .unwrap();
+            let __id = trace_task_id(Table::Imports);
+            let __call = trace_call(
+                Party::Guest,
+                __id,
+                "test:host/types/counter@0.1.0.merge",
+                false,
+                __params,
+            );
+            let wave = trace_return_value(proxy::recorder::replay::check(&__call));
             let ret: Value = wasm_wave::from_str(
                     &<exports::test::host::types::Counter as ValueTyped>::value_type(),
-                    &wave,
+                    &wave.unwrap(),
                 )
                 .unwrap();
             ret.to_rust()
@@ -149,12 +184,10 @@ impl exports::test::host::types::GuestCounter for MockedResource {
     unsafe fn resource_from_raw_(handle: *mut Option<Self>) -> Option<Self> {
         if let Some(res) = *unsafe { Box::from_raw(handle) } {
             if !MOVING.with(|moving| moving.get()) {
-                let params = vec![wasm_wave::to_string(& res.to_value()).unwrap()];
-                let ret = proxy::recorder::replay::replay_import(
-                    Some("drop"),
-                    Some(&params),
+                let name = wasm_wave::to_string(&res.to_value()).unwrap();
+                proxy::recorder::replay::check(
+                    &trace_drop(Party::Guest, Table::Imports, name),
                 );
-                assert!(ret.is_none());
             }
         }
         None
@@ -164,10 +197,15 @@ impl exports::test::log0_1_0::sink::Guest for Stub {
     fn write(msg: String) -> () {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
-        let wave = proxy::recorder::replay::replay_import(
-            Some("test:log/sink@0.1.0.write"),
-            Some(&__params),
+        let __id = trace_task_id(Table::Imports);
+        let __call = trace_call(
+            Party::Guest,
+            __id,
+            "test:log/sink@0.1.0.write",
+            false,
+            __params,
         );
+        let wave = trace_return_value(proxy::recorder::replay::check(&__call));
         assert!(wave.is_none());
     }
 }
@@ -175,12 +213,19 @@ impl exports::test::log0_2_0::sink::Guest for Stub {
     fn write(msg: String) -> bool {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
-        let wave = proxy::recorder::replay::replay_import(
-                Some("test:log/sink@0.2.0.write"),
-                Some(&__params),
+        let __id = trace_task_id(Table::Imports);
+        let __call = trace_call(
+            Party::Guest,
+            __id,
+            "test:log/sink@0.2.0.write",
+            false,
+            __params,
+        );
+        let wave = trace_return_value(proxy::recorder::replay::check(&__call));
+        let ret: Value = wasm_wave::from_str(
+                &<bool as ValueTyped>::value_type(),
+                &wave.unwrap(),
             )
-            .unwrap();
-        let ret: Value = wasm_wave::from_str(&<bool as ValueTyped>::value_type(), &wave)
             .unwrap();
         ret.to_rust()
     }
@@ -448,6 +493,68 @@ impl ToRust<MockedResource> for Value {
             .expect("invalid handle label");
         MockedResource { handle, name }
     }
+}
+use bindings::proxy::recorder::types::*;
+thread_local! {
+    static TASK_ID : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+}
+#[allow(dead_code)]
+fn trace_task_id(table: Table) -> TaskId {
+    let id = TASK_ID
+        .with(|id| {
+            id.set(id.get() + 1);
+            id.get()
+        });
+    TaskId { table, id }
+}
+#[allow(dead_code)]
+fn trace_call(
+    by: Party,
+    id: TaskId,
+    func: &str,
+    is_async: bool,
+    args: Vec<String>,
+) -> Line {
+    let call = Call {
+        id,
+        is_async,
+        func: func.to_string(),
+        args,
+    };
+    Line {
+        by,
+        at: None,
+        event: Event::Call(call),
+    }
+}
+#[allow(dead_code)]
+fn trace_return(by: Party, id: TaskId, value: Option<String>) -> Line {
+    let ret = ReturnValue { id, value };
+    Line {
+        by,
+        at: None,
+        event: Event::Return(ret),
+    }
+}
+#[allow(dead_code)]
+fn trace_drop(by: Party, table: Table, name: String) -> Line {
+    let label = Label { table, name };
+    Line {
+        by,
+        at: None,
+        event: Event::Drop(label),
+    }
+}
+/// The value of the `return` among the host's answers to a call.
+#[allow(dead_code)]
+fn trace_return_value(answers: Vec<Line>) -> Option<String> {
+    answers
+        .into_iter()
+        .find_map(|line| match line.event {
+            Event::Return(ret) => Some(ret.value),
+            _ => None,
+        })
+        .expect("the trace doesn't answer the call")
 }
 thread_local! {
     #[allow(dead_code)] static MOVING : std::cell::Cell < bool > = const {

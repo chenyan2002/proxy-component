@@ -22,22 +22,25 @@ impl exports::proxy::conversion::conversion::Guest for Stub {
 impl exports::wrapped_test::host::types::Guest for Stub {
     type Counter = test::host::types::Counter;
     fn make_point(x: i32, y: i32) -> exports::wrapped_test::host::types::Point {
+        let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
         let x = x.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&x)).unwrap());
         let y = y.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&y)).unwrap());
-        proxy::recorder::record::record_args(
-            Some("test:host/types@0.1.0.make-point"),
-            &params,
-            false,
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "test:host/types@0.1.0.make-point",
+                false,
+                params,
+            ),
         );
         let res = test::host::types::make_point(x, y);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-        proxy::recorder::record::record_ret(
-            Some("test:host/types@0.1.0.make-point"),
-            Some(&wave_res),
-            false,
+        proxy::recorder::record::record(
+            &trace_return(Party::Host, __id, Some(wave_res)),
         );
         res.to_proxy()
     }
@@ -45,168 +48,165 @@ impl exports::wrapped_test::host::types::Guest for Stub {
         p: exports::wrapped_test::host::types::Perms,
         c: exports::wrapped_test::host::types::Color,
     ) -> ::core::result::Result<exports::wrapped_test::host::types::Shape, String> {
+        let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
         let p = p.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
         let c = c.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
-        proxy::recorder::record::record_args(
-            Some("test:host/types@0.1.0.check"),
-            &params,
-            false,
+        proxy::recorder::record::record(
+            &trace_call(Party::Guest, __id, "test:host/types@0.1.0.check", false, params),
         );
         let res = test::host::types::check(p, c);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-        proxy::recorder::record::record_ret(
-            Some("test:host/types@0.1.0.check"),
-            Some(&wave_res),
-            false,
+        proxy::recorder::record::record(
+            &trace_return(Party::Host, __id, Some(wave_res)),
         );
         res.to_proxy()
     }
     fn open(
         name: String,
     ) -> ::core::result::Result<exports::wrapped_test::host::types::Counter, String> {
+        let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
         let name = name.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
-        proxy::recorder::record::record_args(
-            Some("test:host/types@0.1.0.open"),
-            &params,
-            false,
+        proxy::recorder::record::record(
+            &trace_call(Party::Guest, __id, "test:host/types@0.1.0.open", false, params),
         );
         let res = test::host::types::open(&name);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-        proxy::recorder::record::record_ret(
-            Some("test:host/types@0.1.0.open"),
-            Some(&wave_res),
-            false,
+        proxy::recorder::record::record(
+            &trace_return(Party::Host, __id, Some(wave_res)),
         );
         res.to_proxy()
     }
 }
 impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Counter {
     fn new(start: u32) -> Self {
+        let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
         let start = start.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
-        proxy::recorder::record::record_args(
-            Some("new test:host/types/counter@0.1.0"),
-            &params,
-            false,
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "new test:host/types/counter@0.1.0",
+                false,
+                params,
+            ),
         );
         let res = Self::new(start);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-        proxy::recorder::record::record_ret(
-            Some("new test:host/types/counter@0.1.0"),
-            Some(&wave_res),
-            false,
+        proxy::recorder::record::record(
+            &trace_return(Party::Host, __id, Some(wave_res)),
         );
         res
     }
     fn get(&self) -> u32 {
+        let __id = trace_task_id(Table::Imports);
         let params: Vec<String> = vec![
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
-        proxy::recorder::record::record_args(
-            Some("test:host/types/counter@0.1.0.get"),
-            &params,
-            false,
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "test:host/types/counter@0.1.0.get",
+                false,
+                params,
+            ),
         );
         let res = self.get();
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-        proxy::recorder::record::record_ret(
-            Some("test:host/types/counter@0.1.0.get"),
-            Some(&wave_res),
-            false,
+        proxy::recorder::record::record(
+            &trace_return(Party::Host, __id, Some(wave_res)),
         );
         res.to_proxy()
     }
     fn add(&self, n: u32) -> () {
+        let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = vec![
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
         let n = n.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&n)).unwrap());
-        proxy::recorder::record::record_args(
-            Some("test:host/types/counter@0.1.0.add"),
-            &params,
-            false,
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "test:host/types/counter@0.1.0.add",
+                false,
+                params,
+            ),
         );
         self.add(n);
-        proxy::recorder::record::record_ret(
-            Some("test:host/types/counter@0.1.0.add"),
-            None,
-            false,
-        );
+        proxy::recorder::record::record(&trace_return(Party::Host, __id, None));
     }
     fn merge(
         a: exports::wrapped_test::host::types::CounterBorrow<'_>,
         b: exports::wrapped_test::host::types::Counter,
     ) -> exports::wrapped_test::host::types::Counter {
+        let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
         let a = a.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&a)).unwrap());
         let b = b.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&b)).unwrap());
-        proxy::recorder::record::record_args(
-            Some("test:host/types/counter@0.1.0.merge"),
-            &params,
-            false,
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "test:host/types/counter@0.1.0.merge",
+                false,
+                params,
+            ),
         );
         let res = Self::merge(&a, b);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-        proxy::recorder::record::record_ret(
-            Some("test:host/types/counter@0.1.0.merge"),
-            Some(&wave_res),
-            false,
+        proxy::recorder::record::record(
+            &trace_return(Party::Host, __id, Some(wave_res)),
         );
         res.to_proxy()
     }
     unsafe fn resource_from_raw_(handle: *mut Option<Self>) -> Option<Self> {
         if let Some(res) = *unsafe { Box::from_raw(handle) } {
-            let params = vec![wasm_wave::to_string(& res.to_value()).unwrap()];
-            proxy::recorder::record::record_args(Some("drop"), &params, false);
+            let name = wasm_wave::to_string(&res.to_value()).unwrap();
+            proxy::recorder::record::record(
+                &trace_drop(Party::Guest, Table::Imports, name),
+            );
             drop(res);
-            proxy::recorder::record::record_ret(Some("drop"), None, false);
         }
         None
     }
 }
 impl exports::wrapped_test::log0_1_0::sink::Guest for Stub {
     fn write(msg: String) -> () {
+        let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
         let msg = msg.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
-        proxy::recorder::record::record_args(
-            Some("test:log/sink@0.1.0.write"),
-            &params,
-            false,
+        proxy::recorder::record::record(
+            &trace_call(Party::Guest, __id, "test:log/sink@0.1.0.write", false, params),
         );
         test::log0_1_0::sink::write(&msg);
-        proxy::recorder::record::record_ret(
-            Some("test:log/sink@0.1.0.write"),
-            None,
-            false,
-        );
+        proxy::recorder::record::record(&trace_return(Party::Host, __id, None));
     }
 }
 impl exports::wrapped_test::log0_2_0::sink::Guest for Stub {
     fn write(msg: String) -> bool {
+        let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
         let msg = msg.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
-        proxy::recorder::record::record_args(
-            Some("test:log/sink@0.2.0.write"),
-            &params,
-            false,
+        proxy::recorder::record::record(
+            &trace_call(Party::Guest, __id, "test:log/sink@0.2.0.write", false, params),
         );
         let res = test::log0_2_0::sink::write(&msg);
         let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-        proxy::recorder::record::record_ret(
-            Some("test:log/sink@0.2.0.write"),
-            Some(&wave_res),
-            false,
+        proxy::recorder::record::record(
+            &trace_return(Party::Host, __id, Some(wave_res)),
         );
         res.to_proxy()
     }
@@ -1278,4 +1278,66 @@ impl<
         >(x) else { unreachable!() };
         Ok(x)
     }
+}
+use bindings::proxy::recorder::types::*;
+thread_local! {
+    static TASK_ID : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+}
+#[allow(dead_code)]
+fn trace_task_id(table: Table) -> TaskId {
+    let id = TASK_ID
+        .with(|id| {
+            id.set(id.get() + 1);
+            id.get()
+        });
+    TaskId { table, id }
+}
+#[allow(dead_code)]
+fn trace_call(
+    by: Party,
+    id: TaskId,
+    func: &str,
+    is_async: bool,
+    args: Vec<String>,
+) -> Line {
+    let call = Call {
+        id,
+        is_async,
+        func: func.to_string(),
+        args,
+    };
+    Line {
+        by,
+        at: None,
+        event: Event::Call(call),
+    }
+}
+#[allow(dead_code)]
+fn trace_return(by: Party, id: TaskId, value: Option<String>) -> Line {
+    let ret = ReturnValue { id, value };
+    Line {
+        by,
+        at: None,
+        event: Event::Return(ret),
+    }
+}
+#[allow(dead_code)]
+fn trace_drop(by: Party, table: Table, name: String) -> Line {
+    let label = Label { table, name };
+    Line {
+        by,
+        at: None,
+        event: Event::Drop(label),
+    }
+}
+/// The value of the `return` among the host's answers to a call.
+#[allow(dead_code)]
+fn trace_return_value(answers: Vec<Line>) -> Option<String> {
+    answers
+        .into_iter()
+        .find_map(|line| match line.event {
+            Event::Return(ret) => Some(ret.value),
+            _ => None,
+        })
+        .expect("the trace doesn't answer the call")
 }

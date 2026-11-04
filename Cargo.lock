@@ -1386,6 +1386,7 @@ dependencies = [
  "prettyplease 0.2.37",
  "proc-macro2",
  "quote",
+ "serde",
  "syn 2.0.119",
  "tempfile",
  "trace",
@@ -1483,7 +1484,6 @@ name = "recorder"
 version = "0.1.0"
 dependencies = [
  "libc-alloc",
- "serde_json",
  "trace",
  "wit-bindgen 0.63.0",
 ]
@@ -1876,6 +1876,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "wit-bindgen 0.63.0",
 ]
 
 [[package]]

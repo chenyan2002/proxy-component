@@ -14,8 +14,15 @@ impl State {
         let wit_func = self.expect_wit_func(module_path, resource, func_name);
         let kind = wit_func.kind;
         let display_name = &wit_func.display_name;
+        let is_async = wit_func.is_async;
         let args = extract_arg_info(sig);
         let ret_ty = get_return_type(&sig.output);
+        // Checks the call, and takes the value of the `return` that answers it.
+        let check_call = quote! {
+            let __id = trace_task_id(Table::Imports);
+            let __call = trace_call(Party::Guest, __id, #display_name, #is_async, __params);
+            let wave = trace_return_value(proxy::recorder::replay::check(&__call));
+        };
         let replay_import = if let Some(ret_ty) = ret_ty {
             let to_rust = match wit_func.constructor_resource() {
                 Some(name) => {
@@ -24,13 +31,13 @@ impl State {
                 None => quote! { ret.to_rust() },
             };
             quote! {
-                let wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&__params)).unwrap();
-                let ret: Value = wasm_wave::from_str(&<#ret_ty as ValueTyped>::value_type(), &wave).unwrap();
+                #check_call
+                let ret: Value = wasm_wave::from_str(&<#ret_ty as ValueTyped>::value_type(), &wave.unwrap()).unwrap();
                 #to_rust
             }
         } else {
             quote! {
-                let wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&__params));
+                #check_call
                 assert!(wave.is_none());
             }
         };
@@ -62,17 +69,15 @@ impl State {
         }
     }
     /// Overrides wit-bindgen's `resource_from_raw_`, which the `[dtor]` of a mocked resource
-    /// calls, to check the drop with the trace.
+    /// calls, to check the guest's drop with the trace.
     pub fn generate_replay_drop(&self) -> syn::ImplItemFn {
-        let drop_name = trace::DROP;
         parse_quote! {
             unsafe fn resource_from_raw_(handle: *mut Option<Self>) -> Option<Self> {
                 // `None` if `into_inner` moved the resource out: not a drop.
                 if let Some(res) = *unsafe { Box::from_raw(handle) } {
                     if !MOVING.with(|moving| moving.get()) {
-                        let params = vec![wasm_wave::to_string(&res.to_value()).unwrap()];
-                        let ret = proxy::recorder::replay::replay_import(Some(#drop_name), Some(&params));
-                        assert!(ret.is_none());
+                        let name = wasm_wave::to_string(&res.to_value()).unwrap();
+                        proxy::recorder::replay::check(&trace_drop(Party::Guest, Table::Imports, name));
                     }
                 }
                 None
@@ -98,10 +103,9 @@ impl State {
         };
         file.items
     }
-    /// The arm of the `start` function dropping a resource of the main component, which the
-    /// trace labels by its handle in this component, e.g. `#session-1`.
+    /// The arm of the `start` function for the host's drop of a resource of the main component,
+    /// which the trace labels by its handle in this component, e.g. `#session-1`.
     fn replay_export_drop(&self) -> Option<proc_macro2::TokenStream> {
-        let drop_name = trace::DROP;
         let resources: Vec<_> = self
             .types
             .iter()
@@ -125,8 +129,9 @@ impl State {
             }
         });
         Some(quote! {
-            #drop_name => {
-                let (name, handle) = args[0]
+            Event::Drop(label) => {
+                let (name, handle) = label
+                    .name
                     .strip_prefix('#')
                     .and_then(|label| label.rsplit_once('-'))
                     .and_then(|(name, handle)| Some((name, handle.parse::<u32>().ok()?)))
@@ -135,7 +140,6 @@ impl State {
                     #(#arms)*
                     _ => unreachable!(),
                 }
-                proxy::recorder::replay::assert_export_ret(Some(#drop_name), None);
             }
         })
     }
@@ -151,15 +155,16 @@ impl State {
                 ..
             } = func;
             let arg_idx = (0..arg_names.len()).map(|idx| quote! { args[#idx] });
+            // The export call's id is the trace's, as the trace makes the call.
             let assert_ret = if has_ret {
                 quote! {
                     let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                    proxy::recorder::replay::assert_export_ret(Some(#display_name), Some(&wave_res));
+                    proxy::recorder::replay::check(&trace_return(Party::Guest, __id, Some(wave_res)));
                 }
             } else {
                 quote! {
                     assert!(res == ());
-                    proxy::recorder::replay::assert_export_ret(Some(#display_name), None);
+                    proxy::recorder::replay::check(&trace_return(Party::Guest, __id, None));
                 }
             };
             // The host keeps the resources it gets, until the trace drops them.
@@ -184,11 +189,16 @@ impl State {
         self.generate_start(
             sig,
             quote! {
-                while let Some((method, args)) = proxy::recorder::replay::replay_export() {
-                    match method.as_str() {
-                        #(#arms)*
+                while let Some(line) = proxy::recorder::replay::next_host_line() {
+                    match line.event {
+                        Event::Call(Call { id: __id, func, args, .. }) => {
+                            match func.as_str() {
+                                #(#arms)*
+                                _ => unreachable!("the trace calls an unknown export {func}"),
+                            }
+                        }
                         #drop_arm
-                        _ => unreachable!(),
+                        event => unreachable!("the host can't do {event:?} in a p2 trace"),
                     }
                     // clean up borrowed resources from input args
                     SCOPED_ALLOC.with(|alloc| {

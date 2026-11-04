@@ -67,7 +67,7 @@ test-fixture:
 	wac compose $(FIXTURE)/compose.wac -d test:mockhost=$(FIXTURE_WASM)/proxy_host.wasm -d test:driver=$(FIXTURE_WASM)/proxy_driver.wasm -d test:main=composed.wasm -o $(FIXTURE_OUT)/record.wasm
 	$(WASMTIME) --invoke 'run()' $(FIXTURE_OUT)/record.wasm > $(FIXTURE_OUT)/trace.out
 	# the host's drops of the guest's sessions
-	grep -c '"ExportArgs":{"method":"drop"' $(FIXTURE_OUT)/trace.out | grep -qx 2
+	grep -c '"by":"Host","at":null,"event":{"Drop"' $(FIXTURE_OUT)/trace.out | grep -qx 2
 	$(INSTRUMENT) -m replay $(FIXTURE_WASM)/proxy_guest.wasm
 	$(WASMTIME) --invoke 'start()' composed.wasm < $(FIXTURE_OUT)/trace.out
 	$(INSTRUMENT) -m replay --use-host-recorder $(FIXTURE_WASM)/proxy_guest.wasm
