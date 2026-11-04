@@ -5,6 +5,30 @@ bindings::export!(Stub with_types_in bindings);
 impl exports::proxy::recorder::start_replay::Guest for Stub {
     async fn start() -> () {
         let __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
+        /// Calls an async export, and records that the guest started it, if it blocks.
+        #[allow(dead_code)]
+        async fn call_export<T>(
+            id: TaskId,
+            call: impl std::future::Future<Output = T>,
+        ) -> T {
+            let mut call = std::pin::pin!(call);
+            let mut started = false;
+            std::future::poll_fn(|cx| {
+                    let poll = call.as_mut().poll(cx);
+                    if poll.is_pending() && !started {
+                        started = true;
+                        proxy::recorder::record::record(
+                            &Line {
+                                by: Party::Guest,
+                                at: None,
+                                event: Event::Started(id),
+                            },
+                        );
+                    }
+                    poll
+                })
+                .await
+        }
         let __buf = proxy::util::debug::get_random();
         let mut u = Unstructured::new(&__buf);
         for _ in 0..10 {
@@ -16,13 +40,32 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
                     let c: test::guest::api::Counter = Fuzz::fuzz(&mut u).unwrap();
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:guest/api@0.1.0.run", __params
-                            .join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:guest/api@0.1.0.run",
+                                false,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = test::guest::api::run(&p, &c);
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    let _ = test::guest::api::run(&p, &c);
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -31,13 +74,32 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let mut __params: Vec<String> = Vec::new();
                     let s: test::guest::api::Shape = Fuzz::fuzz(&mut u).unwrap();
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&s)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:guest/api@0.1.0.classify", __params
-                            .join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:guest/api@0.1.0.classify",
+                                false,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = test::guest::api::classify(&s);
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    let _ = test::guest::api::classify(&s);
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -46,13 +108,32 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let mut __params: Vec<String> = Vec::new();
                     let c: test::guest::api::Counter = Fuzz::fuzz(&mut u).unwrap();
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:guest/api@0.1.0.begin", __params
-                            .join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:guest/api@0.1.0.begin",
+                                false,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = test::guest::api::begin(c);
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    let _ = test::guest::api::begin(c);
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -62,13 +143,32 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let name: String = Fuzz::fuzz(&mut u).unwrap();
                     __params
                         .push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "new test:guest/api/session@0.1.0",
-                            __params.join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "new test:guest/api/session@0.1.0",
+                                false,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = test::guest::api::Session::new(&name);
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    let _ = test::guest::api::Session::new(&name);
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -79,13 +179,32 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&x)).unwrap());
                     let y: i32 = Fuzz::fuzz(&mut u).unwrap();
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&y)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:host/types@0.1.0.make-point",
-                            __params.join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:host/types@0.1.0.make-point",
+                                false,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = test::host::types::make_point(x, y);
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    let _ = test::host::types::make_point(x, y);
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -96,13 +215,32 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
                     let c: test::host::types::Color = Fuzz::fuzz(&mut u).unwrap();
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:host/types@0.1.0.check", __params
-                            .join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:host/types@0.1.0.check",
+                                false,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = test::host::types::check(p, c);
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    let _ = test::host::types::check(p, c);
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -112,13 +250,32 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let name: String = Fuzz::fuzz(&mut u).unwrap();
                     __params
                         .push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:host/types@0.1.0.open", __params
-                            .join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:host/types@0.1.0.open",
+                                false,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = test::host::types::open(&name);
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    let _ = test::host::types::open(&name);
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -128,13 +285,32 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let start: u32 = Fuzz::fuzz(&mut u).unwrap();
                     __params
                         .push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "new test:host/types/counter@0.1.0",
-                            __params.join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "new test:host/types/counter@0.1.0",
+                                false,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = test::host::types::Counter::new(start);
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    let _ = test::host::types::Counter::new(start);
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -145,23 +321,38 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&a)).unwrap());
                     let b: test::host::types::Counter = Fuzz::fuzz(&mut u).unwrap();
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&b)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:host/types/counter@0.1.0.merge",
-                            __params.join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:host/types/counter@0.1.0.merge",
+                                false,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = test::host::types::Counter::merge(&a, b);
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    let _ = test::host::types::Counter::merge(&a, b);
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
                 }
                 _ => unreachable!(),
             }
-            SCOPED_ALLOC
-                .with(|alloc| {
-                    alloc.borrow_mut().clear();
-                });
         }
         join_spawned().await;
         proxy::conversion::executor::stop();
@@ -389,6 +580,16 @@ impl Fuzz for test::guest::api::Session {
             cannot_mock()
         })
     }
+    fn consume(self, _u: &mut Unstructured<'_>) {
+        let name = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+        let line = trace_drop(Party::Host, TRACE_TABLE, name);
+        proxy::recorder::record::record(
+            &Line {
+                at: Some(trace_at()),
+                ..line
+            },
+        );
+    }
 }
 impl<'a> Fuzz for &'a test::guest::api::Session {
     fn fuzz(_u: &mut Unstructured<'_>) -> Result<Self> {
@@ -418,6 +619,12 @@ impl Fuzz for test::host::types::Point {
             label: Fuzz::fuzz(u)?,
         })
     }
+    #[allow(unused_variables)]
+    fn consume(self, u: &mut Unstructured<'_>) {
+        Fuzz::consume(self.x, u);
+        Fuzz::consume(self.y, u);
+        Fuzz::consume(self.label, u);
+    }
 }
 impl Fuzz for test::host::types::Shape {
     fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
@@ -430,6 +637,15 @@ impl Fuzz for test::host::types::Shape {
             _ => unreachable!(),
         }
     }
+    #[allow(unused_variables)]
+    fn consume(self, u: &mut Unstructured<'_>) {
+        match self {
+            test::host::types::Shape::Circle(x) => Fuzz::consume(x, u),
+            test::host::types::Shape::Rect(x) => Fuzz::consume(x, u),
+            test::host::types::Shape::HttpError(x) => Fuzz::consume(x, u),
+            test::host::types::Shape::Empty => {}
+        }
+    }
 }
 impl Fuzz for test::host::types::Color {
     fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
@@ -439,6 +655,14 @@ impl Fuzz for test::host::types::Color {
             1usize => Ok(test::host::types::Color::Green),
             2usize => Ok(test::host::types::Color::DnsBlue),
             _ => unreachable!(),
+        }
+    }
+    #[allow(unused_variables)]
+    fn consume(self, u: &mut Unstructured<'_>) {
+        match self {
+            test::host::types::Color::Red => {}
+            test::host::types::Color::Green => {}
+            test::host::types::Color::DnsBlue => {}
         }
     }
 }
@@ -489,7 +713,7 @@ trait Fuzz: Sized {
 impl Fuzz for MockedResource {
     fn fuzz(_u: &mut Unstructured<'_>) -> Result<Self> {
         Ok(Self {
-            handle: 0,
+            handle: next_mock_label(),
             name: "mocked-resource".to_string(),
         })
     }
@@ -560,9 +784,95 @@ impl Fuzz for wit_bindgen::rt::async_support::ErrorContext {
         Ok(Self::new(&String::fuzz(u)?))
     }
 }
+use bindings::proxy::recorder::types::*;
 thread_local! {
-    #[allow(dead_code)] static PENDING_RET : std::cell::Cell < bool > = const {
+    static TASK_ID : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+}
+#[allow(dead_code)]
+fn trace_task_id(table: Table) -> TaskId {
+    let id = TASK_ID
+        .with(|id| {
+            id.set(id.get() + 1);
+            id.get()
+        });
+    TaskId { table, id }
+}
+#[allow(dead_code)]
+fn trace_call(
+    by: Party,
+    id: TaskId,
+    func: &str,
+    is_async: bool,
+    args: Vec<String>,
+) -> Line {
+    let call = Call {
+        id,
+        is_async,
+        func: func.to_string(),
+        args,
+    };
+    Line {
+        by,
+        at: None,
+        event: Event::Call(call),
+    }
+}
+#[allow(dead_code)]
+fn trace_return(by: Party, id: TaskId, value: Option<String>) -> Line {
+    let ret = ReturnValue { id, value };
+    Line {
+        by,
+        at: None,
+        event: Event::Return(ret),
+    }
+}
+#[allow(dead_code)]
+fn trace_drop(by: Party, table: Table, name: String) -> Line {
+    let label = Label { table, name };
+    Line {
+        by,
+        at: None,
+        event: Event::Drop(label),
+    }
+}
+/// The value of the `return` among the host's answers to a call.
+#[allow(dead_code)]
+fn trace_return_value(answers: Vec<Line>) -> Option<String> {
+    answers
+        .into_iter()
+        .find_map(|line| match line.event {
+            Event::Return(ret) => Some(ret.value),
+            _ => None,
+        })
+        .expect("the trace doesn't answer the call")
+}
+#[allow(dead_code)]
+const TRACE_TABLE: Table = Table::Exports;
+#[allow(dead_code)]
+fn trace_at() -> u32 {
+    proxy::conversion::executor::step()
+}
+#[allow(dead_code)]
+fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
+    proxy::conversion::executor::host_drops(true);
+    let res = f();
+    proxy::conversion::executor::host_drops(false);
+    res
+}
+thread_local! {
+    #[allow(dead_code)] static MOVING : std::cell::Cell < bool > = const {
     std::cell::Cell::new(false) };
+}
+thread_local! {
+    static MOCK_LABEL : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+    static HOST_DROP_AT : std::cell::Cell < Option < u32 >> = const {
+    std::cell::Cell::new(None) };
+}
+/// The label of a new mock.
+#[allow(dead_code)]
+fn next_mock_label() -> u32 {
+    MOCK_LABEL.set(MOCK_LABEL.get() + 1);
+    MOCK_LABEL.get()
 }
 thread_local! {
     static SPAWNED : std::cell::RefCell < Vec < wit_bindgen::JoinHandle < () >> > = const

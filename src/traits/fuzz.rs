@@ -1,6 +1,6 @@
 use crate::codegen::util::make_path;
 use crate::codegen::wit::WitType;
-use crate::traits::{Trait, new_mock};
+use crate::traits::{Trait, host_end_defs, new_mock};
 use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
@@ -25,11 +25,25 @@ impl Trait for FuzzTrait {
         if in_import {
             // The imports component, which makes the mock, labels it by its handle.
             let mock = new_mock(wit, quote! { 0 });
+            // A resource of the guest, which the host gets from an export, and drops; the host
+            // keeps its own resources, which the guest gives back, as no one sees their drop.
+            let consume = if wit.conversion.is_none() {
+                quote! {
+                    fn consume(self, _u: &mut Unstructured<'_>) {
+                        let name = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+                        let line = trace_drop(Party::Host, TRACE_TABLE, name);
+                        proxy::recorder::record::record(&Line { at: Some(trace_at()), ..line });
+                    }
+                }
+            } else {
+                quote! {}
+            };
             res.push(parse_quote! {
             impl Fuzz for #resource_path {
                 fn fuzz(_u: &mut Unstructured<'_>) -> Result<Self> {
                     Ok(#mock)
                 }
+                #consume
             }
             });
             res.push(parse_quote! {
@@ -47,9 +61,8 @@ impl Trait for FuzzTrait {
             res.push(parse_quote! {
             impl Fuzz for #resource_path {
                 fn fuzz(_u: &mut Unstructured<'_>) -> Result<Self> {
-                    // `_resource_new` gives it its handle.
                     Ok(#resource_path::new(MockedResource {
-                        handle: 0,
+                        handle: next_mock_label(),
                         name: #wit_name.to_string(),
                     }))
                 }
@@ -89,6 +102,10 @@ impl Trait for FuzzTrait {
                     #(#field_names: Fuzz::fuzz(u)?),*
                 })
             }
+            #[allow(unused_variables)]
+            fn consume(self, u: &mut Unstructured<'_>) {
+                #(Fuzz::consume(self.#field_names, u);)*
+            }
         }
         }]
     }
@@ -112,6 +129,14 @@ impl Trait for FuzzTrait {
                 syn::Fields::Named(_) => unreachable!(),
             }
         });
+        let consume_arms = enum_item.variants.iter().map(|variant| {
+            let tag = &variant.ident;
+            match &variant.fields {
+                syn::Fields::Unit => quote! { #enum_name::#tag => {} },
+                syn::Fields::Unnamed(_) => quote! { #enum_name::#tag(x) => Fuzz::consume(x, u) },
+                syn::Fields::Named(_) => unreachable!(),
+            }
+        });
         let variant_len = enum_item.variants.len();
         vec![parse_quote! {
         impl #impl_generics Fuzz for #enum_name #ty_generics #where_clause {
@@ -120,6 +145,12 @@ impl Trait for FuzzTrait {
                 match idx {
                     #(#arms),*,
                     _ => unreachable!(),
+                }
+            }
+            #[allow(unused_variables)]
+            fn consume(self, u: &mut Unstructured<'_>) {
+                match self {
+                    #(#consume_arms),*
                 }
             }
         }
@@ -160,16 +191,17 @@ impl Trait for FuzzTrait {
           trait Fuzz: Sized {
               // A value the virtualized host gives the guest.
               fn fuzz(u: &mut Unstructured<'_>) -> Result<Self>;
-              // What the virtualized host does with a value the guest gives it: by default, drop it.
-              // Only streams and futures override it, which p2 worlds don't have.
+              // What the virtualized host does with a value the guest gives it: by default, drop
+              // it. Streams and futures override it, and the guest's resources, whose drop the
+              // host records; records, variants and the like pass it on to their parts.
               #[allow(dead_code)]
               fn consume(self, _u: &mut Unstructured<'_>) {}
           }
           impl Fuzz for MockedResource {
               fn fuzz(_u: &mut Unstructured<'_>) -> Result<Self> {
-                  // A constructor's, which `_resource_new` gives its handle.
+                  // A constructor's.
                   Ok(Self {
-                      handle: 0,
+                      handle: next_mock_label(),
                       name: "mocked-resource".to_string(),
                   })
               }
@@ -255,45 +287,71 @@ impl Trait for FuzzTrait {
 impl FuzzTrait {
     /// `Fuzz` for streams, futures and error-contexts. The bindings only have the `wit_stream`
     /// and `wit_future` modules for them if the world has streams or futures. Their labels, e.g.
-    /// `#stream-1`, are their handles, as for resources.
+    /// `#stream-1`, are the handles of the ends the component keeps: the reader of one the guest
+    /// gives, and the writer of one the host gives, which `label_by_writer` also prints its
+    /// reader by.
     ///
     /// The virtualized host writes the streams and futures it gives the guest, and reads those
-    /// the guest gives it, in jobs of `assets/executor.rs`. What it writes, and how it reads,
-    /// e.g. whether it reads to the end, is fuzzed when the value changes hands.
+    /// the guest gives it, in jobs of `assets/executor.rs`, which record each copy, value and
+    /// drop. What it writes, and how it reads, e.g. whether it reads to the end, is fuzzed when
+    /// the value changes hands.
     fn async_defs(&self) -> Vec<Item> {
-        let mut items = Vec::new();
+        let mut items = host_end_defs(self.has_streams, self.has_futures);
+        if self.has_streams || self.has_futures {
+            let ast: syn::File = parse_quote! {
+              /// The label of a stream or future, by the end this component keeps.
+              fn label_of(end: &impl ToValue) -> Label {
+                  Label { table: TRACE_TABLE, name: handle_label(end) }
+              }
+              /// A host line, in step `at`, in which its job made it, e.g. issued the write the
+              /// guest read; or, by default, in the current one.
+              fn host_line_at(at: u32, event: Event) -> Line {
+                  Line { by: Party::Host, at: Some(at), event }
+              }
+              fn host_line(event: Event) -> Line {
+                  host_line_at(trace_at(), event)
+              }
+              fn guest_line(event: Event) -> Line {
+                  Line { by: Party::Guest, at: None, event }
+              }
+            };
+            items.extend(ast.items);
+        }
         if self.has_streams {
             let ast: syn::File = parse_quote! {
               impl<T> Fuzz for wit_bindgen::StreamReader<T>
               where
                   T: Fuzz + ToValue + ValueTyped + wit_stream::StreamPayload,
               {
-                  // Writes fuzzed chunks, then ends the stream.
+                  // Writes fuzzed chunks, then ends the stream. A line is a chunk, which the
+                  // guest may read in several copies.
                   fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
-                      let (mut writer, reader) = wit_stream::new::<T>();
-                      // The host keeps the writer, so it labels the stream for its lifetime; the
-                      // reader moves on to the guest, which frees its handle.
-                      let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
-                      let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
-                      proxy::util::debug::print(&format!("new (writer: {label}, reader: {reader_label})"));
+                      let (mut writer, reader, name) = host_stream::<T>();
+                      let label = Label { table: TRACE_TABLE, name };
                       let chunks: Vec<Vec<T>> = Fuzz::fuzz(u)?;
                       spawn(async move {
-                          for chunk in chunks.into_iter().filter(|chunk| !chunk.is_empty()) {
+                          let mut chunks = chunks.into_iter().filter(|chunk| !chunk.is_empty());
+                          while let Some(chunk) = chunks.next() {
                               let items = wasm_wave::to_string(&chunk.to_value()).unwrap();
-                              if !writer.write_all(chunk).await.is_empty() {
-                                  proxy::util::debug::print(&format!("{label} dropped by guest"));
+                              let at = trace_at();
+                              let rest = writer.write_all(chunk).await;
+                              if !rest.is_empty() {
+                                  proxy::recorder::record::record(&guest_line(Event::Drop(label)));
+                                  host_dropping(move || drop((rest, chunks.collect::<Vec<_>>())));
                                   return;
                               }
-                              proxy::util::debug::print(&format!("{label}.read() = {items}"));
+                              let chunk = Chunk { stream: label.clone(), items };
+                              proxy::recorder::record::record(&host_line_at(at, Event::Write(chunk)));
                           }
-                          proxy::util::debug::print(&format!("{label}.read() = dropped"));
+                          drop(writer);
+                          proxy::recorder::record::record(&host_line(Event::Drop(label)));
                       });
                       Ok(reader)
                   }
                   // Mostly reads to the end; otherwise reads a few chunks, or none, and drops the
                   // stream. Out of fuzz data, it reads to the end.
                   fn consume(mut self, u: &mut Unstructured<'_>) {
-                      let label = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+                      let label = label_of(&self);
                       let reads: Option<u32> = match u.int_in_range(0..=9u8).unwrap_or(0) {
                           8 => Some(u.int_in_range(1..=4).unwrap_or(1)),
                           9 => Some(0),
@@ -303,16 +361,20 @@ impl FuzzTrait {
                       spawn(async move {
                           let mut count = 0;
                           while reads != Some(count) {
+                              let at = trace_at();
                               let (result, items) = self.read(Vec::with_capacity(capacity)).await;
                               if let wit_bindgen::StreamResult::Dropped = result {
-                                  proxy::util::debug::print(&format!("{label} -> dropped"));
+                                  proxy::recorder::record::record(&guest_line(Event::Drop(label)));
                                   return;
                               }
-                              let items = wasm_wave::to_string(&items.to_value()).unwrap();
-                              proxy::util::debug::print(&format!("{label} -> {items}"));
+                              let wave = wasm_wave::to_string(&items.to_value()).unwrap();
+                              let chunk = Chunk { stream: label.clone(), items: wave };
+                              proxy::recorder::record::record(&host_line_at(at, Event::Read(chunk)));
+                              host_dropping(move || drop(items));
                               count += 1;
                           }
-                          proxy::util::debug::print(&format!("{label} dropped by host"));
+                          drop(self);
+                          proxy::recorder::record::record(&host_line(Event::Drop(label)));
                       });
                   }
               }
@@ -328,33 +390,38 @@ impl FuzzTrait {
                   // Writes a fuzzed value.
                   fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
                       let value = T::fuzz(u)?;
-                      let (writer, reader) =
-                          wit_future::new::<T>(|| unreachable!("the value is always written"));
-                      // As for streams, the host keeps the writer, which labels the future.
-                      let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
-                      let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
-                      proxy::util::debug::print(&format!("new (writer: {label}, reader: {reader_label})"));
+                      let (writer, reader, name) = host_future::<T>();
+                      let label = Label { table: TRACE_TABLE, name };
                       let wave = wasm_wave::to_string(&value.to_value()).unwrap();
                       spawn(async move {
-                          if writer.write(value).await.is_ok() {
-                              proxy::util::debug::print(&format!("{label}.read() = {wave}"));
-                          } else {
-                              proxy::util::debug::print(&format!("{label} dropped by guest"));
+                          let at = trace_at();
+                          match writer.write(value).await {
+                              Ok(()) => {
+                                  let value = FutureValue { future: label, value: wave };
+                                  proxy::recorder::record::record(&host_line_at(at, Event::Value(value)));
+                              }
+                              Err(unwritten) => {
+                                  proxy::recorder::record::record(&guest_line(Event::Drop(label)));
+                                  host_dropping(move || drop(unwritten));
+                              }
                           }
                       });
                       Ok(reader)
                   }
-                  // Mostly reads the value; otherwise drops the future.
+                  // Mostly reads the value, which the guest wrote; otherwise drops the future.
                   fn consume(self, u: &mut Unstructured<'_>) {
-                      let label = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+                      let label = label_of(&self);
                       let read = u.int_in_range(0..=9u8).unwrap_or(0) != 9;
                       spawn(async move {
                           if read {
-                              let value = wasm_wave::to_string(&self.await.to_value()).unwrap();
-                              proxy::util::debug::print(&format!("{label} -> {value}"));
+                              let value = self.await;
+                              let wave = wasm_wave::to_string(&value.to_value()).unwrap();
+                              let line = guest_line(Event::Value(FutureValue { future: label, value: wave }));
+                              proxy::recorder::record::record(&line);
+                              host_dropping(move || drop(value));
                           } else {
                               drop(self);
-                              proxy::util::debug::print(&format!("{label} dropped by host"));
+                              proxy::recorder::record::record(&host_line(Event::Drop(label)));
                           }
                       });
                   }

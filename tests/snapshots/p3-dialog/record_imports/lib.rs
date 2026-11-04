@@ -8,7 +8,7 @@ impl exports::proxy::conversion::conversion::Guest for Stub {
     ) -> exports::proxy::conversion::conversion::TestP3HostBody {
         let _ = handle;
         exports::proxy::conversion::conversion::TestP3HostBody::new(MockedResource {
-            handle: 0,
+            handle: next_mock_label(),
             name: "body".to_string(),
         })
     }
@@ -25,6 +25,12 @@ impl exports::proxy::conversion::executor::Guest for Stub {
     }
     fn stop() -> () {
         stop_executor()
+    }
+    fn step() -> u32 {
+        next_step()
+    }
+    fn host_drops(dropping: bool) -> () {
+        let _ = dropping;
     }
 }
 impl exports::test::p3::host::Guest for Stub {
@@ -98,7 +104,12 @@ impl exports::test::p3::host::GuestBody for MockedResource {
             name: "body".to_string(),
             ..Dialog::read_value(0)
         };
-        PENDING_RET.with(|pending| pending.set(true));
+        proxy::util::dialog::print(
+            0,
+            &format!(
+                "ret: {}", wasm_wave::to_string(& ToValue::to_value(& ret)).unwrap()
+            ),
+        );
         ret
     }
     async fn size(&self) -> u64 {
@@ -155,30 +166,6 @@ impl exports::test::p3::host::GuestBody for MockedResource {
             ),
         );
         ret
-    }
-    unsafe fn _resource_new(val: *mut u8) -> u32 {
-        #[cfg(target_arch = "wasm32")]
-        #[link(wasm_import_module = "[export]test:p3/host@0.1.0")]
-        unsafe extern "C" {
-            #[link_name = "[resource-new]body"]
-            fn new(_: *mut u8) -> i32;
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        unsafe extern "C" fn new(_: *mut u8) -> i32 {
-            unreachable!()
-        }
-        let handle = unsafe { new(val) } as u32;
-        let mock = unsafe { &mut *(val as *mut Option<MockedResource>) }
-            .as_mut()
-            .unwrap();
-        mock.handle = handle;
-        if PENDING_RET.with(|pending| pending.take()) {
-            let ret = format!(
-                "ret: {}", wasm_wave::to_string(& mock.to_value()).unwrap()
-            );
-            proxy::util::dialog::print(0, &ret);
-        }
-        handle
     }
 }
 impl ValueTyped for exports::test::p3::host::ErrorCode {
@@ -352,7 +339,7 @@ impl Dialog for exports::test::p3::host::ErrorCode {
 impl Dialog for exports::test::p3::host::Body {
     fn read_value(_dep: u32) -> Self {
         exports::test::p3::host::Body::new(MockedResource {
-            handle: 0,
+            handle: next_mock_label(),
             name: "body".to_string(),
         })
     }
@@ -431,7 +418,7 @@ impl<O: Dialog, E: Dialog> Dialog for Result<O, E> {
 impl Dialog for MockedResource {
     fn read_value(_dep: u32) -> Self {
         Self {
-            handle: 0,
+            handle: next_mock_label(),
             name: "mocked-resource".to_string(),
         }
     }
@@ -463,18 +450,62 @@ impl_dialog_tuple!(T1, T2, T3, T4, T5);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
+thread_local! {
+    static READER_LABELS : std::cell::RefCell < std::collections::HashMap < u32, u32 >> =
+    std::cell::RefCell::new(std::collections::HashMap::new());
+}
+/// Labels a stream or future this component made by the handle of its `writer`, which it
+/// keeps for the stream's lifetime, also where its `reader` is printed: in the value that
+/// hands the reader out, after which the reader moves on, and its handle can be reused.
+/// So the entry is gone once the reader is printed.
+fn label_by_writer(reader: u32, writer: u32) {
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    HOOK.call_once(|| {
+        wasm_wave::value::convert::set_handle_label(|_kind, handle| {
+            READER_LABELS.with_borrow_mut(|labels| labels.remove(&handle))
+        })
+    });
+    READER_LABELS
+        .with_borrow_mut(|labels| {
+            labels.remove(&writer);
+            labels.insert(reader, writer);
+        });
+}
+/// The label of a stream or future, e.g. `#stream-7`, by the end this component keeps.
+fn handle_label(end: &impl ToValue) -> String {
+    wasm_wave::to_string(&end.to_value()).unwrap()
+}
+/// A stream the host writes: its writer, its reader, to hand out, and its label.
+fn host_stream<T: wit_stream::StreamPayload + 'static>() -> (
+    wit_bindgen::StreamWriter<T>,
+    wit_bindgen::StreamReader<T>,
+    String,
+) {
+    let (writer, reader) = wit_stream::new::<T>();
+    label_by_writer(reader.handle(), writer.handle());
+    let label = handle_label(&writer);
+    (writer, reader, label)
+}
+/// A future the host writes, which it always does: its writer, its reader, to hand
+/// out, and its label.
+fn host_future<T: wit_future::FuturePayload + 'static>() -> (
+    wit_bindgen::FutureWriter<T>,
+    wit_bindgen::FutureReader<T>,
+    String,
+) {
+    let (writer, reader) = wit_future::new::<
+        T,
+    >(|| unreachable!("the value is always written"));
+    label_by_writer(reader.handle(), writer.handle());
+    let label = handle_label(&writer);
+    (writer, reader, label)
+}
 impl<T> Dialog for wit_bindgen::StreamReader<T>
 where
     T: Dialog + ToValue + ValueTyped + wit_stream::StreamPayload + 'static,
 {
     fn read_value(_dep: u32) -> Self {
-        let (mut writer, reader) = wit_stream::new::<T>();
-        let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
-        let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
-        proxy::util::dialog::print(
-            0,
-            &format!("new (writer: {label}, reader: {reader_label})"),
-        );
+        let (mut writer, reader, label) = host_stream::<T>();
         spawn(async move {
             let choices = ["write a chunk".to_string(), "end the stream".to_string()];
             loop {
@@ -495,7 +526,7 @@ where
         reader
     }
     fn consume(mut self, _dep: u32) {
-        let label = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+        let label = handle_label(&self);
         spawn(async move {
             let choices = ["read a chunk".to_string(), "drop the stream".to_string()];
             loop {
@@ -520,15 +551,7 @@ where
     T: Dialog + ToValue + ValueTyped + wit_future::FuturePayload,
 {
     fn read_value(_dep: u32) -> Self {
-        let (writer, reader) = wit_future::new::<
-            T,
-        >(|| unreachable!("the value is always written"));
-        let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
-        let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
-        proxy::util::dialog::print(
-            0,
-            &format!("new (writer: {label}, reader: {reader_label})"),
-        );
+        let (writer, reader, label) = host_future::<T>();
         spawn(async move {
             proxy::util::dialog::print(0, &format!("The host writes {label}"));
             let value: T = Dialog::read_value(1);
@@ -542,7 +565,7 @@ where
         reader
     }
     fn consume(self, _dep: u32) {
-        let label = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+        let label = handle_label(&self);
         spawn(async move {
             let choices = ["read the value".to_string(), "drop the future".to_string()];
             let prompt = format!("The host reads {label}");
@@ -567,8 +590,13 @@ impl Dialog for wit_bindgen::rt::async_support::ErrorContext {
     }
 }
 thread_local! {
-    #[allow(dead_code)] static PENDING_RET : std::cell::Cell < bool > = const {
-    std::cell::Cell::new(false) };
+    static MOCK_LABEL : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+}
+/// The label of a new mock.
+#[allow(dead_code)]
+fn next_mock_label() -> u32 {
+    MOCK_LABEL.set(MOCK_LABEL.get() + 1);
+    MOCK_LABEL.get()
 }
 type Job = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
 #[derive(Default)]
@@ -579,7 +607,59 @@ struct Executor {
 }
 thread_local! {
     static EXECUTOR : std::cell::RefCell < Executor > =
-    std::cell::RefCell::new(Executor::default());
+    std::cell::RefCell::new(Executor::default()); static STEP : std::cell::Cell < u32 > =
+    const { std::cell::Cell::new(0) }; static WAKE_AGAIN : std::cell::Cell < bool > =
+    const { std::cell::Cell::new(false) };
+}
+/// Counts a step, and returns it.
+#[allow(dead_code)]
+fn next_step() -> u32 {
+    STEP.set(STEP.get() + 1);
+    STEP.get()
+}
+/// The step a job runs in.
+#[allow(dead_code)]
+fn current_step() -> u32 {
+    STEP.get()
+}
+/// Waits, from any task, until the executor has run `runs` more times, and returns the step of
+/// the last run. A job counts them, waking the executor itself in between.
+#[allow(dead_code)]
+async fn wait_for_runs(runs: u32) -> u32 {
+    #[derive(Default)]
+    struct Done {
+        step: Option<u32>,
+        waker: Option<std::task::Waker>,
+    }
+    let done = std::rc::Rc::new(std::cell::RefCell::new(Done::default()));
+    let job_done = done.clone();
+    let mut left = runs;
+    spawn(
+        std::future::poll_fn(move |_| {
+            if left == 0 {
+                let mut done = job_done.borrow_mut();
+                done.step = Some(current_step());
+                if let Some(waker) = done.waker.take() {
+                    waker.wake();
+                }
+                return std::task::Poll::Ready(());
+            }
+            left -= 1;
+            WAKE_AGAIN.set(true);
+            std::task::Poll::Pending
+        }),
+    );
+    std::future::poll_fn(move |cx| {
+            let mut done = done.borrow_mut();
+            match done.step {
+                Some(step) => std::task::Poll::Ready(step),
+                None => {
+                    done.waker = Some(cx.waker().clone());
+                    std::task::Poll::Pending
+                }
+            }
+        })
+        .await
 }
 /// Queues `job`, from any function, sync or async.
 #[allow(dead_code)]
@@ -597,6 +677,8 @@ fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
 async fn run_executor() {
     let mut running: Vec<Job> = Vec::new();
     std::future::poll_fn(|cx| {
+            next_step();
+            WAKE_AGAIN.set(false);
             running.retain_mut(|job| job.as_mut().poll(cx).is_pending());
             loop {
                 let mut queued = EXECUTOR
@@ -613,6 +695,9 @@ async fn run_executor() {
                         std::task::Poll::Ready(())
                     } else {
                         e.waker = Some(cx.waker().clone());
+                        if WAKE_AGAIN.get() {
+                            cx.waker().wake_by_ref();
+                        }
                         std::task::Poll::Pending
                     }
                 })

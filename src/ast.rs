@@ -56,7 +56,11 @@ impl<'a> Opt<'a> {
                     ident(self.mode.to_str())
                 ));
             }
-            Mode::Fuzz => out.push_str("import proxy:util/debug;\n"),
+            // `debug` for random numbers, and the trace, as in record mode.
+            Mode::Fuzz => {
+                out.push_str("import proxy:util/debug;\n");
+                out.push_str("import proxy:recorder/%record@0.1.0;\n");
+            }
             Mode::Dialog => out.push_str("import proxy:util/dialog;\n"),
         }
     }

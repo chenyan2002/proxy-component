@@ -19,6 +19,12 @@ impl exports::proxy::conversion::executor::Guest for Stub {
     fn stop() -> () {
         stop_executor()
     }
+    fn step() -> u32 {
+        next_step()
+    }
+    fn host_drops(dropping: bool) -> () {
+        MOVING.with(|moving| moving.set(dropping))
+    }
 }
 impl exports::test::host::types::Guest for Stub {
     type Counter = MockedResource;
@@ -556,6 +562,12 @@ fn trace_return_value(answers: Vec<Line>) -> Option<String> {
         })
         .expect("the trace doesn't answer the call")
 }
+#[allow(dead_code)]
+const TRACE_TABLE: Table = Table::Imports;
+#[allow(dead_code)]
+fn trace_at() -> u32 {
+    current_step()
+}
 thread_local! {
     #[allow(dead_code)] static MOVING : std::cell::Cell < bool > = const {
     std::cell::Cell::new(false) };
@@ -569,7 +581,59 @@ struct Executor {
 }
 thread_local! {
     static EXECUTOR : std::cell::RefCell < Executor > =
-    std::cell::RefCell::new(Executor::default());
+    std::cell::RefCell::new(Executor::default()); static STEP : std::cell::Cell < u32 > =
+    const { std::cell::Cell::new(0) }; static WAKE_AGAIN : std::cell::Cell < bool > =
+    const { std::cell::Cell::new(false) };
+}
+/// Counts a step, and returns it.
+#[allow(dead_code)]
+fn next_step() -> u32 {
+    STEP.set(STEP.get() + 1);
+    STEP.get()
+}
+/// The step a job runs in.
+#[allow(dead_code)]
+fn current_step() -> u32 {
+    STEP.get()
+}
+/// Waits, from any task, until the executor has run `runs` more times, and returns the step of
+/// the last run. A job counts them, waking the executor itself in between.
+#[allow(dead_code)]
+async fn wait_for_runs(runs: u32) -> u32 {
+    #[derive(Default)]
+    struct Done {
+        step: Option<u32>,
+        waker: Option<std::task::Waker>,
+    }
+    let done = std::rc::Rc::new(std::cell::RefCell::new(Done::default()));
+    let job_done = done.clone();
+    let mut left = runs;
+    spawn(
+        std::future::poll_fn(move |_| {
+            if left == 0 {
+                let mut done = job_done.borrow_mut();
+                done.step = Some(current_step());
+                if let Some(waker) = done.waker.take() {
+                    waker.wake();
+                }
+                return std::task::Poll::Ready(());
+            }
+            left -= 1;
+            WAKE_AGAIN.set(true);
+            std::task::Poll::Pending
+        }),
+    );
+    std::future::poll_fn(move |cx| {
+            let mut done = done.borrow_mut();
+            match done.step {
+                Some(step) => std::task::Poll::Ready(step),
+                None => {
+                    done.waker = Some(cx.waker().clone());
+                    std::task::Poll::Pending
+                }
+            }
+        })
+        .await
 }
 /// Queues `job`, from any function, sync or async.
 #[allow(dead_code)]
@@ -587,6 +651,8 @@ fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
 async fn run_executor() {
     let mut running: Vec<Job> = Vec::new();
     std::future::poll_fn(|cx| {
+            next_step();
+            WAKE_AGAIN.set(false);
             running.retain_mut(|job| job.as_mut().poll(cx).is_pending());
             loop {
                 let mut queued = EXECUTOR
@@ -603,6 +669,9 @@ async fn run_executor() {
                         std::task::Poll::Ready(())
                     } else {
                         e.waker = Some(cx.waker().clone());
+                        if WAKE_AGAIN.get() {
+                            cx.waker().wake_by_ref();
+                        }
                         std::task::Poll::Pending
                     }
                 })

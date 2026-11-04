@@ -8,7 +8,7 @@ impl exports::proxy::conversion::conversion::Guest for Stub {
     ) -> exports::proxy::conversion::conversion::TestHostTypesCounter {
         let _ = handle;
         exports::proxy::conversion::conversion::TestHostTypesCounter::new(MockedResource {
-            handle: 0,
+            handle: next_mock_label(),
             name: "counter".to_string(),
         })
     }
@@ -25,6 +25,12 @@ impl exports::proxy::conversion::executor::Guest for Stub {
     }
     fn stop() -> () {
         stop_executor()
+    }
+    fn step() -> u32 {
+        next_step()
+    }
+    fn host_drops(dropping: bool) -> () {
+        let _ = dropping;
     }
 }
 impl exports::test::host::types::Guest for Stub {
@@ -114,7 +120,12 @@ impl exports::test::host::types::GuestCounter for MockedResource {
             name: "counter".to_string(),
             ..Dialog::read_value(0)
         };
-        PENDING_RET.with(|pending| pending.set(true));
+        proxy::util::dialog::print(
+            0,
+            &format!(
+                "ret: {}", wasm_wave::to_string(& ToValue::to_value(& ret)).unwrap()
+            ),
+        );
         ret
     }
     fn get(&self) -> u32 {
@@ -163,30 +174,6 @@ impl exports::test::host::types::GuestCounter for MockedResource {
             ),
         );
         ret
-    }
-    unsafe fn _resource_new(val: *mut u8) -> u32 {
-        #[cfg(target_arch = "wasm32")]
-        #[link(wasm_import_module = "[export]test:host/types@0.1.0")]
-        unsafe extern "C" {
-            #[link_name = "[resource-new]counter"]
-            fn new(_: *mut u8) -> i32;
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        unsafe extern "C" fn new(_: *mut u8) -> i32 {
-            unreachable!()
-        }
-        let handle = unsafe { new(val) } as u32;
-        let mock = unsafe { &mut *(val as *mut Option<MockedResource>) }
-            .as_mut()
-            .unwrap();
-        mock.handle = handle;
-        if PENDING_RET.with(|pending| pending.take()) {
-            let ret = format!(
-                "ret: {}", wasm_wave::to_string(& mock.to_value()).unwrap()
-            );
-            proxy::util::dialog::print(0, &ret);
-        }
-        handle
     }
 }
 impl exports::test::log0_1_0::sink::Guest for Stub {
@@ -564,7 +551,7 @@ impl Dialog for exports::test::host::types::Perms {
 impl Dialog for exports::test::host::types::Counter {
     fn read_value(_dep: u32) -> Self {
         exports::test::host::types::Counter::new(MockedResource {
-            handle: 0,
+            handle: next_mock_label(),
             name: "counter".to_string(),
         })
     }
@@ -643,7 +630,7 @@ impl<O: Dialog, E: Dialog> Dialog for Result<O, E> {
 impl Dialog for MockedResource {
     fn read_value(_dep: u32) -> Self {
         Self {
-            handle: 0,
+            handle: next_mock_label(),
             name: "mocked-resource".to_string(),
         }
     }
@@ -686,8 +673,13 @@ impl Dialog for wit_bindgen::rt::async_support::ErrorContext {
     }
 }
 thread_local! {
-    #[allow(dead_code)] static PENDING_RET : std::cell::Cell < bool > = const {
-    std::cell::Cell::new(false) };
+    static MOCK_LABEL : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+}
+/// The label of a new mock.
+#[allow(dead_code)]
+fn next_mock_label() -> u32 {
+    MOCK_LABEL.set(MOCK_LABEL.get() + 1);
+    MOCK_LABEL.get()
 }
 type Job = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
 #[derive(Default)]
@@ -698,7 +690,59 @@ struct Executor {
 }
 thread_local! {
     static EXECUTOR : std::cell::RefCell < Executor > =
-    std::cell::RefCell::new(Executor::default());
+    std::cell::RefCell::new(Executor::default()); static STEP : std::cell::Cell < u32 > =
+    const { std::cell::Cell::new(0) }; static WAKE_AGAIN : std::cell::Cell < bool > =
+    const { std::cell::Cell::new(false) };
+}
+/// Counts a step, and returns it.
+#[allow(dead_code)]
+fn next_step() -> u32 {
+    STEP.set(STEP.get() + 1);
+    STEP.get()
+}
+/// The step a job runs in.
+#[allow(dead_code)]
+fn current_step() -> u32 {
+    STEP.get()
+}
+/// Waits, from any task, until the executor has run `runs` more times, and returns the step of
+/// the last run. A job counts them, waking the executor itself in between.
+#[allow(dead_code)]
+async fn wait_for_runs(runs: u32) -> u32 {
+    #[derive(Default)]
+    struct Done {
+        step: Option<u32>,
+        waker: Option<std::task::Waker>,
+    }
+    let done = std::rc::Rc::new(std::cell::RefCell::new(Done::default()));
+    let job_done = done.clone();
+    let mut left = runs;
+    spawn(
+        std::future::poll_fn(move |_| {
+            if left == 0 {
+                let mut done = job_done.borrow_mut();
+                done.step = Some(current_step());
+                if let Some(waker) = done.waker.take() {
+                    waker.wake();
+                }
+                return std::task::Poll::Ready(());
+            }
+            left -= 1;
+            WAKE_AGAIN.set(true);
+            std::task::Poll::Pending
+        }),
+    );
+    std::future::poll_fn(move |cx| {
+            let mut done = done.borrow_mut();
+            match done.step {
+                Some(step) => std::task::Poll::Ready(step),
+                None => {
+                    done.waker = Some(cx.waker().clone());
+                    std::task::Poll::Pending
+                }
+            }
+        })
+        .await
 }
 /// Queues `job`, from any function, sync or async.
 #[allow(dead_code)]
@@ -716,6 +760,8 @@ fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
 async fn run_executor() {
     let mut running: Vec<Job> = Vec::new();
     std::future::poll_fn(|cx| {
+            next_step();
+            WAKE_AGAIN.set(false);
             running.retain_mut(|job| job.as_mut().poll(cx).is_pending());
             loop {
                 let mut queued = EXECUTOR
@@ -732,6 +778,9 @@ async fn run_executor() {
                         std::task::Poll::Ready(())
                     } else {
                         e.waker = Some(cx.waker().clone());
+                        if WAKE_AGAIN.get() {
+                            cx.waker().wake_by_ref();
+                        }
                         std::task::Poll::Pending
                     }
                 })

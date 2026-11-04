@@ -17,12 +17,7 @@ impl State {
         let args = extract_arg_info(sig);
         let ret_ty = get_return_type(&sig.output);
         // The streams and futures the guest gives the host, whose reading the user decides.
-        let consumed: Vec<_> = args
-            .iter()
-            .zip(&wit_func.params_async)
-            .filter(|(arg, is_async)| **is_async && !arg.is_borrowed)
-            .map(|(arg, _)| &arg.ident)
-            .collect();
+        let consumed = wit_func.consumed_args(&args);
         let params = params_to_wave(kind.as_ref(), &args);
         let preamble = quote! {
             #params
@@ -31,18 +26,14 @@ impl State {
         };
         if ret_ty.is_some() {
             let ret_name = wit_func.result.as_ref().unwrap();
-            // A constructor's mock has no handle yet, so `_resource_new` prints its `ret`.
-            let (read_ret, print_ret) = match wit_func.constructor_resource() {
-                Some(name) => (
-                    quote! { MockedResource { name: #name.to_string(), ..Dialog::read_value(0) } },
-                    quote! { PENDING_RET.with(|pending| pending.set(true)); },
-                ),
-                None => (
-                    quote! { Dialog::read_value(0) },
-                    quote! {
-                        proxy::util::dialog::print(0, &format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&ret)).unwrap()));
-                    },
-                ),
+            let read_ret = match wit_func.constructor_resource() {
+                Some(name) => {
+                    quote! { MockedResource { name: #name.to_string(), ..Dialog::read_value(0) } }
+                }
+                None => quote! { Dialog::read_value(0) },
+            };
+            let print_ret = quote! {
+                proxy::util::dialog::print(0, &format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&ret)).unwrap()));
             };
             parse_quote! {
                 #sig {

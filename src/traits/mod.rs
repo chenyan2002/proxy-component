@@ -40,6 +40,76 @@ fn new_mock(wit: &WitType, handle: TokenStream) -> TokenStream {
     }
 }
 
+/// Items for the virtualized host's ends of the streams and futures it gives the guest, which
+/// the fuzz and dialog traits make: `host_stream` and `host_future` make the pair, keep its
+/// writer, which labels it for its lifetime, and hand out its reader. The bindings only have the
+/// `wit_stream` and `wit_future` modules if the world has streams or futures.
+fn host_end_defs(has_streams: bool, has_futures: bool) -> Vec<Item> {
+    let mut items = Vec::new();
+    if !has_streams && !has_futures {
+        return items;
+    }
+    let file: syn::File = syn::parse_quote! {
+        thread_local! {
+            // The readers of the streams and futures this component made, by handle, and the
+            // writers that label them (see `label_by_writer`).
+            static READER_LABELS: std::cell::RefCell<std::collections::HashMap<u32, u32>> =
+                std::cell::RefCell::new(std::collections::HashMap::new());
+        }
+        /// Labels a stream or future this component made by the handle of its `writer`, which it
+        /// keeps for the stream's lifetime, also where its `reader` is printed: in the value that
+        /// hands the reader out, after which the reader moves on, and its handle can be reused.
+        /// So the entry is gone once the reader is printed.
+        fn label_by_writer(reader: u32, writer: u32) {
+            static HOOK: std::sync::Once = std::sync::Once::new();
+            HOOK.call_once(|| {
+                wasm_wave::value::convert::set_handle_label(|_kind, handle| {
+                    READER_LABELS.with_borrow_mut(|labels| labels.remove(&handle))
+                })
+            });
+            READER_LABELS.with_borrow_mut(|labels| {
+                // A handle the new writer reuses is no longer a reader's.
+                labels.remove(&writer);
+                labels.insert(reader, writer);
+            });
+        }
+        /// The label of a stream or future, e.g. `#stream-7`, by the end this component keeps.
+        fn handle_label(end: &impl ToValue) -> String {
+            wasm_wave::to_string(&end.to_value()).unwrap()
+        }
+    };
+    items.extend(file.items);
+    if has_streams {
+        let file: syn::File = syn::parse_quote! {
+            /// A stream the host writes: its writer, its reader, to hand out, and its label.
+            fn host_stream<T: wit_stream::StreamPayload + 'static>(
+            ) -> (wit_bindgen::StreamWriter<T>, wit_bindgen::StreamReader<T>, String) {
+                let (writer, reader) = wit_stream::new::<T>();
+                label_by_writer(reader.handle(), writer.handle());
+                let label = handle_label(&writer);
+                (writer, reader, label)
+            }
+        };
+        items.extend(file.items);
+    }
+    if has_futures {
+        let file: syn::File = syn::parse_quote! {
+            /// A future the host writes, which it always does: its writer, its reader, to hand
+            /// out, and its label.
+            fn host_future<T: wit_future::FuturePayload + 'static>(
+            ) -> (wit_bindgen::FutureWriter<T>, wit_bindgen::FutureReader<T>, String) {
+                let (writer, reader) =
+                    wit_future::new::<T>(|| unreachable!("the value is always written"));
+                label_by_writer(reader.handle(), writer.handle());
+                let label = handle_label(&writer);
+                (writer, reader, label)
+            }
+        };
+        items.extend(file.items);
+    }
+    items
+}
+
 pub trait Trait {
     fn trait_defs(&self) -> Vec<Item>;
     // `wit` has the WIT names of the item and of its fields, cases or flags, in order.

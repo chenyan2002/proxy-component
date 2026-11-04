@@ -3,8 +3,7 @@
 proxy-component records and replays p2 components, and fuzzes and mocks (dialog mode) p3
 components. This file is the design for recording and replaying p3 components: the trace format,
 how the proxy records a run without changing it, how replay reproduces it, and what makes replay
-portable across runtimes. Nothing here is implemented yet, except a spike that tests the central
-claim; see [Spike results](#spike-results) and [Phases](#phases).
+portable across runtimes. What is implemented so far is listed below, and in [Phases](#phases).
 
 It builds on the cross-tool design in component-ui's
 [`docs/p3.md`](https://github.com/chenyan2002/component-ui/blob/main/docs/p3.md), and was written
@@ -22,16 +21,10 @@ dialog support for p3.
   the task of its `run` export, which `start` calls. The exports component's work is made by
   `start` itself, so it spawns on the task of `start`. Fuzz mode waits for both at the end of
   `start`; dialog mode drains them after each export call.
-- **Labels.** Resources, streams, futures and error-contexts are labeled by handles in the
-  generated components' own tables, as [Labels](#labels) describes: a mock by the handle wasmtime
-  gives it, through an override of wit-bindgen's `_resource_new`, and a stream or future by the
-  end the proxy keeps. A stream or future the proxy creates is introduced with a
-  `new (writer: #stream-7, reader: #stream-5)` line, which goes away once fuzz and dialog label
-  streams as record does; see [Labels](#labels).
-
-- **Record and replay modes write and read this trace format** (`crates/trace`), through the
-  recorder interface (`assets/recorder.wit`), for p2 components. They reject nothing up front,
-  but they don't handle streams, futures or async functions yet.
+- **The trace format** ([Trace format](#trace-format)) and its recorder interface. Fuzz mode
+  writes it for p2 and p3 components, with [steps](#steps) and [labels](#labels). Record and
+  replay modes write and read it for p2 components; they reject nothing up front, but don't handle
+  streams, futures or async functions yet.
 
 ## Where nondeterminism comes from
 
@@ -205,10 +198,13 @@ number in that table, e.g. `#fields-3` or `#stream-7`.
 
 - **Resources** of the host are in the imports table, which holds them for both components. In
   record mode, a host resource is labeled by the handle the imports component keeps for it, which
-  the exports component gets through `get-handle-*`; in fuzz and dialog modes, a mock by its
-  handle, which `_resource_new` gives it; in replay, a mock carries the trace's label. A resource
-  of the guest, which the exports component wraps, is in the exports table, e.g. the host's drop
-  of a session, `drop #session-1 (exports)`.
+  the exports component gets through `get-handle-*`; in fuzz and dialog modes, a mock by a number
+  the imports component gives it when it makes it, counting from 1, which no other mock gets; in
+  replay, a mock carries the trace's label. The mock's own handle can't label it: it moves on with
+  the mock, which frees its number, and a borrow the guest passes back comes in as the mock
+  itself, without a handle. Fuzz mode records the end of every mock, also the host's drops, which
+  record mode can't see. A resource of the guest, which the exports component wraps, is in the
+  exports table, e.g. the host's drop of a session, `drop #session-1 (exports)`.
 - **Streams and futures** are labeled by the handle of the end the proxy received, which it keeps
   for the stream's lifetime: the host's reader in an import's result or an export's arguments, the
   guest's in an import's arguments or an export's result. The proxy pumps it through a pair of its
@@ -224,11 +220,13 @@ number in that table, e.g. `#fields-3` or `#stream-7`.
 
   - **Record mode** prints each value as it received it, before `to_proxy`. Today it prints
     arguments after converting them, which has to change.
-  - **Fuzz and dialog** label as record does. A mock plays the host: it creates the host's pair
-    and keeps the writer, and the proxy keeps the reader, labels the stream by it, and pumps it to
-    the guest through a second pair. Today they hand that reader straight to the guest, which frees
-    its slot, so they label by the writer, and bind the two with a `new (writer: …, reader: …)`
-    line, which this format doesn't have.
+  - **Fuzz and dialog modes** make the stream themselves: they keep the writer, and hand the
+    reader out, which frees the reader's slot. So they label the stream by the writer, also where
+    the reader is printed, in the value that hands it out: they register the pair with wasm-wave's
+    `set_handle_label`, which prints the reader under its writer's number until the reader has
+    been printed. Pumping it through a pair the mock keeps the reader of, as record mode does,
+    isn't possible: wasmtime traps a copy between two ends of one component instance, unless
+    the payload is numeric.
   - **Replay** creates a pair for each stream the host hands out, hands out its reader, and
     performs the trace's lines on the stream's label through its writer.
   - **The guest's `stream.new` and `future.new`** are built-ins inside its component that the
@@ -254,13 +252,10 @@ Limits:
   of the host's ends and the pumps, so it can't recompute the labels, only use the trace's.
 - `list<u8>` items are WAVE lists for now; p3.md's byte strings (`b"…"`) would be shorter.
 
-The alternative is to label handles by a counter, in the order they cross between the proxy and the
-main component, shared by the two generated components through an interface of the imports
-component. A number is then never reused, and the same in record and replay, so replay can check
-each label, and there is no `table`. A resource can keep its label in its representation, but a
-stream, future or error-context is a wit-bindgen type, which wasm-wave's `ToValue` prints by its
-handle, so the proxy has to map each handle to its label, and set the lookup with wasm-wave's
-`set_handle_label`. It has the same limit for ends that come back.
+Mocks already use a counter. Extending it to every handle, shared by the two generated
+components, would make a number never reused, and the same in record and replay, so that replay
+could check each label, without a `table`; streams, futures and error-contexts would map each
+handle to its number with `set_handle_label`. It has the same limit for ends that come back.
 
 ## Recording
 
@@ -319,8 +314,7 @@ these rules keep it from doing:
     replay, only E is.
 
   A p2 guest isn't affected: it is sequential, and sees the host only through calls, so pausing it
-  changes nothing it can observe. [The shim](#portability) would lift this requirement, as it
-  positions host events by the guest's waits rather than by the executor's steps.
+  changes nothing it can observe. [The shim](#portability) would lift this requirement.
 
 ### Steps
 
@@ -346,7 +340,10 @@ Replay has to know when to perform each host line. There are three kinds of line
    a STARTED call, the items of a `Write`, a future's `Value`. Also the host taking what the guest
    wrote, a `Read`, which completes the guest's write; the host dropping its end, a `Drop`, which
    the guest sees as `dropped`; a `Cancelled`; and the host calling an export, below. The executor
-   performs them when the host gets to them, so `at: n` says they happened in step `n`. In replay,
+   performs them when the host gets to them, so `at: n` says they happened in step `n`. For a copy,
+   it is the step in which the host made its side, e.g. issued the write the guest then read,
+   rather than the one in which the host saw it complete, which may come after the guest reacted
+   to it. In replay,
    the executor counts its steps the same way, and a job holding such a line waits until the count
    reaches `n`. There is no host to wake the executor, so a job waiting for a later step makes the
    executor wake itself, by yielding, and its next run is the next step.
@@ -357,7 +354,10 @@ function that increments the counter and returns it, as the export `Call`'s `at`
 later runs are numbered after it. In replay, `start` makes an export call recorded at step `n` once
 the count reaches `n - 1`, by calling `step` and then the export. An arrival can't fall within a
 run of the executor: the host only calls an export while no wasm is running, unless something
-suspends where the proxy can't see it, which the requirements below rule out.
+suspends where the proxy can't see it, which the requirements below rule out. The exports
+component's other host lines take a step the same way: those of its jobs, e.g. reading a stream an
+export returned, which run on the task of `start`, not in the executor, and the host's drops of
+the guest's resources.
 
 ### Why the step is enough, and a gate isn't needed
 
@@ -403,15 +403,15 @@ trace, the two results could reach the guest before or after a different one of 
 
 - **Deterministic runtime choices**, see [Portability](#portability).
 - **The same executor in record and replay**, with only the leaves different: host calls in
-  record, futures that the trace makes ready in replay.
+  record, futures that the trace makes ready in replay. Its work in a step depends only on its
+  state and the trace's lines for that step.
 - **Steps in replay where the host woke the executor in the recording.** Replay has no host, so a
   job that waits for a later step makes the executor yield, and come back as the next step.
   wasmtime runs the ready tasks first, as it did before the host's completion in the recording.
 - **No suspension the proxy can't see**: no calls to other components where the recording calls
   the host, no blocking WASI 0.2 calls, and no epoch deadlines that yield, as above.
-- **One clock for both components.** The host calls exports through the exports component, not
-  the executor, so each arrival takes a step from the same counter, through `step` on
-  `proxy:conversion/executor`, as [Steps](#steps) describes.
+- **One clock for both components.** The exports component takes its steps from the same
+  counter, through `step`, as [Steps](#steps) describes.
 
 ### What recording can't reach
 
@@ -493,9 +493,9 @@ guest's wakeups.
   as STARTED, and the guest got the two results in separate wakeups, while replay gave them
   together. wasmtime runs the proxy's call into a component as a queued work item, which suspends
   the proxy while it is entered, and holds back the guest's next call into it (`do_not_enter`,
-  `concurrent.rs:774`). Calling a
-  host component in replay as well made other scenarios diverge, as a component host suspends
-  differently in record and replay. Removing it, i.e. forwarding to host functions, fixed it.
+  `concurrent.rs:774`). Calling a host component in replay as well made other scenarios diverge,
+  as a component host suspends differently in record and replay. Removing it, i.e. forwarding to
+  host functions, fixed it.
 - **Sync WASI 0.2 calls change the schedule.** At first the proxy and the guest printed each line
   with `println!`, and several scenarios diverged; buffering the output fixed them.
 - **Two results never reached the guest in one wakeup**, through the proxy, nor, in one-off
@@ -546,20 +546,18 @@ trace records: the classic condition for deterministic replay, that every nondet
 is recorded. Here it is an induction on steps: if record and replay are in the same state when
 step `n` begins, and step `n` performs the same host lines, they are in the same state when step
 `n + 1` begins. Between steps, the guest's lines are checked, and its calls answered by the lines
-without an `at`. The induction holds under four assumptions, none of them proven yet:
+without an `at`. The induction holds under the requirements of
+[Why the step is enough](#why-the-step-is-enough-and-a-gate-isnt-needed), and two more, none of
+them proven yet:
 
 - **The executor is the only way in.** Every host event reaches the guest in a run of the
   executor; see [Recording](#the-executor-delivers-and-records-host-events).
-- **Between steps, everything is deterministic.** The runtime's choices are fixed, and nothing
-  suspends where the proxy can't see it: no host components, no blocking WASI 0.2 calls, no epoch
-  deadlines that yield. The
-  component model doesn't guarantee this (`Concurrency.md` allows nondeterminism); wasmtime 49
-  happens to, which is why replay in another runtime needs [the profile or the
-  shim](#portability).
-- **The same executor in record and replay**, whose work in a step depends only on its state and
-  the trace's lines for that step.
 - **The trace holds every input**: the values, RETURNED or STARTED, and the step of each host
   line.
+
+Of the requirements, deterministic runtime choices are the one the component model doesn't
+guarantee (`Concurrency.md` allows nondeterminism); wasmtime 49 happens to make them, which is why
+replay in another runtime needs [the profile or the shim](#portability).
 
 ### Fork-join program
 
@@ -642,9 +640,8 @@ depend on runtime patches. wasmtime 49 has the start of its own record and repla
 1. **Spike, in wasmtime**: done, see [Spike results](#spike-results).
 2. **Trace format** in `crates/trace`, and the recorder interface: done, for p2 record and
    replay.
-3. **Replay**, tested on traces that fuzz mode writes in this format, as its executor can count
-   steps too, and its mocks can label streams as record does, with the checks of
-   [Correctness](#checking-the-implementation).
+3. **Replay**, tested on traces that fuzz mode writes in this format, with the checks of
+   [Correctness](#checking-the-implementation). Fuzz mode writes the format: done.
 4. **Record**, with the executor and its pumps, under `wasmtime serve` and `run`.
 5. **Portability across runtimes**: the profile proposal, or the shim.
 

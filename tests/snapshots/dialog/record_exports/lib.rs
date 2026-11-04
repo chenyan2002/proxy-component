@@ -854,7 +854,7 @@ impl<O: Dialog, E: Dialog> Dialog for Result<O, E> {
 impl Dialog for MockedResource {
     fn read_value(_dep: u32) -> Self {
         Self {
-            handle: 0,
+            handle: next_mock_label(),
             name: "mocked-resource".to_string(),
         }
     }
@@ -897,8 +897,13 @@ impl Dialog for wit_bindgen::rt::async_support::ErrorContext {
     }
 }
 thread_local! {
-    #[allow(dead_code)] static PENDING_RET : std::cell::Cell < bool > = const {
-    std::cell::Cell::new(false) };
+    static MOCK_LABEL : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+}
+/// The label of a new mock.
+#[allow(dead_code)]
+fn next_mock_label() -> u32 {
+    MOCK_LABEL.set(MOCK_LABEL.get() + 1);
+    MOCK_LABEL.get()
 }
 thread_local! {
     static SPAWNED : std::cell::RefCell < Vec < wit_bindgen::JoinHandle < () >> > = const

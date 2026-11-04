@@ -96,10 +96,14 @@ pub fn generate(
     state.generate_stubs();
     let traits = crate::traits::TraitGenerator::new(&state).generate();
     state.output.extend(traits);
-    if matches!(mode, Mode::Record | Mode::Replay) {
+    if matches!(mode, Mode::Record | Mode::Replay | Mode::Fuzz) {
         state.output.extend(trace_defs());
     }
-    if matches!(mode, Mode::Replay) {
+    let has_executor = state.has_executor();
+    if matches!(mode, Mode::Replay | Mode::Fuzz) {
+        state.output.extend(job_defs(mode, has_executor));
+    }
+    if matches!(mode, Mode::Replay | Mode::Fuzz) {
         let defs = state.replay_defs();
         state.output.extend(defs);
     }
@@ -107,15 +111,16 @@ pub fn generate(
         let defs = state.mock_defs();
         state.output.extend(defs);
     }
-    let exports_executor = state.exports_executor();
-    let imports_executor = state.imports_executor();
     let mut file = state.into_output_file();
-    if exports_executor {
-        let executor = syn::parse_file(include_str!("../../assets/executor.rs"))?;
-        file.items.extend(executor.items);
-    }
-    if imports_executor {
-        file.items.extend(start_spawn_defs());
+    // The imports component's jobs run in the executor, and the exports component's on the task
+    // of `start`.
+    match has_executor {
+        Some(HasExecutor::Exports) => {
+            let executor = syn::parse_file(include_str!("../../assets/executor.rs"))?;
+            file.items.extend(executor.items);
+        }
+        Some(HasExecutor::Imports) => file.items.extend(start_spawn_defs()),
+        None => {}
     }
     if use_custom_allocator {
         // dlmalloc with a memory source that grows by bytes, for `--page-size=1`.
@@ -260,10 +265,9 @@ impl State {
             (Mode::Record, Some(_)) => {
                 methods.push(syn::ImplItem::Fn(self.generate_record_drop(module_path)))
             }
-            (Mode::Replay, Some(_)) => methods.push(syn::ImplItem::Fn(self.generate_replay_drop())),
-            (Mode::Fuzz | Mode::Dialog, Some(resource)) => methods.push(syn::ImplItem::Fn(
-                self.generate_mock_resource_new(module_path, resource),
-            )),
+            (Mode::Replay | Mode::Fuzz, Some(_)) => {
+                methods.push(syn::ImplItem::Fn(self.generate_mock_drop()))
+            }
             _ => (),
         }
         parse_quote! {
@@ -284,12 +288,12 @@ impl State {
         } else if func_name.starts_with("get_mock_") {
             let resource = get_return_type(&sig.output).unwrap();
             let name = self.conversion_resource(&sig.ident);
-            // In fuzz and dialog modes, `_resource_new` labels the mock by its handle (see
-            // `generate_mock_resource_new`); in replay mode, by the handle in the trace.
+            // In fuzz and dialog modes, the mock gets the next label (see `next_mock_label`); in
+            // replay mode, the trace's.
             match self.mode {
                 Mode::Fuzz | Mode::Dialog => quote! {
                     let _ = handle;
-                    #resource::new(MockedResource { handle: 0, name: #name.to_string() })
+                    #resource::new(MockedResource { handle: next_mock_label(), name: #name.to_string() })
                 },
                 _ => quote! {
                     #resource::new(MockedResource { handle, name: #name.to_string() })
@@ -352,19 +356,15 @@ impl State {
         }
         res
     }
-    /// Whether this is the imports component, which exports `proxy:conversion/executor` to run its
-    /// jobs.
-    fn exports_executor(&self) -> bool {
-        self.module_paths
-            .iter()
-            .any(|path| path.join("::") == EXECUTOR_MODULE)
-    }
-    /// Whether this is the exports component, whose `start` runs `proxy:conversion/executor`.
-    fn imports_executor(&self) -> bool {
+    /// Whether this component exports `proxy:conversion/executor` or imports it; `None` in record
+    /// mode, which has no executor.
+    fn has_executor(&self) -> Option<HasExecutor> {
         let import = EXECUTOR_MODULE.strip_prefix("exports::").unwrap();
-        self.module_paths
-            .iter()
-            .any(|path| path.join("::") == import)
+        self.module_paths.iter().find_map(|path| match path.join("::") {
+            path if path == EXECUTOR_MODULE => Some(HasExecutor::Exports),
+            path if path == import => Some(HasExecutor::Imports),
+            _ => None,
+        })
     }
     /// The async `start` function running `body`. The imports component's jobs run in
     /// `proxy:conversion/executor` until the exports `start` called are done, and the jobs of this
@@ -397,6 +397,15 @@ impl State {
             },
             ("run", _) => quote! { run_executor().await },
             ("stop", _) => quote! { stop_executor() },
+            ("step", _) => quote! { next_step() },
+            ("host_drops", Mode::Fuzz) => quote! {
+                MOVING.with(|moving| moving.set(dropping));
+                HOST_DROP_AT.set(dropping.then(next_step));
+            },
+            ("host_drops", Mode::Replay) => {
+                quote! { MOVING.with(|moving| moving.set(dropping)) }
+            }
+            ("host_drops", _) => quote! { let _ = dropping; },
             (name, _) => unreachable!("unexpected executor function {name}"),
         };
         parse_quote! {
@@ -414,7 +423,77 @@ impl State {
     }
 }
 
-/// Helpers of record and replay modes, which make the lines of `proxy:recorder/types`. Each
+/// How a component has `proxy:conversion/executor`, in the modes with `start`.
+#[derive(Clone, Copy)]
+enum HasExecutor {
+    /// It exports it, to run its jobs: the imports component.
+    Exports,
+    /// It imports it, which its `start` runs: the exports component, whose jobs run on the task
+    /// of `start`.
+    Imports,
+}
+
+/// Items for the jobs of replay and fuzz modes, which differ by where the jobs run: the table the
+/// component labels its handles in; `trace_at`, the step of a host line its jobs deliver, the
+/// executor's run in the imports component, and a step of its own, as an export call's arrival,
+/// in the exports component; and, in fuzz mode, `host_dropping`, which runs `f`, dropping mocks
+/// for the host, e.g. those in a value a job read from the guest, so that the trace has the
+/// host's drops, in the step they happen in.
+fn job_defs(mode: &Mode, has_executor: Option<HasExecutor>) -> Vec<Item> {
+    let is_fuzz = matches!(mode, Mode::Fuzz);
+    let file: File = match has_executor {
+        Some(HasExecutor::Exports) => {
+            let host_dropping = if is_fuzz {
+                quote! {
+                    #[allow(dead_code)]
+                    fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
+                        MOVING.with(|moving| moving.set(true));
+                        HOST_DROP_AT.set(Some(current_step()));
+                        let res = f();
+                        MOVING.with(|moving| moving.set(false));
+                        HOST_DROP_AT.set(None);
+                        res
+                    }
+                }
+            } else {
+                quote! {}
+            };
+            parse_quote! {
+                #[allow(dead_code)]
+                const TRACE_TABLE: Table = Table::Imports;
+                #[allow(dead_code)]
+                fn trace_at() -> u32 { current_step() }
+                #host_dropping
+            }
+        }
+        Some(HasExecutor::Imports) => {
+            let host_dropping = if is_fuzz {
+                quote! {
+                    #[allow(dead_code)]
+                    fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
+                        proxy::conversion::executor::host_drops(true);
+                        let res = f();
+                        proxy::conversion::executor::host_drops(false);
+                        res
+                    }
+                }
+            } else {
+                quote! {}
+            };
+            parse_quote! {
+                #[allow(dead_code)]
+                const TRACE_TABLE: Table = Table::Exports;
+                #[allow(dead_code)]
+                fn trace_at() -> u32 { proxy::conversion::executor::step() }
+                #host_dropping
+            }
+        }
+        None => return Vec::new(),
+    };
+    file.items
+}
+
+/// Helpers of record, replay and fuzz modes, which make the lines of `proxy:recorder/types`. Each
 /// component numbers the calls it sees with its own counter: the exports component the host's
 /// calls of exports, and the imports component the guest's calls of imports (see
 /// `crates/trace`).

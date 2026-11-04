@@ -1,6 +1,6 @@
 use crate::codegen::util::make_path;
 use crate::codegen::wit::WitType;
-use crate::traits::{Trait, new_mock};
+use crate::traits::{Trait, host_end_defs, new_mock};
 use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
@@ -47,9 +47,8 @@ impl Trait for DialogTrait {
             res.push(parse_quote! {
             impl Dialog for #resource_path {
                 fn read_value(_dep: u32) -> Self {
-                    // `_resource_new` gives it its handle.
                     #resource_path::new(MockedResource {
-                        handle: 0,
+                        handle: next_mock_label(),
                         name: #wit_name.to_string(),
                     })
                 }
@@ -239,9 +238,9 @@ impl Trait for DialogTrait {
           }
           impl Dialog for MockedResource {
               fn read_value(_dep: u32) -> Self {
-                  // A constructor's, which `_resource_new` gives its handle.
+                  // A constructor's.
                   Self {
-                      handle: 0,
+                      handle: next_mock_label(),
                       name: "mocked-resource".to_string(),
                   }
               }
@@ -305,13 +304,14 @@ impl Trait for DialogTrait {
 
 impl DialogTrait {
     /// `Dialog` for streams, futures and error-contexts. The bindings only have the `wit_stream`
-    /// and `wit_future` modules for them if the world has streams or futures.
+    /// and `wit_future` modules for them if the world has streams or futures. They are labeled as
+    /// in fuzz mode, by the end the component keeps (see `host_end_defs`).
     ///
     /// The virtualized host writes the streams and futures it gives the guest, and reads those
     /// the guest gives it, in jobs of `assets/executor.rs`, which ask the user, one chunk at a
     /// time, what to write, or whether to keep reading.
     fn async_defs(&self) -> Vec<Item> {
-        let mut items = Vec::new();
+        let mut items = host_end_defs(self.has_streams, self.has_futures);
         if self.has_streams {
             let ast: syn::File = parse_quote! {
               impl<T> Dialog for wit_bindgen::StreamReader<T>
@@ -319,12 +319,7 @@ impl DialogTrait {
                   T: Dialog + ToValue + ValueTyped + wit_stream::StreamPayload + 'static,
               {
                   fn read_value(_dep: u32) -> Self {
-                      let (mut writer, reader) = wit_stream::new::<T>();
-                      // The host keeps the writer, so it labels the stream for its lifetime; the
-                      // reader moves on to the guest, which frees its handle.
-                      let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
-                      let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
-                      proxy::util::dialog::print(0, &format!("new (writer: {label}, reader: {reader_label})"));
+                      let (mut writer, reader, label) = host_stream::<T>();
                       spawn(async move {
                           let choices = ["write a chunk".to_string(), "end the stream".to_string()];
                           loop {
@@ -345,7 +340,7 @@ impl DialogTrait {
                       reader
                   }
                   fn consume(mut self, _dep: u32) {
-                      let label = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+                      let label = handle_label(&self);
                       spawn(async move {
                           let choices = ["read a chunk".to_string(), "drop the stream".to_string()];
                           loop {
@@ -375,12 +370,7 @@ impl DialogTrait {
                   T: Dialog + ToValue + ValueTyped + wit_future::FuturePayload,
               {
                   fn read_value(_dep: u32) -> Self {
-                      let (writer, reader) =
-                          wit_future::new::<T>(|| unreachable!("the value is always written"));
-                      // As for streams, the host keeps the writer, which labels the future.
-                      let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
-                      let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
-                      proxy::util::dialog::print(0, &format!("new (writer: {label}, reader: {reader_label})"));
+                      let (writer, reader, label) = host_future::<T>();
                       spawn(async move {
                           proxy::util::dialog::print(0, &format!("The host writes {label}"));
                           let value: T = Dialog::read_value(1);
@@ -394,7 +384,7 @@ impl DialogTrait {
                       reader
                   }
                   fn consume(self, _dep: u32) {
-                      let label = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+                      let label = handle_label(&self);
                       spawn(async move {
                           let choices = ["read the value".to_string(), "drop the future".to_string()];
                           let prompt = format!("The host reads {label}");

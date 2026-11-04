@@ -3,7 +3,7 @@
 //! wit-bindgen names each Rust item after a WIT item, so an item of the bindings is found by
 //! applying wit-bindgen's naming to the WIT items, never by recovering WIT names from Rust ones.
 use super::State;
-use super::util::ResourceFuncKind;
+use super::util::{ArgInfo, ResourceFuncKind};
 use crate::wit_util::{has_async_value, strip_wrapped};
 use heck::ToUpperCamelCase;
 use std::collections::BTreeMap;
@@ -40,6 +40,15 @@ pub struct WitFunc {
     pub result_async: bool,
 }
 impl WitFunc {
+    /// The arguments with the streams and futures the guest gives the host, which the
+    /// virtualized host reads or drops, of `args`, the arguments of the Rust function.
+    pub fn consumed_args<'a>(&self, args: &'a [ArgInfo]) -> Vec<&'a Ident> {
+        args.iter()
+            .zip(&self.params_async)
+            .filter(|(arg, is_async)| **is_async && !arg.is_borrowed)
+            .map(|(arg, _)| &arg.ident)
+            .collect()
+    }
     /// In virtualized components, constructors return `Self`, i.e. `MockedResource`, so
     /// type-directed traits like `Dialog` or `Arbitrary` cannot recover the resource name.
     /// Returns the name to patch into the `MockedResource`, if this is a constructor.

@@ -68,32 +68,16 @@ impl State {
             }
         }
     }
-    /// Overrides wit-bindgen's `resource_from_raw_`, which the `[dtor]` of a mocked resource
-    /// calls, to check the guest's drop with the trace.
-    pub fn generate_replay_drop(&self) -> syn::ImplItemFn {
-        parse_quote! {
-            unsafe fn resource_from_raw_(handle: *mut Option<Self>) -> Option<Self> {
-                // `None` if `into_inner` moved the resource out: not a drop.
-                if let Some(res) = *unsafe { Box::from_raw(handle) } {
-                    if !MOVING.with(|moving| moving.get()) {
-                        let name = wasm_wave::to_string(&res.to_value()).unwrap();
-                        proxy::recorder::replay::check(&trace_drop(Party::Guest, Table::Imports, name));
-                    }
-                }
-                None
-            }
-        }
-    }
     /// Items the replay functions use.
     pub fn replay_defs(&self) -> Vec<Item> {
         // `MOVING` is set while an import drops the resources its arguments own, which the guest
-        // moved to the host, so that `generate_replay_drop` doesn't check them as drops.
+        // moved to the host, so that `generate_mock_drop` doesn't take them for the guest's drops.
         //
-        // Only replay needs it. In record mode, the import passes the host resource of each
-        // argument on to the host, taking it out with `into_inner` (see `ToProxy`), so the
-        // destructor finds no resource to record. In replay there's no host to take them: the
+        // Only replay and fuzz modes need it. In record mode, the import passes the host resource
+        // of each argument on to the host, taking it out with `into_inner` (see `ToProxy`), so the
+        // destructor finds no resource to record. With mocks there's no host to take them: the
         // import drops its arguments, and the destructors find their mocked resources. A flag
-        // spares replay a type-directed trait like `ToProxy`, to take the resources out of nested
+        // spares a type-directed trait like `ToProxy`, to take the resources out of nested
         // arguments, e.g. `list<counter>`. A thread-local, as `[dtor]`s take no other arguments.
         let file: syn::File = parse_quote! {
             thread_local! {

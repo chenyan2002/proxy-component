@@ -575,7 +575,7 @@ impl<O: Dialog, E: Dialog> Dialog for Result<O, E> {
 impl Dialog for MockedResource {
     fn read_value(_dep: u32) -> Self {
         Self {
-            handle: 0,
+            handle: next_mock_label(),
             name: "mocked-resource".to_string(),
         }
     }
@@ -607,18 +607,62 @@ impl_dialog_tuple!(T1, T2, T3, T4, T5);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
+thread_local! {
+    static READER_LABELS : std::cell::RefCell < std::collections::HashMap < u32, u32 >> =
+    std::cell::RefCell::new(std::collections::HashMap::new());
+}
+/// Labels a stream or future this component made by the handle of its `writer`, which it
+/// keeps for the stream's lifetime, also where its `reader` is printed: in the value that
+/// hands the reader out, after which the reader moves on, and its handle can be reused.
+/// So the entry is gone once the reader is printed.
+fn label_by_writer(reader: u32, writer: u32) {
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    HOOK.call_once(|| {
+        wasm_wave::value::convert::set_handle_label(|_kind, handle| {
+            READER_LABELS.with_borrow_mut(|labels| labels.remove(&handle))
+        })
+    });
+    READER_LABELS
+        .with_borrow_mut(|labels| {
+            labels.remove(&writer);
+            labels.insert(reader, writer);
+        });
+}
+/// The label of a stream or future, e.g. `#stream-7`, by the end this component keeps.
+fn handle_label(end: &impl ToValue) -> String {
+    wasm_wave::to_string(&end.to_value()).unwrap()
+}
+/// A stream the host writes: its writer, its reader, to hand out, and its label.
+fn host_stream<T: wit_stream::StreamPayload + 'static>() -> (
+    wit_bindgen::StreamWriter<T>,
+    wit_bindgen::StreamReader<T>,
+    String,
+) {
+    let (writer, reader) = wit_stream::new::<T>();
+    label_by_writer(reader.handle(), writer.handle());
+    let label = handle_label(&writer);
+    (writer, reader, label)
+}
+/// A future the host writes, which it always does: its writer, its reader, to hand
+/// out, and its label.
+fn host_future<T: wit_future::FuturePayload + 'static>() -> (
+    wit_bindgen::FutureWriter<T>,
+    wit_bindgen::FutureReader<T>,
+    String,
+) {
+    let (writer, reader) = wit_future::new::<
+        T,
+    >(|| unreachable!("the value is always written"));
+    label_by_writer(reader.handle(), writer.handle());
+    let label = handle_label(&writer);
+    (writer, reader, label)
+}
 impl<T> Dialog for wit_bindgen::StreamReader<T>
 where
     T: Dialog + ToValue + ValueTyped + wit_stream::StreamPayload + 'static,
 {
     fn read_value(_dep: u32) -> Self {
-        let (mut writer, reader) = wit_stream::new::<T>();
-        let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
-        let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
-        proxy::util::dialog::print(
-            0,
-            &format!("new (writer: {label}, reader: {reader_label})"),
-        );
+        let (mut writer, reader, label) = host_stream::<T>();
         spawn(async move {
             let choices = ["write a chunk".to_string(), "end the stream".to_string()];
             loop {
@@ -639,7 +683,7 @@ where
         reader
     }
     fn consume(mut self, _dep: u32) {
-        let label = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+        let label = handle_label(&self);
         spawn(async move {
             let choices = ["read a chunk".to_string(), "drop the stream".to_string()];
             loop {
@@ -664,15 +708,7 @@ where
     T: Dialog + ToValue + ValueTyped + wit_future::FuturePayload,
 {
     fn read_value(_dep: u32) -> Self {
-        let (writer, reader) = wit_future::new::<
-            T,
-        >(|| unreachable!("the value is always written"));
-        let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
-        let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
-        proxy::util::dialog::print(
-            0,
-            &format!("new (writer: {label}, reader: {reader_label})"),
-        );
+        let (writer, reader, label) = host_future::<T>();
         spawn(async move {
             proxy::util::dialog::print(0, &format!("The host writes {label}"));
             let value: T = Dialog::read_value(1);
@@ -686,7 +722,7 @@ where
         reader
     }
     fn consume(self, _dep: u32) {
-        let label = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+        let label = handle_label(&self);
         spawn(async move {
             let choices = ["read the value".to_string(), "drop the future".to_string()];
             let prompt = format!("The host reads {label}");
@@ -711,8 +747,13 @@ impl Dialog for wit_bindgen::rt::async_support::ErrorContext {
     }
 }
 thread_local! {
-    #[allow(dead_code)] static PENDING_RET : std::cell::Cell < bool > = const {
-    std::cell::Cell::new(false) };
+    static MOCK_LABEL : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+}
+/// The label of a new mock.
+#[allow(dead_code)]
+fn next_mock_label() -> u32 {
+    MOCK_LABEL.set(MOCK_LABEL.get() + 1);
+    MOCK_LABEL.get()
 }
 thread_local! {
     static SPAWNED : std::cell::RefCell < Vec < wit_bindgen::JoinHandle < () >> > = const

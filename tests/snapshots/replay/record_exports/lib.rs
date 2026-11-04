@@ -586,6 +586,12 @@ fn trace_return_value(answers: Vec<Line>) -> Option<String> {
         })
         .expect("the trace doesn't answer the call")
 }
+#[allow(dead_code)]
+const TRACE_TABLE: Table = Table::Exports;
+#[allow(dead_code)]
+fn trace_at() -> u32 {
+    proxy::conversion::executor::step()
+}
 thread_local! {
     #[allow(dead_code)] static MOVING : std::cell::Cell < bool > = const {
     std::cell::Cell::new(false) };

@@ -23,10 +23,10 @@ pub struct InstrumentArgs {
     pub one_byte_page_size: bool,
 }
 impl InstrumentArgs {
-    /// Whether the composition has the bundled recorder component: only record and replay
-    /// modes use it, unless the host implements it.
+    /// Whether the composition has the bundled recorder component: record, replay and fuzz modes
+    /// use it, unless the host implements it.
     pub fn bundles_recorder(&self) -> bool {
-        matches!(self.mode, Mode::Record | Mode::Replay) && !self.use_host_recorder
+        matches!(self.mode, Mode::Record | Mode::Replay | Mode::Fuzz) && !self.use_host_recorder
     }
 }
 

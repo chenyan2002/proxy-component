@@ -5,6 +5,30 @@ bindings::export!(Stub with_types_in bindings);
 impl exports::proxy::recorder::start_replay::Guest for Stub {
     async fn start() -> () {
         let __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
+        /// Calls an async export, and records that the guest started it, if it blocks.
+        #[allow(dead_code)]
+        async fn call_export<T>(
+            id: TaskId,
+            call: impl std::future::Future<Output = T>,
+        ) -> T {
+            let mut call = std::pin::pin!(call);
+            let mut started = false;
+            std::future::poll_fn(|cx| {
+                    let poll = call.as_mut().poll(cx);
+                    if poll.is_pending() && !started {
+                        started = true;
+                        proxy::recorder::record::record(
+                            &Line {
+                                by: Party::Guest,
+                                at: None,
+                                event: Event::Started(id),
+                            },
+                        );
+                    }
+                    poll
+                })
+                .await
+        }
         let __buf = proxy::util::debug::get_random();
         let mut u = Unstructured::new(&__buf);
         for _ in 0..10 {
@@ -15,13 +39,32 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let url: String = Fuzz::fuzz(&mut u).unwrap();
                     __params
                         .push(wasm_wave::to_string(&ToValue::to_value(&url)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:p3/api@0.1.0.handle", __params
-                            .join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:p3/api@0.1.0.handle",
+                                true,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = call_export(__id, test::p3::api::handle(url)).await;
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    let _ = test::p3::api::handle(url).await;
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -31,13 +74,32 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let port: u16 = Fuzz::fuzz(&mut u).unwrap();
                     __params
                         .push(wasm_wave::to_string(&ToValue::to_value(&port)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:p3/api@0.1.0.serve", __params
-                            .join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:p3/api@0.1.0.serve",
+                                true,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = call_export(__id, test::p3::api::serve(port)).await;
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    Fuzz::consume(test::p3::api::serve(port).await, &mut u);
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -49,13 +111,32 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         )
                         .unwrap();
                     __params.push(wasm_wave::to_string(&ToValue::to_value(&s)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:p3/api@0.1.0.echo", __params
-                            .join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:p3/api@0.1.0.echo",
+                                false,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = test::p3::api::echo(s);
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    Fuzz::consume(test::p3::api::echo(s), &mut u);
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -65,13 +146,32 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let url: String = Fuzz::fuzz(&mut u).unwrap();
                     __params
                         .push(wasm_wave::to_string(&ToValue::to_value(&url)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:p3/host@0.1.0.fetch", __params
-                            .join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:p3/host@0.1.0.fetch",
+                                true,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = call_export(__id, test::p3::host::fetch(url)).await;
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    let _ = test::p3::host::fetch(url).await;
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -81,13 +181,28 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let ms: u64 = Fuzz::fuzz(&mut u).unwrap();
                     __params
                         .push(wasm_wave::to_string(&ToValue::to_value(&ms)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:p3/host@0.1.0.sleep", __params
-                            .join(", ")
-                        ),
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:p3/host@0.1.0.sleep",
+                                true,
+                                __params,
+                            )
+                        },
                     );
-                    let _ = test::p3::host::sleep(ms).await;
+                    let res = call_export(__id, test::p3::host::sleep(ms)).await;
+                    proxy::recorder::record::record(
+                        &trace_return(Party::Guest, __id, None),
+                    );
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -100,13 +215,28 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         .unwrap();
                     __params
                         .push(wasm_wave::to_string(&ToValue::to_value(&err)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:p3/host@0.1.0.report", __params
-                            .join(", ")
-                        ),
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:p3/host@0.1.0.report",
+                                false,
+                                __params,
+                            )
+                        },
                     );
-                    let _ = test::p3::host::report(err);
+                    let res = test::p3::host::report(err);
+                    proxy::recorder::record::record(
+                        &trace_return(Party::Guest, __id, None),
+                    );
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -118,13 +248,28 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     > = Fuzz::fuzz(&mut u).unwrap();
                     __params
                         .push(wasm_wave::to_string(&ToValue::to_value(&done)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:p3/host@0.1.0.finish", __params
-                            .join(", ")
-                        ),
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:p3/host@0.1.0.finish",
+                                false,
+                                __params,
+                            )
+                        },
                     );
-                    let _ = test::p3::host::finish(done);
+                    let res = test::p3::host::finish(done);
+                    proxy::recorder::record::record(
+                        &trace_return(Party::Guest, __id, None),
+                    );
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -138,13 +283,32 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         .push(
                             wasm_wave::to_string(&ToValue::to_value(&contents)).unwrap(),
                         );
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "new test:p3/host/body@0.1.0", __params
-                            .join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "new test:p3/host/body@0.1.0",
+                                false,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = test::p3::host::Body::new(contents);
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    let _ = test::p3::host::Body::new(contents);
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
@@ -154,23 +318,38 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let this: test::p3::host::Body = Fuzz::fuzz(&mut u).unwrap();
                     __params
                         .push(wasm_wave::to_string(&ToValue::to_value(&this)).unwrap());
-                    proxy::util::debug::print(
-                        &format!(
-                            "export: {}({})", "test:p3/host/body@0.1.0.consume", __params
-                            .join(", ")
+                    let __id = trace_task_id(Table::Exports);
+                    let __at = proxy::conversion::executor::step();
+                    proxy::recorder::record::record(
+                        &Line {
+                            at: Some(__at),
+                            ..trace_call(
+                                Party::Host,
+                                __id,
+                                "test:p3/host/body@0.1.0.consume",
+                                false,
+                                __params,
+                            )
+                        },
+                    );
+                    let res = test::p3::host::Body::consume(this);
+                    proxy::recorder::record::record(
+                        &trace_return(
+                            Party::Guest,
+                            __id,
+                            Some(wasm_wave::to_string(&res.to_value()).unwrap()),
                         ),
                     );
-                    Fuzz::consume(test::p3::host::Body::consume(this), &mut u);
+                    proxy::conversion::executor::host_drops(true);
+                    Fuzz::consume(res, &mut u);
+                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                    proxy::conversion::executor::host_drops(false);
                     for _ in 0..u.int_in_range(0..=3u8).unwrap() {
                         wit_bindgen::yield_async().await;
                     }
                 }
                 _ => unreachable!(),
             }
-            SCOPED_ALLOC
-                .with(|alloc| {
-                    alloc.borrow_mut().clear();
-                });
         }
         join_spawned().await;
         proxy::conversion::executor::stop();
@@ -310,6 +489,13 @@ impl Fuzz for test::p3::host::ErrorCode {
             _ => unreachable!(),
         }
     }
+    #[allow(unused_variables)]
+    fn consume(self, u: &mut Unstructured<'_>) {
+        match self {
+            test::p3::host::ErrorCode::Timeout => {}
+            test::p3::host::ErrorCode::Other(x) => Fuzz::consume(x, u),
+        }
+    }
 }
 impl Fuzz for test::p3::host::Body {
     fn fuzz(_u: &mut Unstructured<'_>) -> Result<Self> {
@@ -340,7 +526,7 @@ trait Fuzz: Sized {
 impl Fuzz for MockedResource {
     fn fuzz(_u: &mut Unstructured<'_>) -> Result<Self> {
         Ok(Self {
-            handle: 0,
+            handle: next_mock_label(),
             name: "mocked-resource".to_string(),
         })
     }
@@ -406,33 +592,114 @@ impl_fuzz_tuple!(T1, T2, T3, T4, T5, T6);
 impl_fuzz_tuple!(T1, T2, T3, T4, T5, T6, T7);
 impl_fuzz_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
 impl_fuzz_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
+thread_local! {
+    static READER_LABELS : std::cell::RefCell < std::collections::HashMap < u32, u32 >> =
+    std::cell::RefCell::new(std::collections::HashMap::new());
+}
+/// Labels a stream or future this component made by the handle of its `writer`, which it
+/// keeps for the stream's lifetime, also where its `reader` is printed: in the value that
+/// hands the reader out, after which the reader moves on, and its handle can be reused.
+/// So the entry is gone once the reader is printed.
+fn label_by_writer(reader: u32, writer: u32) {
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    HOOK.call_once(|| {
+        wasm_wave::value::convert::set_handle_label(|_kind, handle| {
+            READER_LABELS.with_borrow_mut(|labels| labels.remove(&handle))
+        })
+    });
+    READER_LABELS
+        .with_borrow_mut(|labels| {
+            labels.remove(&writer);
+            labels.insert(reader, writer);
+        });
+}
+/// The label of a stream or future, e.g. `#stream-7`, by the end this component keeps.
+fn handle_label(end: &impl ToValue) -> String {
+    wasm_wave::to_string(&end.to_value()).unwrap()
+}
+/// A stream the host writes: its writer, its reader, to hand out, and its label.
+fn host_stream<T: wit_stream::StreamPayload + 'static>() -> (
+    wit_bindgen::StreamWriter<T>,
+    wit_bindgen::StreamReader<T>,
+    String,
+) {
+    let (writer, reader) = wit_stream::new::<T>();
+    label_by_writer(reader.handle(), writer.handle());
+    let label = handle_label(&writer);
+    (writer, reader, label)
+}
+/// A future the host writes, which it always does: its writer, its reader, to hand
+/// out, and its label.
+fn host_future<T: wit_future::FuturePayload + 'static>() -> (
+    wit_bindgen::FutureWriter<T>,
+    wit_bindgen::FutureReader<T>,
+    String,
+) {
+    let (writer, reader) = wit_future::new::<
+        T,
+    >(|| unreachable!("the value is always written"));
+    label_by_writer(reader.handle(), writer.handle());
+    let label = handle_label(&writer);
+    (writer, reader, label)
+}
+/// The label of a stream or future, by the end this component keeps.
+fn label_of(end: &impl ToValue) -> Label {
+    Label {
+        table: TRACE_TABLE,
+        name: handle_label(end),
+    }
+}
+/// A host line, in step `at`, in which its job made it, e.g. issued the write the
+/// guest read; or, by default, in the current one.
+fn host_line_at(at: u32, event: Event) -> Line {
+    Line {
+        by: Party::Host,
+        at: Some(at),
+        event,
+    }
+}
+fn host_line(event: Event) -> Line {
+    host_line_at(trace_at(), event)
+}
+fn guest_line(event: Event) -> Line {
+    Line {
+        by: Party::Guest,
+        at: None,
+        event,
+    }
+}
 impl<T> Fuzz for wit_bindgen::StreamReader<T>
 where
     T: Fuzz + ToValue + ValueTyped + wit_stream::StreamPayload,
 {
     fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
-        let (mut writer, reader) = wit_stream::new::<T>();
-        let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
-        let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
-        proxy::util::debug::print(
-            &format!("new (writer: {label}, reader: {reader_label})"),
-        );
+        let (mut writer, reader, name) = host_stream::<T>();
+        let label = Label { table: TRACE_TABLE, name };
         let chunks: Vec<Vec<T>> = Fuzz::fuzz(u)?;
         spawn(async move {
-            for chunk in chunks.into_iter().filter(|chunk| !chunk.is_empty()) {
+            let mut chunks = chunks.into_iter().filter(|chunk| !chunk.is_empty());
+            while let Some(chunk) = chunks.next() {
                 let items = wasm_wave::to_string(&chunk.to_value()).unwrap();
-                if !writer.write_all(chunk).await.is_empty() {
-                    proxy::util::debug::print(&format!("{label} dropped by guest"));
+                let at = trace_at();
+                let rest = writer.write_all(chunk).await;
+                if !rest.is_empty() {
+                    proxy::recorder::record::record(&guest_line(Event::Drop(label)));
+                    host_dropping(move || drop((rest, chunks.collect::<Vec<_>>())));
                     return;
                 }
-                proxy::util::debug::print(&format!("{label}.read() = {items}"));
+                let chunk = Chunk {
+                    stream: label.clone(),
+                    items,
+                };
+                proxy::recorder::record::record(&host_line_at(at, Event::Write(chunk)));
             }
-            proxy::util::debug::print(&format!("{label}.read() = dropped"));
+            drop(writer);
+            proxy::recorder::record::record(&host_line(Event::Drop(label)));
         });
         Ok(reader)
     }
     fn consume(mut self, u: &mut Unstructured<'_>) {
-        let label = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+        let label = label_of(&self);
         let reads: Option<u32> = match u.int_in_range(0..=9u8).unwrap_or(0) {
             8 => Some(u.int_in_range(1..=4).unwrap_or(1)),
             9 => Some(0),
@@ -442,16 +709,23 @@ where
         spawn(async move {
             let mut count = 0;
             while reads != Some(count) {
+                let at = trace_at();
                 let (result, items) = self.read(Vec::with_capacity(capacity)).await;
                 if let wit_bindgen::StreamResult::Dropped = result {
-                    proxy::util::debug::print(&format!("{label} -> dropped"));
+                    proxy::recorder::record::record(&guest_line(Event::Drop(label)));
                     return;
                 }
-                let items = wasm_wave::to_string(&items.to_value()).unwrap();
-                proxy::util::debug::print(&format!("{label} -> {items}"));
+                let wave = wasm_wave::to_string(&items.to_value()).unwrap();
+                let chunk = Chunk {
+                    stream: label.clone(),
+                    items: wave,
+                };
+                proxy::recorder::record::record(&host_line_at(at, Event::Read(chunk)));
+                host_dropping(move || drop(items));
                 count += 1;
             }
-            proxy::util::debug::print(&format!("{label} dropped by host"));
+            drop(self);
+            proxy::recorder::record::record(&host_line(Event::Drop(label)));
         });
     }
 }
@@ -461,34 +735,47 @@ where
 {
     fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
         let value = T::fuzz(u)?;
-        let (writer, reader) = wit_future::new::<
-            T,
-        >(|| unreachable!("the value is always written"));
-        let label = wasm_wave::to_string(&ToValue::to_value(&writer)).unwrap();
-        let reader_label = wasm_wave::to_string(&ToValue::to_value(&reader)).unwrap();
-        proxy::util::debug::print(
-            &format!("new (writer: {label}, reader: {reader_label})"),
-        );
+        let (writer, reader, name) = host_future::<T>();
+        let label = Label { table: TRACE_TABLE, name };
         let wave = wasm_wave::to_string(&value.to_value()).unwrap();
         spawn(async move {
-            if writer.write(value).await.is_ok() {
-                proxy::util::debug::print(&format!("{label}.read() = {wave}"));
-            } else {
-                proxy::util::debug::print(&format!("{label} dropped by guest"));
+            let at = trace_at();
+            match writer.write(value).await {
+                Ok(()) => {
+                    let value = FutureValue {
+                        future: label,
+                        value: wave,
+                    };
+                    proxy::recorder::record::record(
+                        &host_line_at(at, Event::Value(value)),
+                    );
+                }
+                Err(unwritten) => {
+                    proxy::recorder::record::record(&guest_line(Event::Drop(label)));
+                    host_dropping(move || drop(unwritten));
+                }
             }
         });
         Ok(reader)
     }
     fn consume(self, u: &mut Unstructured<'_>) {
-        let label = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+        let label = label_of(&self);
         let read = u.int_in_range(0..=9u8).unwrap_or(0) != 9;
         spawn(async move {
             if read {
-                let value = wasm_wave::to_string(&self.await.to_value()).unwrap();
-                proxy::util::debug::print(&format!("{label} -> {value}"));
+                let value = self.await;
+                let wave = wasm_wave::to_string(&value.to_value()).unwrap();
+                let line = guest_line(
+                    Event::Value(FutureValue {
+                        future: label,
+                        value: wave,
+                    }),
+                );
+                proxy::recorder::record::record(&line);
+                host_dropping(move || drop(value));
             } else {
                 drop(self);
-                proxy::util::debug::print(&format!("{label} dropped by host"));
+                proxy::recorder::record::record(&host_line(Event::Drop(label)));
             }
         });
     }
@@ -498,9 +785,95 @@ impl Fuzz for wit_bindgen::rt::async_support::ErrorContext {
         Ok(Self::new(&String::fuzz(u)?))
     }
 }
+use bindings::proxy::recorder::types::*;
 thread_local! {
-    #[allow(dead_code)] static PENDING_RET : std::cell::Cell < bool > = const {
+    static TASK_ID : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+}
+#[allow(dead_code)]
+fn trace_task_id(table: Table) -> TaskId {
+    let id = TASK_ID
+        .with(|id| {
+            id.set(id.get() + 1);
+            id.get()
+        });
+    TaskId { table, id }
+}
+#[allow(dead_code)]
+fn trace_call(
+    by: Party,
+    id: TaskId,
+    func: &str,
+    is_async: bool,
+    args: Vec<String>,
+) -> Line {
+    let call = Call {
+        id,
+        is_async,
+        func: func.to_string(),
+        args,
+    };
+    Line {
+        by,
+        at: None,
+        event: Event::Call(call),
+    }
+}
+#[allow(dead_code)]
+fn trace_return(by: Party, id: TaskId, value: Option<String>) -> Line {
+    let ret = ReturnValue { id, value };
+    Line {
+        by,
+        at: None,
+        event: Event::Return(ret),
+    }
+}
+#[allow(dead_code)]
+fn trace_drop(by: Party, table: Table, name: String) -> Line {
+    let label = Label { table, name };
+    Line {
+        by,
+        at: None,
+        event: Event::Drop(label),
+    }
+}
+/// The value of the `return` among the host's answers to a call.
+#[allow(dead_code)]
+fn trace_return_value(answers: Vec<Line>) -> Option<String> {
+    answers
+        .into_iter()
+        .find_map(|line| match line.event {
+            Event::Return(ret) => Some(ret.value),
+            _ => None,
+        })
+        .expect("the trace doesn't answer the call")
+}
+#[allow(dead_code)]
+const TRACE_TABLE: Table = Table::Exports;
+#[allow(dead_code)]
+fn trace_at() -> u32 {
+    proxy::conversion::executor::step()
+}
+#[allow(dead_code)]
+fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
+    proxy::conversion::executor::host_drops(true);
+    let res = f();
+    proxy::conversion::executor::host_drops(false);
+    res
+}
+thread_local! {
+    #[allow(dead_code)] static MOVING : std::cell::Cell < bool > = const {
     std::cell::Cell::new(false) };
+}
+thread_local! {
+    static MOCK_LABEL : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+    static HOST_DROP_AT : std::cell::Cell < Option < u32 >> = const {
+    std::cell::Cell::new(None) };
+}
+/// The label of a new mock.
+#[allow(dead_code)]
+fn next_mock_label() -> u32 {
+    MOCK_LABEL.set(MOCK_LABEL.get() + 1);
+    MOCK_LABEL.get()
 }
 thread_local! {
     static SPAWNED : std::cell::RefCell < Vec < wit_bindgen::JoinHandle < () >> > = const

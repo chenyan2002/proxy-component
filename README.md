@@ -60,7 +60,7 @@ $ proxy-component instrument -m fuzz <component.wasm>
 $ wasmtime --invoke 'start()' composed.wasm
 ```
 
-Fuzzing the import return and export input based on the WIT type. This mode requires a [Debug component](components/debug/) to get random numbers and logging. The `composed.wasm` can be run in
+Fuzzing the import return and export input based on the WIT type. This mode requires a [Debug component](components/debug/) to get random numbers. The run prints its trace to stdout, in the same format as record mode, so `wasmtime --invoke 'start()' composed.wasm > trace.out` stores it. The `composed.wasm` can be run in
 a standalone `wasmtime` without any special host functions.
 
 ### Dialog
