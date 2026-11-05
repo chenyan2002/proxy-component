@@ -429,9 +429,9 @@ impl ToValue for &MockedResource {
         Value::make_handle(label.into())
     }
 }
-impl ToRust<MockedResource> for Value {
-    fn to_rust(&self) -> MockedResource {
-        let label = self.unwrap_handle();
+impl FromWave for MockedResource {
+    fn from_wave(value: &Value) -> Self {
+        let label = value.unwrap_handle();
         let (name, handle) = label
             .rsplit_once('-')
             .and_then(|(name, handle_str)| {

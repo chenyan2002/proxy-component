@@ -54,7 +54,7 @@ impl exports::test::host::types::Guest for Stub {
                 &wave.unwrap(),
             )
             .unwrap();
-        ret.to_rust()
+        FromWave::from_wave(&ret)
     }
     fn check(
         p: exports::test::host::types::Perms,
@@ -80,7 +80,7 @@ impl exports::test::host::types::Guest for Stub {
                 &wave.unwrap(),
             )
             .unwrap();
-        ret.to_rust()
+        FromWave::from_wave(&ret)
     }
     fn open(
         name: String,
@@ -104,7 +104,7 @@ impl exports::test::host::types::Guest for Stub {
                 &wave.unwrap(),
             )
             .unwrap();
-        ret.to_rust()
+        FromWave::from_wave(&ret)
     }
 }
 impl exports::test::host::types::GuestCounter for MockedResource {
@@ -127,7 +127,7 @@ impl exports::test::host::types::GuestCounter for MockedResource {
             .unwrap();
         MockedResource {
             name: "counter".to_string(),
-            ..ret.to_rust()
+            ..FromWave::from_wave(&ret)
         }
     }
     fn get(&self) -> u32 {
@@ -148,7 +148,7 @@ impl exports::test::host::types::GuestCounter for MockedResource {
                 &wave.unwrap(),
             )
             .unwrap();
-        ret.to_rust()
+        FromWave::from_wave(&ret)
     }
     fn add(&self, n: u32) -> () {
         let mut __params: Vec<String> = vec![
@@ -188,7 +188,7 @@ impl exports::test::host::types::GuestCounter for MockedResource {
                     &wave.unwrap(),
                 )
                 .unwrap();
-            ret.to_rust()
+            FromWave::from_wave(&ret)
         };
         MOVING.with(|moving| moving.set(true));
         drop((b,));
@@ -241,7 +241,7 @@ impl exports::test::log0_2_0::sink::Guest for Stub {
                 &wave.unwrap(),
             )
             .unwrap();
-        ret.to_rust()
+        FromWave::from_wave(&ret)
     }
 }
 impl ValueTyped for exports::test::host::types::Point {
@@ -265,13 +265,14 @@ impl ToValue for exports::test::host::types::Point {
         Value::make_record(&ty, fields).unwrap()
     }
 }
-impl ToRust<exports::test::host::types::Point> for Value {
-    fn to_rust(&self) -> exports::test::host::types::Point {
-        let fields: std::collections::BTreeMap<_, _> = self.unwrap_record().collect();
+impl FromWave for exports::test::host::types::Point {
+    #[allow(unused_variables)]
+    fn from_wave(value: &Value) -> Self {
+        let fields: std::collections::BTreeMap<_, _> = value.unwrap_record().collect();
         exports::test::host::types::Point {
-            x: fields["x"].to_rust(),
-            y: fields["y"].to_rust(),
-            label: fields["label"].to_rust(),
+            x: FromWave::from_wave(&fields["x"]),
+            y: FromWave::from_wave(&fields["y"]),
+            label: FromWave::from_wave(&fields["label"]),
         }
     }
 }
@@ -301,17 +302,17 @@ impl ToValue for exports::test::host::types::Shape {
             .unwrap()
     }
 }
-impl ToRust<exports::test::host::types::Shape> for Value {
-    fn to_rust(&self) -> exports::test::host::types::Shape {
-        match self.unwrap_variant() {
+impl FromWave for exports::test::host::types::Shape {
+    fn from_wave(value: &Value) -> Self {
+        match value.unwrap_variant() {
             (ref case, Some(val)) if case == "circle" => {
-                exports::test::host::types::Shape::Circle(val.to_rust())
+                exports::test::host::types::Shape::Circle(FromWave::from_wave(&val))
             }
             (ref case, Some(val)) if case == "rect" => {
-                exports::test::host::types::Shape::Rect(val.to_rust())
+                exports::test::host::types::Shape::Rect(FromWave::from_wave(&val))
             }
             (ref case, Some(val)) if case == "HTTP-error" => {
-                exports::test::host::types::Shape::HttpError(val.to_rust())
+                exports::test::host::types::Shape::HttpError(FromWave::from_wave(&val))
             }
             (ref case, None) if case == "empty" => {
                 exports::test::host::types::Shape::Empty
@@ -338,9 +339,9 @@ impl ToValue for exports::test::host::types::Color {
             .unwrap()
     }
 }
-impl ToRust<exports::test::host::types::Color> for Value {
-    fn to_rust(&self) -> exports::test::host::types::Color {
-        match self.unwrap_variant() {
+impl FromWave for exports::test::host::types::Color {
+    fn from_wave(value: &Value) -> Self {
+        match value.unwrap_variant() {
             (ref case, None) if case == "red" => exports::test::host::types::Color::Red,
             (ref case, None) if case == "green" => {
                 exports::test::host::types::Color::Green
@@ -373,9 +374,9 @@ impl ToValue for exports::test::host::types::Perms {
         Value::make_flags(&ty, flags).unwrap()
     }
 }
-impl ToRust<exports::test::host::types::Perms> for Value {
-    fn to_rust(&self) -> exports::test::host::types::Perms {
-        let flags: Vec<_> = self.unwrap_flags().map(|f| f.into_owned()).collect();
+impl FromWave for exports::test::host::types::Perms {
+    fn from_wave(value: &Value) -> Self {
+        let flags: Vec<_> = value.unwrap_flags().map(|f| f.into_owned()).collect();
         let mut res = exports::test::host::types::Perms::empty();
         if flags.iter().any(|flag| flag == "read") {
             res |= exports::test::host::types::Perms::READ;
@@ -413,9 +414,9 @@ impl<'a> ToValue for exports::test::host::types::CounterBorrow<'a> {
         Value::make_handle(label.into())
     }
 }
-impl ToRust<exports::test::host::types::Counter> for Value {
-    fn to_rust(&self) -> exports::test::host::types::Counter {
-        let label = self.unwrap_handle();
+impl FromWave for exports::test::host::types::Counter {
+    fn from_wave(value: &Value) -> Self {
+        let label = value.unwrap_handle();
         let expect_handle = label
             .strip_prefix(&format!("{}-", "counter"))
             .and_then(|s| s.parse::<u32>().ok())
@@ -427,8 +428,8 @@ impl ToRust<exports::test::host::types::Counter> for Value {
         handle
     }
 }
-impl<'a> ToRust<exports::test::host::types::CounterBorrow<'a>> for Value {
-    fn to_rust(&self) -> exports::test::host::types::CounterBorrow<'a> {
+impl<'a> FromWave for exports::test::host::types::CounterBorrow<'a> {
+    fn from_wave(_value: &Value) -> Self {
         unreachable!()
     }
 }
@@ -496,9 +497,9 @@ impl ToValue for &MockedResource {
         Value::make_handle(label.into())
     }
 }
-impl ToRust<MockedResource> for Value {
-    fn to_rust(&self) -> MockedResource {
-        let label = self.unwrap_handle();
+impl FromWave for MockedResource {
+    fn from_wave(value: &Value) -> Self {
+        let label = value.unwrap_handle();
         let (name, handle) = label
             .rsplit_once('-')
             .and_then(|(name, handle_str)| {
@@ -506,6 +507,78 @@ impl ToRust<MockedResource> for Value {
             })
             .expect("invalid handle label");
         MockedResource { handle, name }
+    }
+}
+/// A value of the trace, as the Rust type of the bindings: wasm-wave's `ToRust`, as a
+/// local trait, so that it can be implemented for wit-bindgen's streams, futures and
+/// error-contexts, as `Fuzz` is for `Arbitrary`.
+trait FromWave: Sized {
+    fn from_wave(value: &Value) -> Self;
+    /// From the payload of a result's or a variant's case, which `()` has none of.
+    fn from_payload(value: Option<&Value>) -> Self {
+        Self::from_wave(value.expect("the case has a payload"))
+    }
+}
+macro_rules! impl_from_wave_primitive {
+    ($($t:ty),*) => {
+        $(impl FromWave for $t { fn from_wave(value : & Value) -> Self { value.to_rust()
+        } })*
+    };
+}
+impl_from_wave_primitive!(
+    bool, u8, u16, u32, u64, i8, i16, i32, i64, f32, f64, char, String
+);
+impl FromWave for () {
+    fn from_wave(_value: &Value) -> Self {}
+    fn from_payload(_value: Option<&Value>) -> Self {}
+}
+impl<T: FromWave> FromWave for Vec<T> {
+    fn from_wave(value: &Value) -> Self {
+        value.unwrap_list().map(|x| T::from_wave(&x)).collect()
+    }
+}
+impl<T: FromWave> FromWave for Option<T> {
+    fn from_wave(value: &Value) -> Self {
+        value.unwrap_option().map(|x| T::from_wave(&x))
+    }
+}
+impl<T: FromWave, E: FromWave> FromWave for core::result::Result<T, E> {
+    fn from_wave(value: &Value) -> Self {
+        match value.unwrap_result() {
+            Ok(x) => Ok(T::from_payload(x.as_deref())),
+            Err(x) => Err(E::from_payload(x.as_deref())),
+        }
+    }
+}
+macro_rules! impl_from_wave_tuple {
+    ($($T:ident),+) => {
+        impl < $($T : FromWave),+ > FromWave for ($($T,)+) { fn from_wave(value : &
+        Value) -> Self { let mut items = value.unwrap_tuple(); ($($T ::from_wave(& items
+        .next().unwrap()),)+) } }
+    };
+}
+impl_from_wave_tuple!(T1);
+impl_from_wave_tuple!(T1, T2);
+impl_from_wave_tuple!(T1, T2, T3);
+impl_from_wave_tuple!(T1, T2, T3, T4);
+impl_from_wave_tuple!(T1, T2, T3, T4, T5);
+impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6);
+impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7);
+impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
+impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
+impl<T: 'static> FromWave for wit_bindgen::StreamReader<T> {
+    fn from_wave(_value: &Value) -> Self {
+        unimplemented!("replaying a stream")
+    }
+}
+impl<T: 'static> FromWave for wit_bindgen::FutureReader<T> {
+    fn from_wave(_value: &Value) -> Self {
+        unimplemented!("replaying a future")
+    }
+}
+impl FromWave for wit_bindgen::rt::async_support::ErrorContext {
+    fn from_wave(_value: &Value) -> Self {
+        Self::new("")
     }
 }
 use bindings::proxy::recorder::types::*;

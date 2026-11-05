@@ -32,9 +32,9 @@ impl State {
         let replay_import = if let Some(ret_ty) = ret_ty {
             let to_rust = match wit_func.constructor_resource() {
                 Some(name) => {
-                    quote! { MockedResource { name: #name.to_string(), ..ret.to_rust() } }
+                    quote! { MockedResource { name: #name.to_string(), ..FromWave::from_wave(&ret) } }
                 }
-                None => quote! { ret.to_rust() },
+                None => quote! { FromWave::from_wave(&ret) },
             };
             quote! {
                 #check_call
@@ -178,7 +178,7 @@ impl State {
                     let res = {
                         #(
                             let arg_value: Value = wasm_wave::from_str(&<#arg_tys as ValueTyped>::value_type(), &#arg_idx).unwrap();
-                            let #arg_names: #arg_tys = arg_value.to_rust();
+                            let #arg_names: #arg_tys = FromWave::from_wave(&arg_value);
                         )*
                         let res = #call;
                         proxy::conversion::executor::host_drops(true);

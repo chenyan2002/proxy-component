@@ -336,12 +336,12 @@ impl ToValue for test::p3::host::ErrorCode {
             .unwrap()
     }
 }
-impl ToRust<test::p3::host::ErrorCode> for Value {
-    fn to_rust(&self) -> test::p3::host::ErrorCode {
-        match self.unwrap_variant() {
+impl FromWave for test::p3::host::ErrorCode {
+    fn from_wave(value: &Value) -> Self {
+        match value.unwrap_variant() {
             (ref case, None) if case == "timeout" => test::p3::host::ErrorCode::Timeout,
             (ref case, Some(val)) if case == "other" => {
-                test::p3::host::ErrorCode::Other(val.to_rust())
+                test::p3::host::ErrorCode::Other(FromWave::from_wave(&val))
             }
             _ => unreachable!(),
         }
@@ -375,9 +375,9 @@ impl<'a> ToValue for &'a test::p3::host::Body {
         Value::make_handle(label.into())
     }
 }
-impl ToRust<test::p3::host::Body> for Value {
-    fn to_rust(&self) -> test::p3::host::Body {
-        let label = self.unwrap_handle();
+impl FromWave for test::p3::host::Body {
+    fn from_wave(value: &Value) -> Self {
+        let label = value.unwrap_handle();
         let handle = label
             .strip_prefix(&format!("{}-", "body"))
             .and_then(|s| s.parse::<u32>().ok())
@@ -385,9 +385,9 @@ impl ToRust<test::p3::host::Body> for Value {
         proxy::conversion::conversion::get_mock_test_p3_host_body(handle)
     }
 }
-impl<'a> ToRust<&'a test::p3::host::Body> for Value {
-    fn to_rust(&self) -> &'a test::p3::host::Body {
-        let label = self.unwrap_handle();
+impl<'a> FromWave for &'a test::p3::host::Body {
+    fn from_wave(value: &Value) -> Self {
+        let label = value.unwrap_handle();
         let handle = label
             .strip_prefix(&format!("borrow-{}-", "body"))
             .and_then(|s| s.parse::<u32>().ok())
@@ -466,9 +466,9 @@ impl ToValue for &MockedResource {
         Value::make_handle(label.into())
     }
 }
-impl ToRust<MockedResource> for Value {
-    fn to_rust(&self) -> MockedResource {
-        let label = self.unwrap_handle();
+impl FromWave for MockedResource {
+    fn from_wave(value: &Value) -> Self {
+        let label = value.unwrap_handle();
         let (name, handle) = label
             .rsplit_once('-')
             .and_then(|(name, handle_str)| {
@@ -476,6 +476,78 @@ impl ToRust<MockedResource> for Value {
             })
             .expect("invalid handle label");
         MockedResource { handle, name }
+    }
+}
+/// A value of the trace, as the Rust type of the bindings: wasm-wave's `ToRust`, as a
+/// local trait, so that it can be implemented for wit-bindgen's streams, futures and
+/// error-contexts, as `Fuzz` is for `Arbitrary`.
+trait FromWave: Sized {
+    fn from_wave(value: &Value) -> Self;
+    /// From the payload of a result's or a variant's case, which `()` has none of.
+    fn from_payload(value: Option<&Value>) -> Self {
+        Self::from_wave(value.expect("the case has a payload"))
+    }
+}
+macro_rules! impl_from_wave_primitive {
+    ($($t:ty),*) => {
+        $(impl FromWave for $t { fn from_wave(value : & Value) -> Self { value.to_rust()
+        } })*
+    };
+}
+impl_from_wave_primitive!(
+    bool, u8, u16, u32, u64, i8, i16, i32, i64, f32, f64, char, String
+);
+impl FromWave for () {
+    fn from_wave(_value: &Value) -> Self {}
+    fn from_payload(_value: Option<&Value>) -> Self {}
+}
+impl<T: FromWave> FromWave for Vec<T> {
+    fn from_wave(value: &Value) -> Self {
+        value.unwrap_list().map(|x| T::from_wave(&x)).collect()
+    }
+}
+impl<T: FromWave> FromWave for Option<T> {
+    fn from_wave(value: &Value) -> Self {
+        value.unwrap_option().map(|x| T::from_wave(&x))
+    }
+}
+impl<T: FromWave, E: FromWave> FromWave for core::result::Result<T, E> {
+    fn from_wave(value: &Value) -> Self {
+        match value.unwrap_result() {
+            Ok(x) => Ok(T::from_payload(x.as_deref())),
+            Err(x) => Err(E::from_payload(x.as_deref())),
+        }
+    }
+}
+macro_rules! impl_from_wave_tuple {
+    ($($T:ident),+) => {
+        impl < $($T : FromWave),+ > FromWave for ($($T,)+) { fn from_wave(value : &
+        Value) -> Self { let mut items = value.unwrap_tuple(); ($($T ::from_wave(& items
+        .next().unwrap()),)+) } }
+    };
+}
+impl_from_wave_tuple!(T1);
+impl_from_wave_tuple!(T1, T2);
+impl_from_wave_tuple!(T1, T2, T3);
+impl_from_wave_tuple!(T1, T2, T3, T4);
+impl_from_wave_tuple!(T1, T2, T3, T4, T5);
+impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6);
+impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7);
+impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
+impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
+impl<T: 'static> FromWave for wit_bindgen::StreamReader<T> {
+    fn from_wave(_value: &Value) -> Self {
+        unimplemented!("replaying a stream")
+    }
+}
+impl<T: 'static> FromWave for wit_bindgen::FutureReader<T> {
+    fn from_wave(_value: &Value) -> Self {
+        unimplemented!("replaying a future")
+    }
+}
+impl FromWave for wit_bindgen::rt::async_support::ErrorContext {
+    fn from_wave(_value: &Value) -> Self {
+        Self::new("")
     }
 }
 impl Dialog for test::p3::host::ErrorCode {
