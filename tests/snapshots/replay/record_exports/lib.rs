@@ -4,8 +4,12 @@ struct Stub;
 bindings::export!(Stub with_types_in bindings);
 impl exports::proxy::recorder::start_replay::Guest for Stub {
     async fn start() -> () {
-        let __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
-        /// Calls an async export, and checks that the guest started it, if it blocks.
+        /// A line of the guest, which fuzz mode records, and replay checks.
+        #[allow(dead_code)]
+        fn trace_guest(line: &Line) {
+            proxy::recorder::replay::check(line);
+        }
+        /// Calls an async export, and reports that the guest started it, if it blocks.
         #[allow(dead_code)]
         async fn call_export<T>(
             id: TaskId,
@@ -17,7 +21,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     let poll = call.as_mut().poll(cx);
                     if poll.is_pending() && !started {
                         started = true;
-                        proxy::recorder::replay::check(
+                        trace_guest(
                             &Line {
                                 by: Party::Guest,
                                 at: None,
@@ -29,10 +33,18 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 })
                 .await
         }
+        /// Waits until the executor's step `step`, which lets the guest, and the host's
+        /// background work, run, and takes the next step, of a host line `start` makes,
+        /// e.g. an export call's arrival.
+        #[allow(dead_code)]
+        async fn arrive_after(step: u32) -> u32 {
+            proxy::conversion::executor::wait_until_step(step).await;
+            proxy::conversion::executor::step()
+        }
+        let __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
         while let Some(line) = proxy::recorder::replay::next_host_line() {
             if let Some(at) = line.at {
-                proxy::conversion::executor::wait_until_step(at - 1).await;
-                let step = proxy::conversion::executor::step();
+                let step = arrive_after(at - 1).await;
                 assert_eq!(step, at, "replay came to {:?} in step {step}", line.event);
             }
             match line.event {
@@ -57,15 +69,19 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                                     &arg_value,
                                 );
                                 let res = test::guest::api::run(&p, &c);
+                                trace_guest(
+                                    &trace_return(
+                                        Party::Guest,
+                                        __id,
+                                        Some(wasm_wave::to_string(&res.to_value()).unwrap()),
+                                    ),
+                                );
                                 proxy::conversion::executor::host_drops(true);
                                 res
                             };
+                            let _ = res;
+                            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
                             proxy::conversion::executor::host_drops(false);
-                            let wave_res = wasm_wave::to_string(&res.to_value())
-                                .unwrap();
-                            proxy::recorder::replay::check(
-                                &trace_return(Party::Guest, __id, Some(wave_res)),
-                            );
                         }
                         "test:guest/api@0.1.0.classify" => {
                             let res = {
@@ -78,15 +94,19 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                                     &arg_value,
                                 );
                                 let res = test::guest::api::classify(&s);
+                                trace_guest(
+                                    &trace_return(
+                                        Party::Guest,
+                                        __id,
+                                        Some(wasm_wave::to_string(&res.to_value()).unwrap()),
+                                    ),
+                                );
                                 proxy::conversion::executor::host_drops(true);
                                 res
                             };
+                            let _ = res;
+                            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
                             proxy::conversion::executor::host_drops(false);
-                            let wave_res = wasm_wave::to_string(&res.to_value())
-                                .unwrap();
-                            proxy::recorder::replay::check(
-                                &trace_return(Party::Guest, __id, Some(wave_res)),
-                            );
                         }
                         "test:guest/api@0.1.0.begin" => {
                             let res = {
@@ -99,16 +119,19 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                                     &arg_value,
                                 );
                                 let res = test::guest::api::begin(c);
+                                trace_guest(
+                                    &trace_return(
+                                        Party::Guest,
+                                        __id,
+                                        Some(wasm_wave::to_string(&res.to_value()).unwrap()),
+                                    ),
+                                );
                                 proxy::conversion::executor::host_drops(true);
                                 res
                             };
-                            proxy::conversion::executor::host_drops(false);
-                            let wave_res = wasm_wave::to_string(&res.to_value())
-                                .unwrap();
-                            proxy::recorder::replay::check(
-                                &trace_return(Party::Guest, __id, Some(wave_res)),
-                            );
                             std::mem::forget(res);
+                            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                            proxy::conversion::executor::host_drops(false);
                         }
                         "new test:guest/api/session@0.1.0" => {
                             let res = {
@@ -119,16 +142,19 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                                     .unwrap();
                                 let name: String = FromWave::from_wave(&arg_value);
                                 let res = test::guest::api::Session::new(&name);
+                                trace_guest(
+                                    &trace_return(
+                                        Party::Guest,
+                                        __id,
+                                        Some(wasm_wave::to_string(&res.to_value()).unwrap()),
+                                    ),
+                                );
                                 proxy::conversion::executor::host_drops(true);
                                 res
                             };
-                            proxy::conversion::executor::host_drops(false);
-                            let wave_res = wasm_wave::to_string(&res.to_value())
-                                .unwrap();
-                            proxy::recorder::replay::check(
-                                &trace_return(Party::Guest, __id, Some(wave_res)),
-                            );
                             std::mem::forget(res);
+                            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                            proxy::conversion::executor::host_drops(false);
                         }
                         "test:host/types@0.1.0.make-point" => {
                             let res = {
@@ -145,15 +171,19 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                                     .unwrap();
                                 let y: i32 = FromWave::from_wave(&arg_value);
                                 let res = test::host::types::make_point(x, y);
+                                trace_guest(
+                                    &trace_return(
+                                        Party::Guest,
+                                        __id,
+                                        Some(wasm_wave::to_string(&res.to_value()).unwrap()),
+                                    ),
+                                );
                                 proxy::conversion::executor::host_drops(true);
                                 res
                             };
+                            let _ = res;
+                            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
                             proxy::conversion::executor::host_drops(false);
-                            let wave_res = wasm_wave::to_string(&res.to_value())
-                                .unwrap();
-                            proxy::recorder::replay::check(
-                                &trace_return(Party::Guest, __id, Some(wave_res)),
-                            );
                         }
                         "test:host/types@0.1.0.check" => {
                             let res = {
@@ -174,15 +204,19 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                                     &arg_value,
                                 );
                                 let res = test::host::types::check(p, c);
+                                trace_guest(
+                                    &trace_return(
+                                        Party::Guest,
+                                        __id,
+                                        Some(wasm_wave::to_string(&res.to_value()).unwrap()),
+                                    ),
+                                );
                                 proxy::conversion::executor::host_drops(true);
                                 res
                             };
+                            let _ = res;
+                            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
                             proxy::conversion::executor::host_drops(false);
-                            let wave_res = wasm_wave::to_string(&res.to_value())
-                                .unwrap();
-                            proxy::recorder::replay::check(
-                                &trace_return(Party::Guest, __id, Some(wave_res)),
-                            );
                         }
                         "test:host/types@0.1.0.open" => {
                             let res = {
@@ -193,16 +227,19 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                                     .unwrap();
                                 let name: String = FromWave::from_wave(&arg_value);
                                 let res = test::host::types::open(&name);
+                                trace_guest(
+                                    &trace_return(
+                                        Party::Guest,
+                                        __id,
+                                        Some(wasm_wave::to_string(&res.to_value()).unwrap()),
+                                    ),
+                                );
                                 proxy::conversion::executor::host_drops(true);
                                 res
                             };
-                            proxy::conversion::executor::host_drops(false);
-                            let wave_res = wasm_wave::to_string(&res.to_value())
-                                .unwrap();
-                            proxy::recorder::replay::check(
-                                &trace_return(Party::Guest, __id, Some(wave_res)),
-                            );
                             std::mem::forget(res);
+                            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                            proxy::conversion::executor::host_drops(false);
                         }
                         "new test:host/types/counter@0.1.0" => {
                             let res = {
@@ -213,16 +250,19 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                                     .unwrap();
                                 let start: u32 = FromWave::from_wave(&arg_value);
                                 let res = test::host::types::Counter::new(start);
+                                trace_guest(
+                                    &trace_return(
+                                        Party::Guest,
+                                        __id,
+                                        Some(wasm_wave::to_string(&res.to_value()).unwrap()),
+                                    ),
+                                );
                                 proxy::conversion::executor::host_drops(true);
                                 res
                             };
-                            proxy::conversion::executor::host_drops(false);
-                            let wave_res = wasm_wave::to_string(&res.to_value())
-                                .unwrap();
-                            proxy::recorder::replay::check(
-                                &trace_return(Party::Guest, __id, Some(wave_res)),
-                            );
                             std::mem::forget(res);
+                            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                            proxy::conversion::executor::host_drops(false);
                         }
                         "test:host/types/counter@0.1.0.merge" => {
                             let res = {
@@ -243,16 +283,19 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                                     &arg_value,
                                 );
                                 let res = test::host::types::Counter::merge(&a, b);
+                                trace_guest(
+                                    &trace_return(
+                                        Party::Guest,
+                                        __id,
+                                        Some(wasm_wave::to_string(&res.to_value()).unwrap()),
+                                    ),
+                                );
                                 proxy::conversion::executor::host_drops(true);
                                 res
                             };
-                            proxy::conversion::executor::host_drops(false);
-                            let wave_res = wasm_wave::to_string(&res.to_value())
-                                .unwrap();
-                            proxy::recorder::replay::check(
-                                &trace_return(Party::Guest, __id, Some(wave_res)),
-                            );
                             std::mem::forget(res);
+                            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                            proxy::conversion::executor::host_drops(false);
                         }
                         _ => unreachable!("the trace calls an unknown export {func}"),
                     }
@@ -278,12 +321,6 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 }
                 event => unreachable!("`start` doesn't perform {event:?}"),
             }
-            proxy::conversion::executor::host_drops(true);
-            SCOPED_ALLOC
-                .with(|alloc| {
-                    alloc.borrow_mut().clear();
-                });
-            proxy::conversion::executor::host_drops(false);
         }
         join_spawned().await;
         proxy::conversion::executor::stop();
@@ -612,18 +649,6 @@ impl ToValue for &MockedResource {
         Value::make_handle(label.into())
     }
 }
-impl FromWave for MockedResource {
-    fn from_wave(value: &Value) -> Self {
-        let label = value.unwrap_handle();
-        let (name, handle) = label
-            .rsplit_once('-')
-            .and_then(|(name, handle_str)| {
-                handle_str.parse::<u32>().ok().map(|h| (name.to_string(), h))
-            })
-            .expect("invalid handle label");
-        MockedResource { handle, name }
-    }
-}
 /// A value of the trace, as the Rust type of the bindings: wasm-wave's `ToRust`, as a
 /// local trait, so that it can be implemented for wit-bindgen's streams, futures and
 /// error-contexts, as `Fuzz` is for `Arbitrary`.
@@ -694,6 +719,18 @@ impl<T: 'static> FromWave for wit_bindgen::FutureReader<T> {
 impl FromWave for wit_bindgen::rt::async_support::ErrorContext {
     fn from_wave(_value: &Value) -> Self {
         Self::new("")
+    }
+}
+impl FromWave for MockedResource {
+    fn from_wave(value: &Value) -> Self {
+        let label = value.unwrap_handle();
+        let (name, handle) = label
+            .rsplit_once('-')
+            .and_then(|(name, handle_str)| {
+                handle_str.parse::<u32>().ok().map(|h| (name.to_string(), h))
+            })
+            .expect("invalid handle label");
+        MockedResource { handle, name }
     }
 }
 use bindings::proxy::recorder::types::*;

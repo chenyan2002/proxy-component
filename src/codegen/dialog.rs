@@ -71,14 +71,28 @@ impl State {
                     arg_names,
                     arg_wit_tys,
                     arg_tys,
+                    has_ret,
                     ret_async,
                     ..
                 } = func;
-                // The streams and futures the guest returns, whose reading the user decides.
-                let ret = if *ret_async {
-                    quote! { Dialog::consume(#call, 0); }
+                // The result, as the mocks print theirs; then the streams and futures in it, whose
+                // reading the user decides.
+                let print_ret = if *has_ret {
+                    quote! {
+                        proxy::util::dialog::print(0, &format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&res)).unwrap()));
+                    }
                 } else {
-                    quote! { let _ = #call; }
+                    quote! {}
+                };
+                let consume = if *ret_async {
+                    quote! { Dialog::consume(res, 0); }
+                } else {
+                    quote! { let _ = res; }
+                };
+                let ret = quote! {
+                    let res = #call;
+                    #print_ret
+                    #consume
                 };
                 quote! {
                     {

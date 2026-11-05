@@ -54,7 +54,15 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             .join(", ")
                         ),
                     );
-                    let _ = test::guest::api::run(&p, &c);
+                    let res = test::guest::api::run(&p, &c);
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
+                            .unwrap()
+                        ),
+                    );
+                    let _ = res;
                     join_spawned().await;
                     proxy::conversion::executor::stop();
                     __executor.await;
@@ -81,7 +89,15 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             .join(", ")
                         ),
                     );
-                    let _ = test::guest::api::classify(&s);
+                    let res = test::guest::api::classify(&s);
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
+                            .unwrap()
+                        ),
+                    );
+                    let _ = res;
                     join_spawned().await;
                     proxy::conversion::executor::stop();
                     __executor.await;
@@ -108,7 +124,15 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             .join(", ")
                         ),
                     );
-                    let _ = test::guest::api::begin(c);
+                    let res = test::guest::api::begin(c);
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
+                            .unwrap()
+                        ),
+                    );
+                    let _ = res;
                     join_spawned().await;
                     proxy::conversion::executor::stop();
                     __executor.await;
@@ -140,7 +164,15 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             __params.join(", ")
                         ),
                     );
-                    let _ = test::guest::api::Session::new(&name);
+                    let res = test::guest::api::Session::new(&name);
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
+                            .unwrap()
+                        ),
+                    );
+                    let _ = res;
                     join_spawned().await;
                     proxy::conversion::executor::stop();
                     __executor.await;
@@ -175,7 +207,15 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             __params.join(", ")
                         ),
                     );
-                    let _ = test::host::types::make_point(x, y);
+                    let res = test::host::types::make_point(x, y);
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
+                            .unwrap()
+                        ),
+                    );
+                    let _ = res;
                     join_spawned().await;
                     proxy::conversion::executor::stop();
                     __executor.await;
@@ -208,7 +248,15 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             .join(", ")
                         ),
                     );
-                    let _ = test::host::types::check(p, c);
+                    let res = test::host::types::check(p, c);
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
+                            .unwrap()
+                        ),
+                    );
+                    let _ = res;
                     join_spawned().await;
                     proxy::conversion::executor::stop();
                     __executor.await;
@@ -238,7 +286,15 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             .join(", ")
                         ),
                     );
-                    let _ = test::host::types::open(&name);
+                    let res = test::host::types::open(&name);
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
+                            .unwrap()
+                        ),
+                    );
+                    let _ = res;
                     join_spawned().await;
                     proxy::conversion::executor::stop();
                     __executor.await;
@@ -268,7 +324,15 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             __params.join(", ")
                         ),
                     );
-                    let _ = test::host::types::Counter::new(start);
+                    let res = test::host::types::Counter::new(start);
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
+                            .unwrap()
+                        ),
+                    );
+                    let _ = res;
                     join_spawned().await;
                     proxy::conversion::executor::stop();
                     __executor.await;
@@ -306,7 +370,15 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             __params.join(", ")
                         ),
                     );
-                    let _ = test::host::types::Counter::merge(&a, b);
+                    let res = test::host::types::Counter::merge(&a, b);
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
+                            .unwrap()
+                        ),
+                    );
+                    let _ = res;
                     join_spawned().await;
                     proxy::conversion::executor::stop();
                     __executor.await;
@@ -647,18 +719,6 @@ impl ToValue for &MockedResource {
         Value::make_handle(label.into())
     }
 }
-impl FromWave for MockedResource {
-    fn from_wave(value: &Value) -> Self {
-        let label = value.unwrap_handle();
-        let (name, handle) = label
-            .rsplit_once('-')
-            .and_then(|(name, handle_str)| {
-                handle_str.parse::<u32>().ok().map(|h| (name.to_string(), h))
-            })
-            .expect("invalid handle label");
-        MockedResource { handle, name }
-    }
-}
 /// A value of the trace, as the Rust type of the bindings: wasm-wave's `ToRust`, as a
 /// local trait, so that it can be implemented for wit-bindgen's streams, futures and
 /// error-contexts, as `Fuzz` is for `Arbitrary`.
@@ -729,6 +789,18 @@ impl<T: 'static> FromWave for wit_bindgen::FutureReader<T> {
 impl FromWave for wit_bindgen::rt::async_support::ErrorContext {
     fn from_wave(_value: &Value) -> Self {
         Self::new("")
+    }
+}
+impl FromWave for MockedResource {
+    fn from_wave(value: &Value) -> Self {
+        let label = value.unwrap_handle();
+        let (name, handle) = label
+            .rsplit_once('-')
+            .and_then(|(name, handle_str)| {
+                handle_str.parse::<u32>().ok().map(|h| (name.to_string(), h))
+            })
+            .expect("invalid handle label");
+        MockedResource { handle, name }
     }
 }
 impl Dialog for test::guest::api::Session {

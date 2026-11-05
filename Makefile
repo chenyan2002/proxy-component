@@ -1,4 +1,4 @@
-.PHONY: all build-components build-cli test test-cargo test-record test-fixture test-fuzz test-dialog run-fuzz run-record run-dialog run-viceroy
+.PHONY: all build-components build-cli test test-cargo test-record test-fixture test-fuzz-replay test-fuzz test-dialog run-fuzz run-record run-dialog run-viceroy
 
 # `make test ONE_BYTE_PAGE=1` tests with 1-byte-page memories
 ifeq ($(ONE_BYTE_PAGE),1)
@@ -20,7 +20,7 @@ build-components:
 	cp target/one-byte-page/wasm32-wasip2/release/debug.wasm assets/debug.one_byte_page.wasm
 	cp target/one-byte-page/wasm32-wasip2/release/recorder.wasm assets/recorder.one_byte_page.wasm
 
-test: test-cargo test-fuzz test-record test-fixture test-dialog
+test: test-cargo test-fuzz test-record test-fixture test-fuzz-replay test-dialog
 
 # Snapshot tests of the generated sources
 test-cargo:
@@ -72,6 +72,18 @@ test-fixture:
 	$(WASMTIME) --invoke 'start()' composed.wasm < $(FIXTURE_OUT)/trace.out
 	$(INSTRUMENT) -m replay --use-host-recorder $(FIXTURE_WASM)/proxy_guest.wasm
 	target/release/proxy-component run composed.wasm --invoke 'start()' --trace $(FIXTURE_OUT)/trace.out
+
+# Fuzzes the main component of tests/fixtures/proxy-run/guest, and replays each trace it writes
+test-fuzz-replay:
+	cargo build --manifest-path $(FIXTURE)/guest/Cargo.toml --target wasm32-wasip2 --release --target-dir $(FIXTURE_OUT)
+	$(INSTRUMENT) -m fuzz $(FIXTURE_WASM)/proxy_guest.wasm
+	cp composed.wasm $(FIXTURE_OUT)/fuzz.wasm
+	$(INSTRUMENT) -m replay $(FIXTURE_WASM)/proxy_guest.wasm
+	cp composed.wasm $(FIXTURE_OUT)/replay.wasm
+	for i in 1 2 3 4 5 6 7 8 9 10; do \
+		$(WASMTIME) --invoke 'start()' $(FIXTURE_OUT)/fuzz.wasm > $(FIXTURE_OUT)/fuzz-trace.out || exit 1; \
+		$(WASMTIME) --invoke 'start()' $(FIXTURE_OUT)/replay.wasm < $(FIXTURE_OUT)/fuzz-trace.out > /dev/null || exit 1; \
+	done
 
 test-dialog:
 	rm tests/composed.wasm || true

@@ -110,58 +110,34 @@ impl State {
             .map(|func| {
                 let ExportFunc {
                     display_name,
-                    func,
                     arg_names,
                     arg_tys,
-                    call_params,
-                    has_ret,
                     is_async,
                     ..
-                } = func;
-                // An async call that blocks gives the host a subtask, which the guest started.
-                let call = if is_async {
-                    quote! { call_export(__id, #func(#(#call_params),*)).await }
-                } else {
-                    quote! { #func(#(#call_params),*) }
+                } = &func;
+                let args = quote! {
+                    let mut __params: Vec<String> = Vec::new();
+                    #(
+                        let #arg_names: #arg_tys = Fuzz::fuzz(&mut u).unwrap();
+                        __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
+                    )*
                 };
-                let value = if has_ret {
-                    quote! { Some(wasm_wave::to_string(&res.to_value()).unwrap()) }
-                } else {
-                    quote! { None }
+                // The guest, and the host's background work, run a few steps before the call,
+                // as they do before replay's, in the steps the trace has.
+                let before = quote! {
+                    let __id = trace_task_id(Table::Exports);
+                    let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
+                    let __at = arrive_after(proxy::conversion::executor::current_step() + __runs).await;
+                    proxy::recorder::record::record(&Line {
+                        at: Some(__at),
+                        ..trace_call(Party::Host, __id, #display_name, #is_async, __params)
+                    });
                 };
-                // The arguments the call borrowed are dropped at the end of the inner block, which
-                // are the host's drops, not the guest's.
-                quote! {
-                    {
-                        let res = {
-                            let mut __params: Vec<String> = Vec::new();
-                            #(
-                                let #arg_names: #arg_tys = Fuzz::fuzz(&mut u).unwrap();
-                                __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
-                            )*
-                            let __id = trace_task_id(Table::Exports);
-                            let __at = proxy::conversion::executor::step();
-                            proxy::recorder::record::record(&Line {
-                                at: Some(__at),
-                                ..trace_call(Party::Host, __id, #display_name, #is_async, __params)
-                            });
-                            let res = #call;
-                            proxy::recorder::record::record(&trace_return(Party::Guest, __id, #value));
-                            proxy::conversion::executor::host_drops(true);
-                            res
-                        };
-                        // The streams and futures the guest returns, which the host reads or
-                        // drops, and its resources, which the host drops. The host's own
-                        // resources are the host's drops too.
-                        Fuzz::consume(res, &mut u);
-                        SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
-                        proxy::conversion::executor::host_drops(false);
-                        // Lets the guest, and the host's background work, run between calls.
-                        for _ in 0..u.int_in_range(0..=3u8).unwrap() {
-                            wit_bindgen::yield_async().await;
-                        }
-                    }
-                }
+                // The streams and futures the guest returns, which the host reads or drops, and
+                // its resources, which the host drops.
+                let after = quote! { Fuzz::consume(res, &mut u); };
+                let call = self.start_call(&func, args, before, after);
+                quote! { { #call } }
             })
             .collect();
         let func_len = arms.len();
@@ -169,21 +145,6 @@ impl State {
         self.generate_start(
             sig,
             quote! {
-                /// Calls an async export, and records that the guest started it, if it blocks.
-                #[allow(dead_code)]
-                async fn call_export<T>(id: TaskId, call: impl std::future::Future<Output = T>) -> T {
-                    let mut call = std::pin::pin!(call);
-                    let mut started = false;
-                    std::future::poll_fn(|cx| {
-                        let poll = call.as_mut().poll(cx);
-                        if poll.is_pending() && !started {
-                            started = true;
-                            proxy::recorder::record::record(&Line { by: Party::Guest, at: None, event: Event::Started(id) });
-                        }
-                        poll
-                    })
-                    .await
-                }
                 let __buf = proxy::util::debug::get_random();
                 let mut u = Unstructured::new(&__buf);
                 for _ in 0..10 {

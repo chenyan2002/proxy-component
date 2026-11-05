@@ -381,8 +381,49 @@ impl State {
             Mode::Replay => quote! { proxy::recorder::replay::finish(); },
             _ => quote! {},
         };
+        // What the export calls of fuzz and replay modes share (see `start_call`), so that they
+        // stay alike, as replay requires: fuzz mode records a guest line, which replay checks.
+        let trace_guest = match self.mode {
+            Mode::Fuzz => quote! { proxy::recorder::record::record(line); },
+            Mode::Replay => quote! { proxy::recorder::replay::check(line); },
+            _ => quote! {},
+        };
+        let start_defs = match self.mode {
+            Mode::Fuzz | Mode::Replay => quote! {
+                /// A line of the guest, which fuzz mode records, and replay checks.
+                #[allow(dead_code)]
+                fn trace_guest(line: &Line) {
+                    #trace_guest
+                }
+                /// Calls an async export, and reports that the guest started it, if it blocks.
+                #[allow(dead_code)]
+                async fn call_export<T>(id: TaskId, call: impl std::future::Future<Output = T>) -> T {
+                    let mut call = std::pin::pin!(call);
+                    let mut started = false;
+                    std::future::poll_fn(|cx| {
+                        let poll = call.as_mut().poll(cx);
+                        if poll.is_pending() && !started {
+                            started = true;
+                            trace_guest(&Line { by: Party::Guest, at: None, event: Event::Started(id) });
+                        }
+                        poll
+                    })
+                    .await
+                }
+                /// Waits until the executor's step `step`, which lets the guest, and the host's
+                /// background work, run, and takes the next step, of a host line `start` makes,
+                /// e.g. an export call's arrival.
+                #[allow(dead_code)]
+                async fn arrive_after(step: u32) -> u32 {
+                    proxy::conversion::executor::wait_until_step(step).await;
+                    proxy::conversion::executor::step()
+                }
+            },
+            _ => quote! {},
+        };
         parse_quote! {
             #sig {
+                #start_defs
                 let #executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
                 #body
                 join_spawned().await;
@@ -390,6 +431,49 @@ impl State {
                 __executor.await;
                 #finish
             }
+        }
+    }
+    /// An export call of `start`, in fuzz and replay modes: `args` binds the arguments, `before`
+    /// runs before the call, with `__id` the call's, and `after` gets the result, `res`. The
+    /// guest's `return` is reported (see `trace_guest`), and the arguments the call borrowed are
+    /// dropped at the end of their block, which, like those of the result, are the host's drops.
+    fn start_call(
+        &self,
+        func: &ExportFunc,
+        args: TokenStream,
+        before: TokenStream,
+        after: TokenStream,
+    ) -> TokenStream {
+        let ExportFunc {
+            func,
+            call_params,
+            is_async,
+            has_ret,
+            ..
+        } = func;
+        // An async call that blocks gives the host a subtask, which the guest started.
+        let call = if *is_async {
+            quote! { call_export(__id, #func(#(#call_params),*)).await }
+        } else {
+            quote! { #func(#(#call_params),*) }
+        };
+        let value = if *has_ret {
+            quote! { Some(wasm_wave::to_string(&res.to_value()).unwrap()) }
+        } else {
+            quote! { None }
+        };
+        quote! {
+            let res = {
+                #args
+                #before
+                let res = #call;
+                trace_guest(&trace_return(Party::Guest, __id, #value));
+                proxy::conversion::executor::host_drops(true);
+                res
+            };
+            #after
+            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+            proxy::conversion::executor::host_drops(false);
         }
     }
     /// The functions of `proxy:conversion/executor`, which the imports component exports, for the
@@ -404,6 +488,7 @@ impl State {
             ("run", _) => quote! { run_executor().await },
             ("stop", _) => quote! { stop_executor() },
             ("step", _) => quote! { next_step() },
+            ("current_step", _) => quote! { current_step() },
             ("wait_until_step", _) => quote! { wait_until_step(step).await },
             ("host_drops", Mode::Replay | Mode::Fuzz) => {
                 quote! { MOVING.with(|moving| moving.set(dropping)) }
@@ -506,7 +591,14 @@ fn job_defs(mode: &Mode, has_executor: Option<HasExecutor>) -> Vec<Item> {
                 let Event::Return(ret) = line.event else {
                     panic!("the trace answers the call with {:?}", line.event);
                 };
-                wait_until_step(line.at.expect("a STARTED call returns in a step")).await;
+                // A STARTED call blocks, so it returns in a later step than the one it was
+                // called in; if replay is there already, it is ahead of the recording.
+                let at = line.at.expect("a STARTED call returns in a step");
+                let now = current_step();
+                assert!(now < at, "replay is in step {now}, past step {at} of the return of {id:?}");
+                wait_until_step(at).await;
+                let now = current_step();
+                assert_eq!(now, at, "replay returned {id:?} in step {now}, not in step {at}");
                 ret.value
             }
         };

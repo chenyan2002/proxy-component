@@ -37,8 +37,8 @@ const DEBUG_WASM_ONE_BYTE_PAGE: &[u8] = include_bytes!("../assets/debug.one_byte
 const RECORDER_WASM_ONE_BYTE_PAGE: &[u8] = include_bytes!("../assets/recorder.one_byte_page.wasm");
 
 pub fn run(args: InstrumentArgs) -> Result<()> {
-    if args.use_host_recorder && !matches!(args.mode, Mode::Record | Mode::Replay) {
-        anyhow::bail!("--use-host-recorder only works in record or replay mode");
+    if args.use_host_recorder && !matches!(args.mode, Mode::Record | Mode::Replay | Mode::Fuzz) {
+        anyhow::bail!("--use-host-recorder only works in record, replay or fuzz mode");
     }
     // 1. Create a tmp directory and initialize a new Rust project in it.
     let tmp_dir = init_rust_project()?;

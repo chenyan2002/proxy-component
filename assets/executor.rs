@@ -87,21 +87,15 @@ async fn wait_for_runs(runs: u32) -> u32 {
     })
     .await
 }
-/// Waits, from any task, until the executor's run in `step`, or returns at once if the count is
-/// already there, e.g. replay's for a host line recorded in that step.
-///
-/// Panics if the count passed `step` without a run in it: replay diverged from the recording.
+/// Waits, from any task, until a run of the executor in `step` or later, or returns at once if
+/// the count is already there, e.g. replay's for a host line recorded in that step, which checks
+/// that it came in that step.
 #[allow(dead_code)]
 async fn wait_until_step(step: u32) {
-    if current_step() == step {
+    if current_step() >= step {
         return;
     }
-    wait_for_run(move || {
-        let now = current_step();
-        assert!(now <= step, "replay reached step {now} before the run in step {step}");
-        now == step
-    })
-    .await;
+    wait_for_run(move || current_step() >= step).await;
 }
 /// Waits until a run of the executor in which `done` returns true, and returns its step. A job
 /// asks in each run, waking the executor itself in between, as no host event would.

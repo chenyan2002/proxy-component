@@ -203,7 +203,8 @@ number in that table, e.g. `#fields-3` or `#stream-7`.
   replay, a mock carries the trace's label. The mock's own handle can't label it: it moves on with
   the mock, which frees its number, and a borrow the guest passes back comes in as the mock
   itself, without a handle. Fuzz mode records the end of every mock, also the host's drops, which
-  record mode can't see. A resource of the guest, which the exports component wraps, is in the
+  record mode can't see; they take no step, as the guest doesn't see them, and replay has nothing
+  to do for them. A resource of the guest, which the exports component wraps, is in the
   exports table, e.g. the host's drop of a session, `drop #session-1 (exports)`.
 - **Streams and futures** are labeled by the handle of the end the proxy received, which it keeps
   for the stream's lifetime: the host's reader in an import's result or an export's arguments, the
@@ -248,14 +249,22 @@ Limits:
   reader of it just doesn't see the two labels as one stream. The [core-level shim](#portability)
   could carry the label through, as the end keeps one handle in the guest's table from when it
   arrives until the guest passes it on.
-- **Replay can't check labels.** Replay's tables differ from the recording's, with mocks instead
-  of the host's ends and the pumps, so it can't recompute the labels, only use the trace's.
+- **Replay compares labels up to renaming.** A table holds more than the values the trace
+  labels: waitable sets and subtasks, which each mode makes its own, so the same value can have
+  another number in replay. Replay pairs each of the trace's labels with the one it sees for the
+  same value, one to one, per table, from the first guest line that has both, and requires every
+  later line to agree. A pair ends when its handle leaves the table, which frees its number: at a
+  `Drop`, a future's `Value`, or when the host hands it on, owned, to the guest, in an export
+  call's arguments or an import's result; the rule is the same for every label. The lines replay
+  performs it renames to its own labels, e.g. the guest's resource a host `Drop` names.
+  So replay checks that the labels are used consistently, not their numbers.
 - `list<u8>` items are WAVE lists for now; p3.md's byte strings (`b"…"`) would be shorter.
 
 Mocks already use a counter. Extending it to every handle, shared by the two generated
 components, would make a number never reused, and the same in record and replay, so that replay
-could check each label, without a `table`; streams, futures and error-contexts would map each
-handle to its number with `set_handle_label`. It has the same limit for ends that come back.
+could compare labels exactly, without renaming, and without a `table`; streams, futures and
+error-contexts would map each handle to its number with `set_handle_label`. It has the same limit
+for ends that come back.
 
 ## Recording
 
@@ -404,7 +413,10 @@ trace, the two results could reach the guest before or after a different one of 
 - **Deterministic runtime choices**, see [Portability](#portability).
 - **The same executor in record and replay**, with only the leaves different: host calls in
   record, futures that the trace makes ready in replay. Its work in a step depends only on its
-  state and the trace's lines for that step.
+  state and the trace's lines for that step. The same goes for `start`: fuzz mode's waits for
+  the steps it chooses before an export call, through `wait-until-step`, as replay's waits for the
+  trace's. When fuzz yielded instead, the two made different tasks, and a sixth of the spike
+  guest's traces replayed its two results in the other order.
 - **Steps in replay where the host woke the executor in the recording.** Replay has no host, so a
   job that waits for a later step makes the executor yield, and come back as the next step.
   wasmtime runs the ready tasks first, as it did before the host's completion in the recording.
@@ -523,12 +535,13 @@ executor runs both.
 - **Divergence** can also show up as a stall, when nothing can reach the next line; wasmtime then
   traps with "deadlock detected", and the recorder prints the line it was waiting for.
 - **Recorder interface** (`assets/recorder.wit`): `types` mirrors the Rust types; `record`
-  records a line; `replay` has `next-host-line`, the next line the host performs on its own, e.g.
-  an export call, and `check`, which checks a guest line, and returns the host lines that answer
-  it at once, e.g. an import's `Return`. Waiting for a step is the executor's, not the recorder's;
-  phase 3 adds a way for the executor's jobs to take the host lines of their task or handle. The
-  bundled recorder (`assets/recorder*.wasm`) and the host recorder of `run`
-  (`--use-host-recorder`) implement it, with `Replay` of `crates/trace`.
+  records a line; `replay` has `next-host-line`, the next line `start` performs, an export call
+  or the host's drop of a resource of the guest; `take-host-line`, the next host line about a task
+  or a handle, e.g. the `Return` of a STARTED call, which its mock waits for; `check`, which
+  checks a guest line, up to renaming, and returns the host lines that answer it at once, e.g. an
+  import's `Return`; and `finish`, which checks that replay reached every line. Waiting for a step
+  is the executor's, not the recorder's. The bundled recorder (`assets/recorder*.wasm`) and the
+  host recorder of `run` (`--use-host-recorder`) implement it, with `Replay` of `crates/trace`.
 
 ## Correctness
 
@@ -641,7 +654,9 @@ depend on runtime patches. wasmtime 49 has the start of its own record and repla
 2. **Trace format** in `crates/trace`, and the recorder interface: done, for p2 record and
    replay.
 3. **Replay**, tested on traces that fuzz mode writes in this format, with the checks of
-   [Correctness](#checking-the-implementation). Fuzz mode writes the format: done.
+   [Correctness](#checking-the-implementation). Fuzz mode writes the format, and replay
+   replays calls and steps, RETURNED and STARTED: done (`make test-fuzz-replay`). Streams and
+   futures remain.
 4. **Record**, with the executor and its pumps, under `wasmtime serve` and `run`.
 5. **Portability across runtimes**: the profile proposal, or the shim.
 

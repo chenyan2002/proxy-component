@@ -137,84 +137,38 @@ impl State {
         let arms = self.export_funcs().into_iter().map(|func| {
             let ExportFunc {
                 display_name,
-                func,
                 arg_names,
                 arg_tys,
-                call_params,
-                has_ret,
                 ret_owns,
-                is_async,
                 ..
-            } = func;
-            // An async call that blocks gives the host a subtask, which the guest started.
-            let call = if is_async {
-                quote! { call_export(__id, #func(#(#call_params),*)).await }
-            } else {
-                quote! { #func(#(#call_params),*) }
-            };
+            } = &func;
             let arg_idx = (0..arg_names.len()).map(|idx| quote! { args[#idx] });
-            // The export call's id is the trace's, as the trace makes the call.
-            let assert_ret = if has_ret {
-                quote! {
-                    let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                    proxy::recorder::replay::check(&trace_return(Party::Guest, __id, Some(wave_res)));
-                }
-            } else {
-                quote! {
-                    assert!(res == ());
-                    proxy::recorder::replay::check(&trace_return(Party::Guest, __id, None));
-                }
+            let args = quote! {
+                #(
+                    let arg_value: Value = wasm_wave::from_str(&<#arg_tys as ValueTyped>::value_type(), &#arg_idx).unwrap();
+                    let #arg_names: #arg_tys = FromWave::from_wave(&arg_value);
+                )*
             };
             // The host keeps the resources it gets, until the trace drops them.
-            let keep_ret = if ret_owns {
+            let after = if *ret_owns {
                 quote! { std::mem::forget(res); }
             } else {
-                quote! {}
+                quote! { let _ = res; }
             };
-            // The arguments the call borrowed are dropped at the end of the block, which are
-            // the host's drops, as in fuzz mode, not the guest's.
-            quote! {
-                #display_name => {
-                    let res = {
-                        #(
-                            let arg_value: Value = wasm_wave::from_str(&<#arg_tys as ValueTyped>::value_type(), &#arg_idx).unwrap();
-                            let #arg_names: #arg_tys = FromWave::from_wave(&arg_value);
-                        )*
-                        let res = #call;
-                        proxy::conversion::executor::host_drops(true);
-                        res
-                    };
-                    proxy::conversion::executor::host_drops(false);
-                    #assert_ret
-                    #keep_ret
-                }
-            }
+            // The call's id is the trace's, as the trace makes the call, in its step (see
+            // below).
+            let call = self.start_call(&func, args, quote! {}, after);
+            quote! { #display_name => { #call } }
         });
         let drop_arm = self.replay_export_drop();
         self.generate_start(
             sig,
             quote! {
-                /// Calls an async export, and checks that the guest started it, if it blocks.
-                #[allow(dead_code)]
-                async fn call_export<T>(id: TaskId, call: impl std::future::Future<Output = T>) -> T {
-                    let mut call = std::pin::pin!(call);
-                    let mut started = false;
-                    std::future::poll_fn(|cx| {
-                        let poll = call.as_mut().poll(cx);
-                        if poll.is_pending() && !started {
-                            started = true;
-                            proxy::recorder::replay::check(&Line { by: Party::Guest, at: None, event: Event::Started(id) });
-                        }
-                        poll
-                    })
-                    .await
-                }
                 while let Some(line) = proxy::recorder::replay::next_host_line() {
                     // A line in step `at` follows the step before it, and takes its own step, as
                     // an export call's arrival does.
                     if let Some(at) = line.at {
-                        proxy::conversion::executor::wait_until_step(at - 1).await;
-                        let step = proxy::conversion::executor::step();
+                        let step = arrive_after(at - 1).await;
                         assert_eq!(step, at, "replay came to {:?} in step {step}", line.event);
                     }
                     match line.event {
@@ -227,12 +181,6 @@ impl State {
                         #drop_arm
                         event => unreachable!("`start` doesn't perform {event:?}"),
                     }
-                    // clean up borrowed resources from input args
-                    proxy::conversion::executor::host_drops(true);
-                    SCOPED_ALLOC.with(|alloc| {
-                        alloc.borrow_mut().clear();
-                    });
-                    proxy::conversion::executor::host_drops(false);
                 }
             },
         )

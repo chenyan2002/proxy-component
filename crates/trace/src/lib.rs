@@ -11,11 +11,14 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+mod renaming;
+use renaming::Renaming;
+
 mod bindings {
     wit_bindgen::generate!({
         path: "../../assets/recorder.wit",
         world: "trace",
-        additional_derives: [serde::Serialize, serde::Deserialize, PartialEq],
+        additional_derives: [serde::Serialize, serde::Deserialize, PartialEq, Eq, Hash],
     });
 }
 pub use bindings::proxy::recorder::types::*;
@@ -177,10 +180,13 @@ impl fmt::Display for Line {
     }
 }
 
-/// A trace being replayed: which of its lines replay has performed or checked.
+/// A trace being replayed: which of its lines replay has performed or checked, and how its
+/// labels pair with replay's (see `renaming`). The lines `Replay` returns have replay's labels,
+/// where it has paired them, and those it takes, the trace's.
 pub struct Replay {
     lines: Vec<Line>,
     done: Vec<bool>,
+    renaming: Renaming,
 }
 
 impl Replay {
@@ -189,6 +195,7 @@ impl Replay {
         Replay {
             lines: trace.0,
             done,
+            renaming: Renaming::default(),
         }
     }
     fn pending(&self) -> impl Iterator<Item = (usize, &Line)> {
@@ -204,14 +211,19 @@ impl Replay {
     pub fn next_host_line(&mut self) -> Option<Line> {
         self.take(|line| line.is_start_line())
     }
-    /// The next host line about `key`, e.g. the `Return` of a STARTED call, which the import's
-    /// mock waits for, or a copy of a stream, which a job performs.
+    /// The next host line about `key`, in replay's labels, e.g. the `Return` of a STARTED call,
+    /// which the import's mock waits for, or a copy of a stream, which a job performs.
     pub fn take_host_line(&mut self, key: &LineKey) -> Option<Line> {
-        self.take(|line| line.by == Party::Host && line.is_about(key))
+        let key = match key {
+            LineKey::Handle(label) => LineKey::Handle(self.renaming.to_trace_label(label)),
+            key => key.clone(),
+        };
+        self.take(|line| line.by == Party::Host && line.is_about(&key))
     }
     fn take(&mut self, matches: impl Fn(&Line) -> bool) -> Option<Line> {
         let (idx, line) = self.pending().find(|(_, line)| matches(line))?;
-        let line = line.clone();
+        let line = self.renaming.to_replay(line);
+        self.renaming.end(&self.lines[idx]);
         self.done[idx] = true;
         Some(line)
     }
@@ -227,24 +239,35 @@ impl Replay {
             panic!("the trace has `{line}`, which replay didn't reach");
         }
     }
-    /// Checks a guest line against the trace, and returns the host lines that answer it at once,
-    /// e.g. the `Return` of an import call. A guest line is matched by its task, for the lines of
-    /// a call, and otherwise as the trace's next guest line.
+    /// Checks a guest line against the trace, up to the pairing of labels, and returns the host
+    /// lines that answer it at once, e.g. the `Return` of an import call. A guest line is matched
+    /// by its task, for the lines of a call, and by its handle, for those of a stream, a future
+    /// or a resource.
     ///
     /// Panics on a mismatch, with the expected and the actual line.
     pub fn check(&mut self, actual: &Line) -> Vec<Line> {
         assert_eq!(actual.by, Party::Guest, "`{actual}` isn't a guest line");
         let task = actual.event.task();
-        let found = self.pending().find(|(_, line)| match task {
-            Some(task) => line.event.task() == Some(task),
-            None => line.by == Party::Guest,
+        let key = match &actual.event {
+            Event::Write(chunk) | Event::Read(chunk) => Some(&chunk.stream),
+            Event::Value(value) => Some(&value.future),
+            Event::Drop(label) => Some(label),
+            _ => None,
+        }
+        .map(|label| LineKey::Handle(self.renaming.to_trace_label(label)));
+        let found = self.pending().find(|(_, line)| match (task, &key) {
+            (Some(task), _) => line.event.task() == Some(task),
+            (None, Some(key)) => line.by == Party::Guest && line.is_about(key),
+            (None, None) => line.by == Party::Guest,
         });
         let Some((idx, expected)) = found else {
             panic!("the guest did `{actual}`, which the trace doesn't have");
         };
-        if expected.by != Party::Guest || expected.event != actual.event {
+        let expected = expected.clone();
+        if expected.by != Party::Guest || !self.renaming.matches(&expected, actual) {
             panic!("the trace has `{expected}`, but the guest did `{actual}`");
         }
+        self.renaming.end(&expected);
         self.done[idx] = true;
         let Some(task) = task else {
             return Vec::new();
@@ -259,8 +282,10 @@ impl Replay {
             if !line.answers_guest() {
                 break;
             }
+            let line = line.clone();
+            answers.push(self.renaming.to_replay(&line));
+            self.renaming.end(&line);
             self.done[idx] = true;
-            answers.push(line.clone());
             if !matches!(line.event, Event::Started(_)) {
                 break;
             }
@@ -397,6 +422,74 @@ mod tests {
         // Neither `start`'s, nor needed.
         assert_eq!(replay.next_host_line(), None);
         replay.finish();
+    }
+
+    #[test]
+    fn replay_renames_labels() {
+        let session = |name: &str| Label {
+            table: Table::Exports,
+            name: name.to_string(),
+        };
+        let (t1, t2) = (task(Table::Exports, 1), task(Table::Exports, 2));
+        let trace = Trace(vec![
+            line(Party::Host, call(t1, "new", &[])),
+            line(Party::Guest, ret(t1, Some("#session-3"))),
+            line(Party::Host, Event::Drop(session("#session-3"))),
+            line(Party::Host, call(t2, "new", &[])),
+            line(Party::Guest, ret(t2, Some("#session-3"))),
+        ]);
+        let mut replay = Replay::new(trace.clone());
+        replay.next_host_line();
+        // Replay's table numbers the session differently.
+        replay.check(&line(Party::Guest, ret(t1, Some("#session-1"))));
+        let drop = line(Party::Host, Event::Drop(session("#session-1")));
+        assert_eq!(replay.next_host_line(), Some(drop));
+        // Once dropped, both labels may name another session.
+        replay.next_host_line();
+        replay.check(&line(Party::Guest, ret(t2, Some("#session-2"))));
+        replay.finish();
+    }
+
+    #[test]
+    fn replay_ends_labels_handed_on() {
+        let (t1, t2, t3) = (task(Table::Exports, 1), task(Table::Exports, 2), task(Table::Exports, 3));
+        let trace = Trace(vec![
+            line(Party::Host, call(t1, "new", &[])),
+            line(Party::Guest, ret(t1, Some("#session-3"))),
+            // The host hands the session back, which frees its number.
+            line(Party::Host, call(t2, "close", &["#session-3"])),
+            line(Party::Guest, ret(t2, None)),
+            line(Party::Host, call(t3, "new", &[])),
+            line(Party::Guest, ret(t3, Some("#session-3"))),
+        ]);
+        let mut replay = Replay::new(trace);
+        replay.next_host_line();
+        replay.check(&line(Party::Guest, ret(t1, Some("#session-1"))));
+        let close = replay.next_host_line().unwrap();
+        assert_eq!(close.event, call(t2, "close", &["#session-1"]));
+        replay.check(&line(Party::Guest, ret(t2, None)));
+        replay.next_host_line();
+        // The recording reused the number, and replay didn't, or the other way round.
+        replay.check(&line(Party::Guest, ret(t3, Some("#session-2"))));
+        replay.finish();
+    }
+
+    #[test]
+    #[should_panic(expected = "the trace has `guest: return t2 #session-3`")]
+    fn replay_checks_labels() {
+        let (t1, t2) = (task(Table::Exports, 1), task(Table::Exports, 2));
+        let trace = Trace(vec![
+            line(Party::Host, call(t1, "new", &[])),
+            line(Party::Guest, ret(t1, Some("#session-3"))),
+            line(Party::Host, call(t2, "get", &[])),
+            line(Party::Guest, ret(t2, Some("#session-3"))),
+        ]);
+        let mut replay = Replay::new(trace);
+        replay.next_host_line();
+        replay.check(&line(Party::Guest, ret(t1, Some("#session-1"))));
+        replay.next_host_line();
+        // The trace's `#session-3` is replay's `#session-1`, not another session.
+        replay.check(&line(Party::Guest, ret(t2, Some("#session-2"))));
     }
 
     #[test]
