@@ -306,13 +306,11 @@ impl<'a> Opt<'a> {
                     out.push_str(&format!(
                         "get-mock-{func_name}: func(handle: u32) -> {func_name};\n"
                     ));
-                    // The handle of a mock in the component that made it, which labels it in
-                    // both generated components.
-                    if matches!(self.mode, Mode::Fuzz | Mode::Dialog) {
-                        out.push_str(&format!(
-                            "get-handle-mock-{func_name}: func(x: borrow<{func_name}>) -> u32;\n"
-                        ));
-                    }
+                    // The label of a mock, which the imports component, which made it, keeps,
+                    // so that both generated components label it alike.
+                    out.push_str(&format!(
+                        "get-handle-mock-{func_name}: func(x: borrow<{func_name}>) -> u32;\n"
+                    ));
                 }
             }
         }

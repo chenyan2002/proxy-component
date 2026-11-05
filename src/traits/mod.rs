@@ -135,12 +135,13 @@ impl<'a> TraitGenerator<'a> {
                 traits.push(Box::new(proxy::ProxyTrait::new(state)));
             }
             Mode::Replay => {
+                // A mock carries the trace's label, which the exports component prints it by too.
                 traits.push(Box::new(wave::WaveTrait {
                     to_value: true,
                     to_rust: true,
                     has_replay_table: true,
                     wrapped_labels: false,
-                    mock_labels: false,
+                    mock_labels: true,
                 }));
             }
             Mode::Fuzz => {

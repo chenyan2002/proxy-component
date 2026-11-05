@@ -11,8 +11,10 @@ interface executor {
   // Counts a step that isn't a run of the executor, e.g. the arrival of an export call, which the
   // exports component makes, and returns it (see `docs/p3-record-replay.md`, Steps).
   step: func() -> u32;
+  // Waits until the executor's run in `step`, or returns at once if the count is already there:
+  // replay's `start` waits for the step before an export call's.
+  wait-until-step: async func(step: u32);
   // Whether the exports component is dropping mocks of the imports component itself, e.g. those
-  // it made for the borrowed arguments of an export call: the host's drops, not the guest's,
-  // which take a step, as an export call does.
+  // it made for the borrowed arguments of an export call: the host's drops, not the guest's.
   host-drops: func(dropping: bool);
 }

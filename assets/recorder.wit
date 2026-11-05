@@ -39,6 +39,9 @@ interface types {
 
   // `at` is the step of a host line the guest observes outside its calls.
   record line { by: party, at: option<u32>, event: event }
+
+  // What a line is about: a call, or a stream or future.
+  variant line-key { task(task-id), handle(label) }
 }
 
 interface %record {
@@ -48,11 +51,15 @@ interface %record {
 }
 
 interface replay {
-  use types.{line};
-  // The next line the host performs on its own: in trace order, the first host line that doesn't
-  // answer a guest call, e.g. an export call, or the host's drop of a guest resource. `none` at
-  // the end of the trace. Traps if a guest line the guest hasn't done comes before it.
+  use types.{line, line-key};
+  // The next line `start` performs, in trace order: an export call, or the host's drop of a
+  // resource of the guest. `none` once there are none.
   next-host-line: func() -> option<line>;
+  // The next host line about `key`, e.g. the `return` of a STARTED call, which its mock waits
+  // for.
+  take-host-line: func(key: line-key) -> option<line>;
+  // Checks that replay reached every line, once it is done; traps on the first it didn't.
+  finish: func();
   // Checks a guest line against the trace, and returns the host lines that answer it at once,
   // e.g. the `return` of an import call. Traps on a mismatch, with the expected and the actual
   // line.

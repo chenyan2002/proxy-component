@@ -376,6 +376,11 @@ impl State {
             Mode::Dialog => quote! { mut __executor },
             _ => quote! { __executor },
         };
+        // Replay checks that it reached every line, once everything is done.
+        let finish = match self.mode {
+            Mode::Replay => quote! { proxy::recorder::replay::finish(); },
+            _ => quote! {},
+        };
         parse_quote! {
             #sig {
                 let #executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
@@ -383,6 +388,7 @@ impl State {
                 join_spawned().await;
                 proxy::conversion::executor::stop();
                 __executor.await;
+                #finish
             }
         }
     }
@@ -398,11 +404,8 @@ impl State {
             ("run", _) => quote! { run_executor().await },
             ("stop", _) => quote! { stop_executor() },
             ("step", _) => quote! { next_step() },
-            ("host_drops", Mode::Fuzz) => quote! {
-                MOVING.with(|moving| moving.set(dropping));
-                HOST_DROP_AT.set(dropping.then(next_step));
-            },
-            ("host_drops", Mode::Replay) => {
+            ("wait_until_step", _) => quote! { wait_until_step(step).await },
+            ("host_drops", Mode::Replay | Mode::Fuzz) => {
                 quote! { MOVING.with(|moving| moving.set(dropping)) }
             }
             ("host_drops", _) => quote! { let _ = dropping; },
@@ -438,7 +441,7 @@ enum HasExecutor {
 /// executor's run in the imports component, and a step of its own, as an export call's arrival,
 /// in the exports component; and, in fuzz mode, `host_dropping`, which runs `f`, dropping mocks
 /// for the host, e.g. those in a value a job read from the guest, so that the trace has the
-/// host's drops, in the step they happen in.
+/// host's drops. Those take no step: the guest doesn't see them.
 fn job_defs(mode: &Mode, has_executor: Option<HasExecutor>) -> Vec<Item> {
     let is_fuzz = matches!(mode, Mode::Fuzz);
     let file: File = match has_executor {
@@ -448,10 +451,8 @@ fn job_defs(mode: &Mode, has_executor: Option<HasExecutor>) -> Vec<Item> {
                     #[allow(dead_code)]
                     fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
                         MOVING.with(|moving| moving.set(true));
-                        HOST_DROP_AT.set(Some(current_step()));
                         let res = f();
                         MOVING.with(|moving| moving.set(false));
-                        HOST_DROP_AT.set(None);
                         res
                     }
                 }
@@ -490,7 +491,28 @@ fn job_defs(mode: &Mode, has_executor: Option<HasExecutor>) -> Vec<Item> {
         }
         None => return Vec::new(),
     };
-    file.items
+    let mut items = file.items;
+    if matches!(mode, Mode::Replay) && matches!(has_executor, Some(HasExecutor::Exports)) {
+        let file: File = parse_quote! {
+            /// The value of the `return` that answers an async call: at once, if the trace has
+            /// the call RETURNED, or, if STARTED, in the step of its `return`, which the mock
+            /// waits for.
+            async fn trace_answer(id: TaskId, answers: Vec<Line>) -> Option<String> {
+                if !answers.iter().any(|line| matches!(line.event, Event::Started(_))) {
+                    return trace_return_value(answers);
+                }
+                let line = proxy::recorder::replay::take_host_line(&LineKey::Task(id))
+                    .expect("the trace doesn't return the call");
+                let Event::Return(ret) = line.event else {
+                    panic!("the trace answers the call with {:?}", line.event);
+                };
+                wait_until_step(line.at.expect("a STARTED call returns in a step")).await;
+                ret.value
+            }
+        };
+        items.extend(file.items);
+    }
+    items
 }
 
 /// Helpers of record, replay and fuzz modes, which make the lines of `proxy:recorder/types`. Each

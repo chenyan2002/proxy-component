@@ -5,24 +5,58 @@ bindings::export!(Stub with_types_in bindings);
 impl exports::proxy::recorder::start_replay::Guest for Stub {
     async fn start() -> () {
         let __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
+        /// Calls an async export, and checks that the guest started it, if it blocks.
+        #[allow(dead_code)]
+        async fn call_export<T>(
+            id: TaskId,
+            call: impl std::future::Future<Output = T>,
+        ) -> T {
+            let mut call = std::pin::pin!(call);
+            let mut started = false;
+            std::future::poll_fn(|cx| {
+                    let poll = call.as_mut().poll(cx);
+                    if poll.is_pending() && !started {
+                        started = true;
+                        proxy::recorder::replay::check(
+                            &Line {
+                                by: Party::Guest,
+                                at: None,
+                                event: Event::Started(id),
+                            },
+                        );
+                    }
+                    poll
+                })
+                .await
+        }
         while let Some(line) = proxy::recorder::replay::next_host_line() {
+            if let Some(at) = line.at {
+                proxy::conversion::executor::wait_until_step(at - 1).await;
+                let step = proxy::conversion::executor::step();
+                assert_eq!(step, at, "replay came to {:?} in step {step}", line.event);
+            }
             match line.event {
                 Event::Call(Call { id: __id, func, args, .. }) => {
                     match func.as_str() {
                         "test:guest/api@0.1.0.run" => {
-                            let arg_value: Value = wasm_wave::from_str(
-                                    &<test::guest::api::Point as ValueTyped>::value_type(),
-                                    &args[0usize],
-                                )
-                                .unwrap();
-                            let p: test::guest::api::Point = arg_value.to_rust();
-                            let arg_value: Value = wasm_wave::from_str(
-                                    &<test::guest::api::Counter as ValueTyped>::value_type(),
-                                    &args[1usize],
-                                )
-                                .unwrap();
-                            let c: test::guest::api::Counter = arg_value.to_rust();
-                            let res = test::guest::api::run(&p, &c);
+                            let res = {
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<test::guest::api::Point as ValueTyped>::value_type(),
+                                        &args[0usize],
+                                    )
+                                    .unwrap();
+                                let p: test::guest::api::Point = arg_value.to_rust();
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<test::guest::api::Counter as ValueTyped>::value_type(),
+                                        &args[1usize],
+                                    )
+                                    .unwrap();
+                                let c: test::guest::api::Counter = arg_value.to_rust();
+                                let res = test::guest::api::run(&p, &c);
+                                proxy::conversion::executor::host_drops(true);
+                                res
+                            };
+                            proxy::conversion::executor::host_drops(false);
                             let wave_res = wasm_wave::to_string(&res.to_value())
                                 .unwrap();
                             proxy::recorder::replay::check(
@@ -30,13 +64,18 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             );
                         }
                         "test:guest/api@0.1.0.classify" => {
-                            let arg_value: Value = wasm_wave::from_str(
-                                    &<test::guest::api::Shape as ValueTyped>::value_type(),
-                                    &args[0usize],
-                                )
-                                .unwrap();
-                            let s: test::guest::api::Shape = arg_value.to_rust();
-                            let res = test::guest::api::classify(&s);
+                            let res = {
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<test::guest::api::Shape as ValueTyped>::value_type(),
+                                        &args[0usize],
+                                    )
+                                    .unwrap();
+                                let s: test::guest::api::Shape = arg_value.to_rust();
+                                let res = test::guest::api::classify(&s);
+                                proxy::conversion::executor::host_drops(true);
+                                res
+                            };
+                            proxy::conversion::executor::host_drops(false);
                             let wave_res = wasm_wave::to_string(&res.to_value())
                                 .unwrap();
                             proxy::recorder::replay::check(
@@ -44,13 +83,18 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             );
                         }
                         "test:guest/api@0.1.0.begin" => {
-                            let arg_value: Value = wasm_wave::from_str(
-                                    &<test::guest::api::Counter as ValueTyped>::value_type(),
-                                    &args[0usize],
-                                )
-                                .unwrap();
-                            let c: test::guest::api::Counter = arg_value.to_rust();
-                            let res = test::guest::api::begin(c);
+                            let res = {
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<test::guest::api::Counter as ValueTyped>::value_type(),
+                                        &args[0usize],
+                                    )
+                                    .unwrap();
+                                let c: test::guest::api::Counter = arg_value.to_rust();
+                                let res = test::guest::api::begin(c);
+                                proxy::conversion::executor::host_drops(true);
+                                res
+                            };
+                            proxy::conversion::executor::host_drops(false);
                             let wave_res = wasm_wave::to_string(&res.to_value())
                                 .unwrap();
                             proxy::recorder::replay::check(
@@ -59,13 +103,18 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             std::mem::forget(res);
                         }
                         "new test:guest/api/session@0.1.0" => {
-                            let arg_value: Value = wasm_wave::from_str(
-                                    &<String as ValueTyped>::value_type(),
-                                    &args[0usize],
-                                )
-                                .unwrap();
-                            let name: String = arg_value.to_rust();
-                            let res = test::guest::api::Session::new(&name);
+                            let res = {
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<String as ValueTyped>::value_type(),
+                                        &args[0usize],
+                                    )
+                                    .unwrap();
+                                let name: String = arg_value.to_rust();
+                                let res = test::guest::api::Session::new(&name);
+                                proxy::conversion::executor::host_drops(true);
+                                res
+                            };
+                            proxy::conversion::executor::host_drops(false);
                             let wave_res = wasm_wave::to_string(&res.to_value())
                                 .unwrap();
                             proxy::recorder::replay::check(
@@ -74,19 +123,24 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             std::mem::forget(res);
                         }
                         "test:host/types@0.1.0.make-point" => {
-                            let arg_value: Value = wasm_wave::from_str(
-                                    &<i32 as ValueTyped>::value_type(),
-                                    &args[0usize],
-                                )
-                                .unwrap();
-                            let x: i32 = arg_value.to_rust();
-                            let arg_value: Value = wasm_wave::from_str(
-                                    &<i32 as ValueTyped>::value_type(),
-                                    &args[1usize],
-                                )
-                                .unwrap();
-                            let y: i32 = arg_value.to_rust();
-                            let res = test::host::types::make_point(x, y);
+                            let res = {
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<i32 as ValueTyped>::value_type(),
+                                        &args[0usize],
+                                    )
+                                    .unwrap();
+                                let x: i32 = arg_value.to_rust();
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<i32 as ValueTyped>::value_type(),
+                                        &args[1usize],
+                                    )
+                                    .unwrap();
+                                let y: i32 = arg_value.to_rust();
+                                let res = test::host::types::make_point(x, y);
+                                proxy::conversion::executor::host_drops(true);
+                                res
+                            };
+                            proxy::conversion::executor::host_drops(false);
                             let wave_res = wasm_wave::to_string(&res.to_value())
                                 .unwrap();
                             proxy::recorder::replay::check(
@@ -94,19 +148,24 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             );
                         }
                         "test:host/types@0.1.0.check" => {
-                            let arg_value: Value = wasm_wave::from_str(
-                                    &<test::host::types::Perms as ValueTyped>::value_type(),
-                                    &args[0usize],
-                                )
-                                .unwrap();
-                            let p: test::host::types::Perms = arg_value.to_rust();
-                            let arg_value: Value = wasm_wave::from_str(
-                                    &<test::host::types::Color as ValueTyped>::value_type(),
-                                    &args[1usize],
-                                )
-                                .unwrap();
-                            let c: test::host::types::Color = arg_value.to_rust();
-                            let res = test::host::types::check(p, c);
+                            let res = {
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<test::host::types::Perms as ValueTyped>::value_type(),
+                                        &args[0usize],
+                                    )
+                                    .unwrap();
+                                let p: test::host::types::Perms = arg_value.to_rust();
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<test::host::types::Color as ValueTyped>::value_type(),
+                                        &args[1usize],
+                                    )
+                                    .unwrap();
+                                let c: test::host::types::Color = arg_value.to_rust();
+                                let res = test::host::types::check(p, c);
+                                proxy::conversion::executor::host_drops(true);
+                                res
+                            };
+                            proxy::conversion::executor::host_drops(false);
                             let wave_res = wasm_wave::to_string(&res.to_value())
                                 .unwrap();
                             proxy::recorder::replay::check(
@@ -114,13 +173,18 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             );
                         }
                         "test:host/types@0.1.0.open" => {
-                            let arg_value: Value = wasm_wave::from_str(
-                                    &<String as ValueTyped>::value_type(),
-                                    &args[0usize],
-                                )
-                                .unwrap();
-                            let name: String = arg_value.to_rust();
-                            let res = test::host::types::open(&name);
+                            let res = {
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<String as ValueTyped>::value_type(),
+                                        &args[0usize],
+                                    )
+                                    .unwrap();
+                                let name: String = arg_value.to_rust();
+                                let res = test::host::types::open(&name);
+                                proxy::conversion::executor::host_drops(true);
+                                res
+                            };
+                            proxy::conversion::executor::host_drops(false);
                             let wave_res = wasm_wave::to_string(&res.to_value())
                                 .unwrap();
                             proxy::recorder::replay::check(
@@ -129,13 +193,18 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             std::mem::forget(res);
                         }
                         "new test:host/types/counter@0.1.0" => {
-                            let arg_value: Value = wasm_wave::from_str(
-                                    &<u32 as ValueTyped>::value_type(),
-                                    &args[0usize],
-                                )
-                                .unwrap();
-                            let start: u32 = arg_value.to_rust();
-                            let res = test::host::types::Counter::new(start);
+                            let res = {
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<u32 as ValueTyped>::value_type(),
+                                        &args[0usize],
+                                    )
+                                    .unwrap();
+                                let start: u32 = arg_value.to_rust();
+                                let res = test::host::types::Counter::new(start);
+                                proxy::conversion::executor::host_drops(true);
+                                res
+                            };
+                            proxy::conversion::executor::host_drops(false);
                             let wave_res = wasm_wave::to_string(&res.to_value())
                                 .unwrap();
                             proxy::recorder::replay::check(
@@ -144,19 +213,24 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             std::mem::forget(res);
                         }
                         "test:host/types/counter@0.1.0.merge" => {
-                            let arg_value: Value = wasm_wave::from_str(
-                                    &<test::host::types::Counter as ValueTyped>::value_type(),
-                                    &args[0usize],
-                                )
-                                .unwrap();
-                            let a: test::host::types::Counter = arg_value.to_rust();
-                            let arg_value: Value = wasm_wave::from_str(
-                                    &<test::host::types::Counter as ValueTyped>::value_type(),
-                                    &args[1usize],
-                                )
-                                .unwrap();
-                            let b: test::host::types::Counter = arg_value.to_rust();
-                            let res = test::host::types::Counter::merge(&a, b);
+                            let res = {
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<test::host::types::Counter as ValueTyped>::value_type(),
+                                        &args[0usize],
+                                    )
+                                    .unwrap();
+                                let a: test::host::types::Counter = arg_value.to_rust();
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<test::host::types::Counter as ValueTyped>::value_type(),
+                                        &args[1usize],
+                                    )
+                                    .unwrap();
+                                let b: test::host::types::Counter = arg_value.to_rust();
+                                let res = test::host::types::Counter::merge(&a, b);
+                                proxy::conversion::executor::host_drops(true);
+                                res
+                            };
+                            proxy::conversion::executor::host_drops(false);
                             let wave_res = wasm_wave::to_string(&res.to_value())
                                 .unwrap();
                             proxy::recorder::replay::check(
@@ -186,16 +260,19 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         _ => unreachable!(),
                     }
                 }
-                event => unreachable!("the host can't do {event:?} in a p2 trace"),
+                event => unreachable!("`start` doesn't perform {event:?}"),
             }
+            proxy::conversion::executor::host_drops(true);
             SCOPED_ALLOC
                 .with(|alloc| {
                     alloc.borrow_mut().clear();
                 });
+            proxy::conversion::executor::host_drops(false);
         }
         join_spawned().await;
         proxy::conversion::executor::stop();
         __executor.await;
+        proxy::recorder::replay::finish();
     }
 }
 impl ValueTyped for test::guest::api::Session {
@@ -409,13 +486,19 @@ impl<'a> ValueTyped for &'a test::host::types::Counter {
 }
 impl ToValue for test::host::types::Counter {
     fn to_value(&self) -> Value {
-        let label = format!("{}-{}", "counter", self.handle());
+        let label = format!(
+            "{}-{}", "counter",
+            proxy::conversion::conversion::get_handle_mock_test_host_types_counter(self)
+        );
         Value::make_handle(label.into())
     }
 }
 impl<'a> ToValue for &'a test::host::types::Counter {
     fn to_value(&self) -> Value {
-        let label = format!("borrow-{}-{}", "counter", self.handle());
+        let label = format!(
+            "borrow-{}-{}", "counter",
+            proxy::conversion::conversion::get_handle_mock_test_host_types_counter(self)
+        );
         Value::make_handle(label.into())
     }
 }

@@ -129,26 +129,30 @@ impl State {
                 } else {
                     quote! { None }
                 };
+                // The arguments the call borrowed are dropped at the end of the inner block, which
+                // are the host's drops, not the guest's.
                 quote! {
                     {
-                        let mut __params: Vec<String> = Vec::new();
-                        #(
-                            let #arg_names: #arg_tys = Fuzz::fuzz(&mut u).unwrap();
-                            __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
-                        )*
-                        let __id = trace_task_id(Table::Exports);
-                        let __at = proxy::conversion::executor::step();
-                        proxy::recorder::record::record(&Line {
-                            at: Some(__at),
-                            ..trace_call(Party::Host, __id, #display_name, #is_async, __params)
-                        });
-                        let res = #call;
-                        proxy::recorder::record::record(&trace_return(Party::Guest, __id, #value));
+                        let res = {
+                            let mut __params: Vec<String> = Vec::new();
+                            #(
+                                let #arg_names: #arg_tys = Fuzz::fuzz(&mut u).unwrap();
+                                __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
+                            )*
+                            let __id = trace_task_id(Table::Exports);
+                            let __at = proxy::conversion::executor::step();
+                            proxy::recorder::record::record(&Line {
+                                at: Some(__at),
+                                ..trace_call(Party::Host, __id, #display_name, #is_async, __params)
+                            });
+                            let res = #call;
+                            proxy::recorder::record::record(&trace_return(Party::Guest, __id, #value));
+                            proxy::conversion::executor::host_drops(true);
+                            res
+                        };
                         // The streams and futures the guest returns, which the host reads or
                         // drops, and its resources, which the host drops. The host's own
-                        // resources, and the mocks of the borrowed arguments, are the host's
-                        // drops.
-                        proxy::conversion::executor::host_drops(true);
+                        // resources are the host's drops too.
                         Fuzz::consume(res, &mut u);
                         SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
                         proxy::conversion::executor::host_drops(false);

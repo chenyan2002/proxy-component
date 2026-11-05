@@ -11,6 +11,11 @@ impl exports::proxy::conversion::conversion::Guest for Stub {
             name: "counter".to_string(),
         })
     }
+    fn get_handle_mock_test_host_types_counter(
+        x: exports::proxy::conversion::conversion::TestHostTypesCounterBorrow<'_>,
+    ) -> u32 {
+        x.get::<MockedResource>().handle
+    }
 }
 impl exports::proxy::conversion::executor::Guest for Stub {
     async fn run() -> () {
@@ -21,6 +26,9 @@ impl exports::proxy::conversion::executor::Guest for Stub {
     }
     fn step() -> u32 {
         next_step()
+    }
+    async fn wait_until_step(step: u32) -> () {
+        wait_until_step(step).await
     }
     fn host_drops(dropping: bool) -> () {
         MOVING.with(|moving| moving.set(dropping))
@@ -568,6 +576,21 @@ const TRACE_TABLE: Table = Table::Imports;
 fn trace_at() -> u32 {
     current_step()
 }
+/// The value of the `return` that answers an async call: at once, if the trace has
+/// the call RETURNED, or, if STARTED, in the step of its `return`, which the mock
+/// waits for.
+async fn trace_answer(id: TaskId, answers: Vec<Line>) -> Option<String> {
+    if !answers.iter().any(|line| matches!(line.event, Event::Started(_))) {
+        return trace_return_value(answers);
+    }
+    let line = proxy::recorder::replay::take_host_line(&LineKey::Task(id))
+        .expect("the trace doesn't return the call");
+    let Event::Return(ret) = line.event else {
+        panic!("the trace answers the call with {:?}", line.event);
+    };
+    wait_until_step(line.at.expect("a STARTED call returns in a step")).await;
+    ret.value
+}
 thread_local! {
     #[allow(dead_code)] static MOVING : std::cell::Cell < bool > = const {
     std::cell::Cell::new(false) };
@@ -597,38 +620,67 @@ fn current_step() -> u32 {
     STEP.get()
 }
 /// Waits, from any task, until the executor has run `runs` more times, and returns the step of
-/// the last run. A job counts them, waking the executor itself in between.
+/// the last run.
 #[allow(dead_code)]
 async fn wait_for_runs(runs: u32) -> u32 {
+    let mut left = runs;
+    wait_for_run(move || {
+            if left == 0 {
+                return true;
+            }
+            left -= 1;
+            false
+        })
+        .await
+}
+/// Waits, from any task, until the executor's run in `step`, or returns at once if the count is
+/// already there, e.g. replay's for a host line recorded in that step.
+///
+/// Panics if the count passed `step` without a run in it: replay diverged from the recording.
+#[allow(dead_code)]
+async fn wait_until_step(step: u32) {
+    if current_step() == step {
+        return;
+    }
+    wait_for_run(move || {
+            let now = current_step();
+            assert!(
+                now <= step, "replay reached step {now} before the run in step {step}"
+            );
+            now == step
+        })
+        .await;
+}
+/// Waits until a run of the executor in which `done` returns true, and returns its step. A job
+/// asks in each run, waking the executor itself in between, as no host event would.
+async fn wait_for_run(mut done: impl FnMut() -> bool + 'static) -> u32 {
     #[derive(Default)]
     struct Done {
         step: Option<u32>,
         waker: Option<std::task::Waker>,
     }
-    let done = std::rc::Rc::new(std::cell::RefCell::new(Done::default()));
-    let job_done = done.clone();
-    let mut left = runs;
+    let shared = std::rc::Rc::new(std::cell::RefCell::new(Done::default()));
+    let job_shared = shared.clone();
     spawn(
         std::future::poll_fn(move |_| {
-            if left == 0 {
-                let mut done = job_done.borrow_mut();
-                done.step = Some(current_step());
-                if let Some(waker) = done.waker.take() {
+            if done() {
+                let mut shared = job_shared.borrow_mut();
+                shared.step = Some(current_step());
+                if let Some(waker) = shared.waker.take() {
                     waker.wake();
                 }
                 return std::task::Poll::Ready(());
             }
-            left -= 1;
             WAKE_AGAIN.set(true);
             std::task::Poll::Pending
         }),
     );
     std::future::poll_fn(move |cx| {
-            let mut done = done.borrow_mut();
-            match done.step {
+            let mut shared = shared.borrow_mut();
+            match shared.step {
                 Some(step) => std::task::Poll::Ready(step),
                 None => {
-                    done.waker = Some(cx.waker().clone());
+                    shared.waker = Some(cx.waker().clone());
                     std::task::Poll::Pending
                 }
             }

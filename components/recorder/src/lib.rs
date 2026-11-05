@@ -13,7 +13,7 @@ mod bindings {
 }
 
 use std::cell::RefCell;
-use trace::{Line, Replay, Trace};
+use trace::{Line, LineKey, Replay, Trace};
 
 struct Component;
 impl bindings::exports::proxy::recorder::record::Guest for Component {
@@ -45,6 +45,14 @@ impl bindings::exports::proxy::recorder::replay::Guest for Component {
         let line = with_replay(|replay| replay.next_host_line())?;
         println!("{line}");
         Some(line)
+    }
+    fn take_host_line(key: LineKey) -> Option<Line> {
+        let line = with_replay(|replay| replay.take_host_line(&key))?;
+        println!("{line}");
+        Some(line)
+    }
+    fn finish() {
+        with_replay(|replay| replay.finish());
     }
     fn check(line: Line) -> Vec<Line> {
         println!("{line}");

@@ -58,6 +58,30 @@ impl Line {
             )
             && self.event.task().is_some_and(|id| id.table == Table::Imports)
     }
+    /// Whether the line is one the host performs from the exports component, which replay's
+    /// `start` performs: an export call, or the host's drop of a resource of the guest. The
+    /// host's drops of its own resources, in the imports table, the guest doesn't see; replay has
+    /// nothing to do for them.
+    pub fn is_start_line(&self) -> bool {
+        self.by == Party::Host
+            && match &self.event {
+                Event::Call(_) => true,
+                Event::Drop(label) => label.table == Table::Exports,
+                _ => false,
+            }
+    }
+    /// Whether the line is about `key`: a line of the task, or of the stream or future.
+    pub fn is_about(&self, key: &LineKey) -> bool {
+        match (key, &self.event) {
+            (LineKey::Task(task), event) => event.task() == Some(*task),
+            (LineKey::Handle(label), Event::Write(chunk) | Event::Read(chunk)) => {
+                &chunk.stream == label
+            }
+            (LineKey::Handle(label), Event::Value(value)) => &value.future == label,
+            (LineKey::Handle(label), Event::Drop(handle)) => handle == label,
+            _ => false,
+        }
+    }
     /// The exit status of a call to `wasi:cli/exit`, which ends the run.
     pub fn exit_status(&self) -> Option<i32> {
         match &self.event {
@@ -173,21 +197,35 @@ impl Replay {
             .enumerate()
             .filter(|(idx, _)| !self.done[*idx])
     }
-    /// The next line the host performs on its own: in trace order, the first host line that
-    /// doesn't answer a guest call, e.g. an export call, or the host's drop of a guest resource.
-    /// `None` at the end of the trace.
-    ///
-    /// Panics if a guest line comes before it, which the guest hasn't done.
+    /// The next line replay's `start` performs, in trace order: an export call, or the host's
+    /// drop of a resource of the guest (see `Line::is_start_line`). `None` once there are none.
+    /// The lines before it that are still pending may happen while `start` waits for its step;
+    /// `finish` reports those that never do.
     pub fn next_host_line(&mut self) -> Option<Line> {
-        let (idx, line) = self
-            .pending()
-            .find(|(_, line)| line.by == Party::Guest || !line.answers_guest())?;
-        if line.by == Party::Guest {
-            panic!("the trace has `{line}`, which the guest didn't do");
-        }
+        self.take(|line| line.is_start_line())
+    }
+    /// The next host line about `key`, e.g. the `Return` of a STARTED call, which the import's
+    /// mock waits for, or a copy of a stream, which a job performs.
+    pub fn take_host_line(&mut self, key: &LineKey) -> Option<Line> {
+        self.take(|line| line.by == Party::Host && line.is_about(key))
+    }
+    fn take(&mut self, matches: impl Fn(&Line) -> bool) -> Option<Line> {
+        let (idx, line) = self.pending().find(|(_, line)| matches(line))?;
         let line = line.clone();
         self.done[idx] = true;
         Some(line)
+    }
+    /// Checks that replay reached every line, once it is done: all but the host's drops of its
+    /// own resources, which replay has nothing to do for.
+    ///
+    /// Panics on the first line it didn't reach.
+    pub fn finish(&self) {
+        let missed = self.pending().find(|(_, line)| {
+            line.by == Party::Guest || line.is_start_line() || !matches!(line.event, Event::Drop(_))
+        });
+        if let Some((_, line)) = missed {
+            panic!("the trace has `{line}`, which replay didn't reach");
+        }
     }
     /// Checks a guest line against the trace, and returns the host lines that answer it at once,
     /// e.g. the `Return` of an import call. A guest line is matched by its task, for the lines of
@@ -338,11 +376,27 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "the trace has `guest: call c1 get(1)`, which the guest didn't do")]
+    #[should_panic(expected = "the trace has `guest: call c1 get(1)`, which replay didn't reach")]
     fn replay_missing_guest_line() {
         let mut replay = Replay::new(p2_trace());
-        replay.next_host_line();
-        replay.next_host_line();
+        // The guest's lines may still come while `start` waits for the next line's step.
+        assert_eq!(replay.next_host_line(), Some(p2_trace().0[0].clone()));
+        assert_eq!(replay.next_host_line(), Some(p2_trace().0[4].clone()));
+        assert_eq!(replay.next_host_line(), None);
+        replay.finish();
+    }
+
+    #[test]
+    fn host_drops_of_mocks() {
+        let mock = Label {
+            table: Table::Imports,
+            name: "#counter-1".to_string(),
+        };
+        let trace = Trace(vec![line(Party::Host, Event::Drop(mock))]);
+        let mut replay = Replay::new(trace);
+        // Neither `start`'s, nor needed.
+        assert_eq!(replay.next_host_line(), None);
+        replay.finish();
     }
 
     #[test]
@@ -364,8 +418,10 @@ mod tests {
             late.clone(),
         ]);
         let mut replay = Replay::new(trace.clone());
-        // The `Return` comes at its step, not in answer to the call.
+        // The `Return` comes at its step, not in answer to the call, and the mock takes it.
         assert_eq!(replay.check(&trace.0[0]), vec![trace.0[1].clone()]);
-        assert_eq!(replay.next_host_line(), Some(late));
+        assert_eq!(replay.next_host_line(), None);
+        assert_eq!(replay.take_host_line(&LineKey::Task(c1)), Some(late));
+        replay.finish();
     }
 }

@@ -24,11 +24,9 @@ impl State {
             },
             _ => quote! {
                 let name = wasm_wave::to_string(&res.to_value()).unwrap();
-                let line = if MOVING.with(|moving| moving.get()) {
-                    Line { at: HOST_DROP_AT.get(), ..trace_drop(Party::Host, Table::Imports, name) }
-                } else {
-                    trace_drop(Party::Guest, Table::Imports, name)
-                };
+                // The host's take no step, as the guest doesn't see them.
+                let by = if MOVING.with(|moving| moving.get()) { Party::Host } else { Party::Guest };
+                let line = trace_drop(by, Table::Imports, name);
                 proxy::recorder::record::record(&line);
             },
         };
@@ -44,19 +42,10 @@ impl State {
     }
     /// Items the mocks use.
     pub fn mock_defs(&self) -> Vec<Item> {
-        // The step of the host's drops, when the exports component makes them, rather than a
-        // mock in answer to a call (see `host-drops`).
-        let host_drop_at = match self.mode {
-            Mode::Fuzz => quote! {
-                static HOST_DROP_AT: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
-            },
-            _ => quote! {},
-        };
         let file: syn::File = parse_quote! {
             thread_local! {
                 // The label of the last mock.
                 static MOCK_LABEL: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-                #host_drop_at
             }
             /// The label of a new mock.
             #[allow(dead_code)]

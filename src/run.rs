@@ -54,6 +54,15 @@ impl bindings::proxy::recorder::replay::Host for State {
         println!("{line}");
         Some(trace::convert(line))
     }
+    fn take_host_line(&mut self, key: bindings::proxy::recorder::types::LineKey) -> Option<Line> {
+        let key: trace::LineKey = trace::convert(key);
+        let line = self.replay.as_mut().unwrap().take_host_line(&key)?;
+        println!("{line}");
+        Some(trace::convert(line))
+    }
+    fn finish(&mut self) {
+        self.replay.as_ref().unwrap().finish();
+    }
     fn check(&mut self, line: Line) -> Vec<Line> {
         let line: trace::Line = trace::convert(line);
         println!("{line}");
