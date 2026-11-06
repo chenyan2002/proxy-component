@@ -99,9 +99,13 @@ run-fuzz-replay:
 	cp composed.wasm $(OUT)/replay.wasm
 	for i in 1 2 3 4 5 6 7 8 9 10; do \
 		$(RUN_WASM) $(OUT)/fuzz-trace.out $(WASMTIME_FLAGS) --invoke 'start()' $(OUT)/fuzz.wasm > /dev/null; fuzz=$$?; \
-		[ $$fuzz -ne 1 ] || exit 1; \
+		if [ $$fuzz -eq 1 ]; then \
+			cat $(OUT)/fuzz-trace.out; echo "fuzzing failed, with the output above, in $(OUT)/fuzz-trace.out"; exit 1; \
+		fi; \
 		$(RUN_WASM) $(OUT)/replay.out $(WASMTIME_FLAGS) --invoke 'start()' $(OUT)/replay.wasm < $(OUT)/fuzz-trace.out > /dev/null; \
-		[ $$? -eq $$fuzz ] || exit 1; \
+		if [ $$? -ne $$fuzz ]; then \
+			cat $(OUT)/replay.out; echo "replay failed, with the output above, in $(OUT)/replay.out, of the trace in $(OUT)/fuzz-trace.out"; exit 1; \
+		fi; \
 	done
 
 test-dialog:
