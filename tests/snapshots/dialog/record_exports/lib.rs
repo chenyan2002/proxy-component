@@ -17,11 +17,6 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     "test:guest/api@0.1.0.classify".to_string(),
                     "test:guest/api@0.1.0.begin".to_string(),
                     "new test:guest/api/session@0.1.0".to_string(),
-                    "test:host/types@0.1.0.make-point".to_string(),
-                    "test:host/types@0.1.0.check".to_string(),
-                    "test:host/types@0.1.0.open".to_string(),
-                    "new test:host/types/counter@0.1.0".to_string(),
-                    "test:host/types/counter@0.1.0.merge".to_string(),
                 ],
             ) as usize;
             match idx {
@@ -180,212 +175,6 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         proxy::conversion::executor::run(),
                     );
                 }
-                5usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "call export func {}", "test:host/types@0.1.0.make-point"
-                        ),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(x), "s32"),
-                    );
-                    let x: i32 = Dialog::read_value(0);
-                    __params.push(wasm_wave::to_string(&ToValue::to_value(&x)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(y), "s32"),
-                    );
-                    let y: i32 = Dialog::read_value(0);
-                    __params.push(wasm_wave::to_string(&ToValue::to_value(&y)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "test:host/types@0.1.0.make-point",
-                            __params.join(", ")
-                        ),
-                    );
-                    let res = test::host::types::make_point(x, y);
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
-                            .unwrap()
-                        ),
-                    );
-                    let _ = res;
-                    join_spawned().await;
-                    proxy::conversion::executor::stop();
-                    __executor.await;
-                    __executor = wit_bindgen::spawn_local(
-                        proxy::conversion::executor::run(),
-                    );
-                }
-                6usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("call export func {}", "test:host/types@0.1.0.check"),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(p), "perms"),
-                    );
-                    let p: test::host::types::Perms = Dialog::read_value(0);
-                    __params.push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(c), "color"),
-                    );
-                    let c: test::host::types::Color = Dialog::read_value(0);
-                    __params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "test:host/types@0.1.0.check", __params
-                            .join(", ")
-                        ),
-                    );
-                    let res = test::host::types::check(p, c);
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
-                            .unwrap()
-                        ),
-                    );
-                    let _ = res;
-                    join_spawned().await;
-                    proxy::conversion::executor::stop();
-                    __executor.await;
-                    __executor = wit_bindgen::spawn_local(
-                        proxy::conversion::executor::run(),
-                    );
-                }
-                7usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("call export func {}", "test:host/types@0.1.0.open"),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "provide argument for {}: {}", stringify!(name), "string"
-                        ),
-                    );
-                    let name: String = Dialog::read_value(0);
-                    __params
-                        .push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "test:host/types@0.1.0.open", __params
-                            .join(", ")
-                        ),
-                    );
-                    let res = test::host::types::open(&name);
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
-                            .unwrap()
-                        ),
-                    );
-                    let _ = res;
-                    join_spawned().await;
-                    proxy::conversion::executor::stop();
-                    __executor.await;
-                    __executor = wit_bindgen::spawn_local(
-                        proxy::conversion::executor::run(),
-                    );
-                }
-                8usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "call export func {}", "new test:host/types/counter@0.1.0"
-                        ),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(start), "u32"),
-                    );
-                    let start: u32 = Dialog::read_value(0);
-                    __params
-                        .push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "new test:host/types/counter@0.1.0",
-                            __params.join(", ")
-                        ),
-                    );
-                    let res = test::host::types::Counter::new(start);
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
-                            .unwrap()
-                        ),
-                    );
-                    let _ = res;
-                    join_spawned().await;
-                    proxy::conversion::executor::stop();
-                    __executor.await;
-                    __executor = wit_bindgen::spawn_local(
-                        proxy::conversion::executor::run(),
-                    );
-                }
-                9usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "call export func {}", "test:host/types/counter@0.1.0.merge"
-                        ),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "provide argument for {}: {}", stringify!(a),
-                            "borrow<counter>"
-                        ),
-                    );
-                    let a: test::host::types::Counter = Dialog::read_value(0);
-                    __params.push(wasm_wave::to_string(&ToValue::to_value(&a)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(b), "counter"),
-                    );
-                    let b: test::host::types::Counter = Dialog::read_value(0);
-                    __params.push(wasm_wave::to_string(&ToValue::to_value(&b)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "test:host/types/counter@0.1.0.merge",
-                            __params.join(", ")
-                        ),
-                    );
-                    let res = test::host::types::Counter::merge(&a, b);
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
-                            .unwrap()
-                        ),
-                    );
-                    let _ = res;
-                    join_spawned().await;
-                    proxy::conversion::executor::stop();
-                    __executor.await;
-                    __executor = wit_bindgen::spawn_local(
-                        proxy::conversion::executor::run(),
-                    );
-                }
                 _ => unreachable!(),
             }
             SCOPED_ALLOC
@@ -420,45 +209,6 @@ impl<'a> ToValue for &'a test::guest::api::Session {
         Value::make_handle(label.into())
     }
 }
-impl FromWave for test::guest::api::Session {
-    fn from_wave(value: &Value) -> Self {
-        let label = value.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("{}-", "session"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        {
-            fn cannot_mock<T>() -> T {
-                unimplemented!("cannot mock `session`, a resource of the main component")
-            }
-            let _ = handle;
-            cannot_mock()
-        }
-    }
-}
-impl<'a> FromWave for &'a test::guest::api::Session {
-    fn from_wave(value: &Value) -> Self {
-        let label = value.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("borrow-{}-", "session"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        SCOPED_ALLOC
-            .with(|alloc| {
-                let mut alloc = alloc.borrow_mut();
-                alloc
-                    .alloc({
-                        fn cannot_mock<T>() -> T {
-                            unimplemented!(
-                                "cannot mock `session`, a resource of the main component"
-                            )
-                        }
-                        let _ = handle;
-                        cannot_mock()
-                    })
-            })
-    }
-}
 impl ValueTyped for test::host::types::Point {
     #[allow(unused_imports)]
     fn value_type() -> Type {
@@ -478,17 +228,6 @@ impl ToValue for test::host::types::Point {
             .to_value())
         ];
         Value::make_record(&ty, fields).unwrap()
-    }
-}
-impl FromWave for test::host::types::Point {
-    #[allow(unused_variables)]
-    fn from_wave(value: &Value) -> Self {
-        let fields: std::collections::BTreeMap<_, _> = value.unwrap_record().collect();
-        test::host::types::Point {
-            x: FromWave::from_wave(&fields["x"]),
-            y: FromWave::from_wave(&fields["y"]),
-            label: FromWave::from_wave(&fields["label"]),
-        }
     }
 }
 impl ValueTyped for test::host::types::Shape {
@@ -516,23 +255,6 @@ impl ToValue for test::host::types::Shape {
             .unwrap()
     }
 }
-impl FromWave for test::host::types::Shape {
-    fn from_wave(value: &Value) -> Self {
-        match value.unwrap_variant() {
-            (ref case, Some(val)) if case == "circle" => {
-                test::host::types::Shape::Circle(FromWave::from_wave(&val))
-            }
-            (ref case, Some(val)) if case == "rect" => {
-                test::host::types::Shape::Rect(FromWave::from_wave(&val))
-            }
-            (ref case, Some(val)) if case == "HTTP-error" => {
-                test::host::types::Shape::HttpError(FromWave::from_wave(&val))
-            }
-            (ref case, None) if case == "empty" => test::host::types::Shape::Empty,
-            _ => unreachable!(),
-        }
-    }
-}
 impl ValueTyped for test::host::types::Color {
     #[allow(unused_imports)]
     fn value_type() -> Type {
@@ -549,16 +271,6 @@ impl ToValue for test::host::types::Color {
             Self::DnsBlue => Value::make_variant(&ty, "DNS-blue", None),
         }
             .unwrap()
-    }
-}
-impl FromWave for test::host::types::Color {
-    fn from_wave(value: &Value) -> Self {
-        match value.unwrap_variant() {
-            (ref case, None) if case == "red" => test::host::types::Color::Red,
-            (ref case, None) if case == "green" => test::host::types::Color::Green,
-            (ref case, None) if case == "DNS-blue" => test::host::types::Color::DnsBlue,
-            _ => unreachable!(),
-        }
     }
 }
 impl ValueTyped for test::host::types::Perms {
@@ -580,22 +292,6 @@ impl ToValue for test::host::types::Perms {
             flags.push("exec");
         }
         Value::make_flags(&ty, flags).unwrap()
-    }
-}
-impl FromWave for test::host::types::Perms {
-    fn from_wave(value: &Value) -> Self {
-        let flags: Vec<_> = value.unwrap_flags().map(|f| f.into_owned()).collect();
-        let mut res = test::host::types::Perms::empty();
-        if flags.iter().any(|flag| flag == "read") {
-            res |= test::host::types::Perms::READ;
-        }
-        if flags.iter().any(|flag| flag == "write") {
-            res |= test::host::types::Perms::WRITE;
-        }
-        if flags.iter().any(|flag| flag == "exec") {
-            res |= test::host::types::Perms::EXEC;
-        }
-        res
     }
 }
 impl ValueTyped for test::host::types::Counter {
@@ -624,35 +320,6 @@ impl<'a> ToValue for &'a test::host::types::Counter {
             proxy::conversion::conversion::get_handle_mock_test_host_types_counter(self)
         );
         Value::make_handle(label.into())
-    }
-}
-impl FromWave for test::host::types::Counter {
-    fn from_wave(value: &Value) -> Self {
-        let label = value.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("{}-", "counter"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        proxy::conversion::conversion::get_mock_test_host_types_counter(handle)
-    }
-}
-impl<'a> FromWave for &'a test::host::types::Counter {
-    fn from_wave(value: &Value) -> Self {
-        let label = value.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("borrow-{}-", "counter"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        SCOPED_ALLOC
-            .with(|alloc| {
-                let mut alloc = alloc.borrow_mut();
-                alloc
-                    .alloc(
-                        proxy::conversion::conversion::get_mock_test_host_types_counter(
-                            handle,
-                        ),
-                    )
-            })
     }
 }
 #[allow(unused_imports)]
@@ -717,90 +384,6 @@ impl ToValue for &MockedResource {
     fn to_value(&self) -> Value {
         let label = format!("borrow-{}-{}", self.name, self.handle);
         Value::make_handle(label.into())
-    }
-}
-/// A value of the trace, as the Rust type of the bindings: wasm-wave's `ToRust`, as a
-/// local trait, so that it can be implemented for wit-bindgen's streams, futures and
-/// error-contexts, as `Fuzz` is for `Arbitrary`.
-trait FromWave: Sized {
-    fn from_wave(value: &Value) -> Self;
-    /// From the payload of a result's or a variant's case, which `()` has none of.
-    fn from_payload(value: Option<&Value>) -> Self {
-        Self::from_wave(value.expect("the case has a payload"))
-    }
-}
-macro_rules! impl_from_wave_primitive {
-    ($($t:ty),*) => {
-        $(impl FromWave for $t { fn from_wave(value : & Value) -> Self { value.to_rust()
-        } })*
-    };
-}
-impl_from_wave_primitive!(
-    bool, u8, u16, u32, u64, i8, i16, i32, i64, f32, f64, char, String
-);
-impl FromWave for () {
-    fn from_wave(_value: &Value) -> Self {}
-    fn from_payload(_value: Option<&Value>) -> Self {}
-}
-impl<T: FromWave> FromWave for Vec<T> {
-    fn from_wave(value: &Value) -> Self {
-        value.unwrap_list().map(|x| T::from_wave(&x)).collect()
-    }
-}
-impl<T: FromWave> FromWave for Option<T> {
-    fn from_wave(value: &Value) -> Self {
-        value.unwrap_option().map(|x| T::from_wave(&x))
-    }
-}
-impl<T: FromWave, E: FromWave> FromWave for core::result::Result<T, E> {
-    fn from_wave(value: &Value) -> Self {
-        match value.unwrap_result() {
-            Ok(x) => Ok(T::from_payload(x.as_deref())),
-            Err(x) => Err(E::from_payload(x.as_deref())),
-        }
-    }
-}
-macro_rules! impl_from_wave_tuple {
-    ($($T:ident),+) => {
-        impl < $($T : FromWave),+ > FromWave for ($($T,)+) { fn from_wave(value : &
-        Value) -> Self { let mut items = value.unwrap_tuple(); ($($T ::from_wave(& items
-        .next().unwrap()),)+) } }
-    };
-}
-impl_from_wave_tuple!(T1);
-impl_from_wave_tuple!(T1, T2);
-impl_from_wave_tuple!(T1, T2, T3);
-impl_from_wave_tuple!(T1, T2, T3, T4);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
-impl<T: 'static> FromWave for wit_bindgen::StreamReader<T> {
-    fn from_wave(_value: &Value) -> Self {
-        unimplemented!("replaying a stream")
-    }
-}
-impl<T: 'static> FromWave for wit_bindgen::FutureReader<T> {
-    fn from_wave(_value: &Value) -> Self {
-        unimplemented!("replaying a future")
-    }
-}
-impl FromWave for wit_bindgen::rt::async_support::ErrorContext {
-    fn from_wave(_value: &Value) -> Self {
-        Self::new("")
-    }
-}
-impl FromWave for MockedResource {
-    fn from_wave(value: &Value) -> Self {
-        let label = value.unwrap_handle();
-        let (name, handle) = label
-            .rsplit_once('-')
-            .and_then(|(name, handle_str)| {
-                handle_str.parse::<u32>().ok().map(|h| (name.to_string(), h))
-            })
-            .expect("invalid handle label");
-        MockedResource { handle, name }
     }
 }
 impl Dialog for test::guest::api::Session {

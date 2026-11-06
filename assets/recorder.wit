@@ -48,18 +48,26 @@ interface %record {
   use types.{line};
   // Records a line, in the order the proxy observes it.
   %record: func(line: line);
+  // Reports a panic of a generated component, which can't print its own, and traps.
+  fail: func(message: string);
 }
 
 interface replay {
-  use types.{line, line-key};
+  use types.{line, line-key, label};
   // The next line `start` performs, in trace order: an export call, or the host's drop of a
   // resource of the guest. `none` once there are none.
   next-host-line: func() -> option<line>;
   // The next host line about `key`, e.g. the `return` of a STARTED call, which its mock waits
   // for.
   take-host-line: func(key: line-key) -> option<line>;
+  // Pairs the trace's label of a stream or future replay makes with replay's, of the end it
+  // keeps; the trace's first appears in a host line, which `check` doesn't pair.
+  pair: func(trace: label, replay: label);
   // Checks that replay reached every line, once it is done; traps on the first it didn't.
   finish: func();
+  // Reports a panic of a generated component, e.g. a divergence a job found, which it can't
+  // print itself, and traps.
+  fail: func(message: string);
   // Checks a guest line against the trace, and returns the host lines that answer it at once,
   // e.g. the `return` of an import call. Traps on a mismatch, with the expected and the actual
   // line.

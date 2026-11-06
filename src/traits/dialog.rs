@@ -319,7 +319,7 @@ impl DialogTrait {
                   T: Dialog + ToValue + ValueTyped + wit_stream::StreamPayload + 'static,
               {
                   fn read_value(_dep: u32) -> Self {
-                      let (mut writer, reader, label) = host_stream::<T>();
+                      let (mut writer, reader, label) = host_stream::<T>(true);
                       spawn(async move {
                           let choices = ["write a chunk".to_string(), "end the stream".to_string()];
                           loop {
@@ -370,7 +370,7 @@ impl DialogTrait {
                   T: Dialog + ToValue + ValueTyped + wit_future::FuturePayload,
               {
                   fn read_value(_dep: u32) -> Self {
-                      let (writer, reader, label) = host_future::<T>();
+                      let (writer, reader, label) = host_future::<T>(true);
                       spawn(async move {
                           proxy::util::dialog::print(0, &format!("The host writes {label}"));
                           let value: T = Dialog::read_value(1);

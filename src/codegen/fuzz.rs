@@ -17,20 +17,11 @@ impl State {
         let args = extract_arg_info(sig);
         let ret_ty = get_return_type(&sig.output);
         // The streams and futures the guest gives the host, which the host reads or drops.
-        let consumed = wit_func.consumed_args(&args);
-        // The other resources the arguments own, which the guest moved to the host.
-        let owned: Vec<_> = args
-            .iter()
-            .zip(&wit_func.params_own)
-            .zip(&wit_func.params_async)
-            .filter(|((arg, owns), is_async)| **owns && !**is_async && !arg.is_borrowed)
-            .map(|((arg, _), _)| &arg.ident)
-            .collect();
-        let drop_owned = if owned.is_empty() {
-            quote! {}
-        } else {
-            quote! { drop((#(#owned,)*)); }
-        };
+        let moved = self.take_moved_args(
+            &wit_func,
+            &args,
+            |arg| quote! { Fuzz::consume(#arg, &mut __host) },
+        );
         let is_async = wit_func.is_async;
         let params = params_to_wave(kind.as_ref(), &args);
         // What the host does, rather than returns: how it reads the streams and futures, and when
@@ -56,12 +47,7 @@ impl State {
             proxy::recorder::record::record(&trace_call(Party::Guest, __id, #display_name, #is_async, __params.clone()));
             let __random = proxy::util::debug::get_random();
             let mut __host = Unstructured::new(&__random);
-            // Dropping what the guest moved to the host isn't a drop of the guest's, so it's
-            // done before the call can wait, while no other task runs.
-            MOVING.with(|moving| moving.set(true));
-            #(Fuzz::consume(#consumed, &mut __host);)*
-            #drop_owned
-            MOVING.with(|moving| moving.set(false));
+            #moved
             #delay
         };
         let record_ret = |value: proc_macro2::TokenStream| {
@@ -115,19 +101,21 @@ impl State {
                     is_async,
                     ..
                 } = &func;
+                // The guest, and the host's background work, run a few steps before the call, as
+                // they do before replay's, in the steps the trace has. Then the arguments are
+                // made, as replay makes them from the trace once it is in the call's step, so that
+                // the jobs of their streams and futures come after the call that hands them out.
                 let args = quote! {
+                    let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
+                    let __at = proxy::conversion::executor::arrive_after(proxy::conversion::executor::current_step() + __runs).await;
                     let mut __params: Vec<String> = Vec::new();
                     #(
                         let #arg_names: #arg_tys = Fuzz::fuzz(&mut u).unwrap();
                         __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                     )*
                 };
-                // The guest, and the host's background work, run a few steps before the call,
-                // as they do before replay's, in the steps the trace has.
                 let before = quote! {
                     let __id = trace_task_id(Table::Exports);
-                    let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
-                    let __at = arrive_after(proxy::conversion::executor::current_step() + __runs).await;
                     proxy::recorder::record::record(&Line {
                         at: Some(__at),
                         ..trace_call(Party::Host, __id, #display_name, #is_async, __params)

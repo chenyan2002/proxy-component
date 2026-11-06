@@ -32,6 +32,8 @@ pub struct State {
     pub conversions: BTreeMap<TypeId, String>,
     /// What each WIT type has, e.g. own handles
     pub type_info: wit_bindgen_core::Types,
+    /// The interfaces of the virtualized host, which the imports component exports
+    pub host_interfaces: BTreeSet<InterfaceId>,
     pub traits: BTreeMap<Vec<String>, Vec<ItemTrait>>,
     pub types: BTreeMap<Vec<String>, Vec<(TypeId, TypeInfo)>>,
     pub funcs: BTreeMap<Vec<String>, BTreeMap<Option<String>, Vec<Signature>>>,
@@ -66,8 +68,6 @@ struct ExportFunc {
     /// Arguments at the call site, borrowed where the function expects a reference
     call_params: Vec<syn::Expr>,
     has_ret: bool,
-    /// Whether the result owns a resource
-    ret_owns: bool,
     is_async: bool,
     /// Whether the result has a stream or future
     ret_async: bool,
@@ -152,6 +152,7 @@ impl State {
             mode,
             interfaces: wit::interface_modules(&resolve, world),
             conversions: wit::conversion_funcs(&resolve),
+            host_interfaces: wit::host_interfaces(&resolve, world),
             has_streams: false,
             has_futures: false,
             type_info: {
@@ -326,6 +327,14 @@ impl State {
                     if matches!(wit_func.kind, Some(ResourceFuncKind::Method)) {
                         continue;
                     }
+                    // The host's own functions, which the main component imports, aren't called,
+                    // as the real host doesn't call them through the proxy. A trace could have
+                    // such a call, but not one with streams or futures, e.g. `body.consume` of a
+                    // body the host made: both ends would be in the generated components, whose
+                    // copies replay can't place in their steps.
+                    if self.host_interfaces.contains(&self.interfaces[path]) {
+                        continue;
+                    }
                     let args = extract_arg_info(sig);
                     let arg_tys = args
                         .iter()
@@ -347,7 +356,6 @@ impl State {
                         arg_tys,
                         call_params: args.iter().map(|arg| arg.call_param()).collect(),
                         has_ret: get_return_type(&sig.output).is_some(),
-                        ret_owns: wit_func.result_owns,
                         is_async: wit_func.is_async,
                         ret_async: wit_func.result_async,
                     });
@@ -360,11 +368,13 @@ impl State {
     /// mode, which has no executor.
     fn has_executor(&self) -> Option<HasExecutor> {
         let import = EXECUTOR_MODULE.strip_prefix("exports::").unwrap();
-        self.module_paths.iter().find_map(|path| match path.join("::") {
-            path if path == EXECUTOR_MODULE => Some(HasExecutor::Exports),
-            path if path == import => Some(HasExecutor::Imports),
-            _ => None,
-        })
+        self.module_paths
+            .iter()
+            .find_map(|path| match path.join("::") {
+                path if path == EXECUTOR_MODULE => Some(HasExecutor::Exports),
+                path if path == import => Some(HasExecutor::Imports),
+                _ => None,
+            })
     }
     /// The async `start` function running `body`. The imports component's jobs run in
     /// `proxy:conversion/executor` until the exports `start` called are done, and the jobs of this
@@ -410,19 +420,13 @@ impl State {
                     })
                     .await
                 }
-                /// Waits until the executor's step `step`, which lets the guest, and the host's
-                /// background work, run, and takes the next step, of a host line `start` makes,
-                /// e.g. an export call's arrival.
-                #[allow(dead_code)]
-                async fn arrive_after(step: u32) -> u32 {
-                    proxy::conversion::executor::wait_until_step(step).await;
-                    proxy::conversion::executor::step()
-                }
             },
             _ => quote! {},
         };
+        let panic_hook = panic_hook(&self.mode);
         parse_quote! {
             #sig {
+                #panic_hook
                 #start_defs
                 let #executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
                 #body
@@ -431,6 +435,36 @@ impl State {
                 __executor.await;
                 #finish
             }
+        }
+    }
+    /// What an import's mock does with the arguments the guest moved to the host, in fuzz and
+    /// replay modes: `consume`, the mode's, of each stream and future, and a drop of the other
+    /// resources. These are the host's drops, not the guest's, so `MOVING` is set; and they happen
+    /// before the call can wait, while no other task runs.
+    fn take_moved_args(
+        &self,
+        wit_func: &wit::WitFunc,
+        args: &[util::ArgInfo],
+        consume: impl Fn(&Ident) -> TokenStream,
+    ) -> TokenStream {
+        let consumed = wit_func.consumed_args(args).into_iter().map(consume);
+        let owned: Vec<_> = args
+            .iter()
+            .zip(&wit_func.params_own)
+            .zip(&wit_func.params_async)
+            .filter(|((arg, owns), is_async)| **owns && !**is_async && !arg.is_borrowed)
+            .map(|((arg, _), _)| &arg.ident)
+            .collect();
+        let drop_owned = if owned.is_empty() {
+            quote! {}
+        } else {
+            quote! { drop((#(#owned,)*)); }
+        };
+        quote! {
+            MOVING.with(|moving| moving.set(true));
+            #(#consumed;)*
+            #drop_owned
+            MOVING.with(|moving| moving.set(false));
         }
     }
     /// An export call of `start`, in fuzz and replay modes: `args` binds the arguments, `before`
@@ -485,11 +519,18 @@ impl State {
                 run_executor().await;
                 EXECUTOR.with_borrow_mut(|e| e.stopped = false);
             },
-            ("run", _) => quote! { run_executor().await },
+            ("run", _) => {
+                let panic_hook = panic_hook(&self.mode);
+                quote! {
+                    #panic_hook
+                    run_executor().await
+                }
+            }
             ("stop", _) => quote! { stop_executor() },
             ("step", _) => quote! { next_step() },
             ("current_step", _) => quote! { current_step() },
             ("wait_until_step", _) => quote! { wait_until_step(step).await },
+            ("arrive_after", _) => quote! { arrive_after(step).await },
             ("host_drops", Mode::Replay | Mode::Fuzz) => {
                 quote! { MOVING.with(|moving| moving.set(dropping)) }
             }
@@ -522,58 +563,53 @@ enum HasExecutor {
 }
 
 /// Items for the jobs of replay and fuzz modes, which differ by where the jobs run: the table the
-/// component labels its handles in; `trace_at`, the step of a host line its jobs deliver, the
-/// executor's run in the imports component, and a step of its own, as an export call's arrival,
-/// in the exports component; and, in fuzz mode, `host_dropping`, which runs `f`, dropping mocks
-/// for the host, e.g. those in a value a job read from the guest, so that the trace has the
-/// host's drops. Those take no step: the guest doesn't see them.
+/// component labels its handles in; `trace_at`, the step in which a job makes a host line, and
+/// `trace_reach`, which waits for it in replay; and `host_dropping`, which runs `f`, dropping
+/// mocks for the host, e.g. those in a value a job read from the guest: the host's drops, which
+/// take no step, as the guest doesn't see them.
 fn job_defs(mode: &Mode, has_executor: Option<HasExecutor>) -> Vec<Item> {
-    let is_fuzz = matches!(mode, Mode::Fuzz);
     let file: File = match has_executor {
-        Some(HasExecutor::Exports) => {
-            let host_dropping = if is_fuzz {
-                quote! {
-                    #[allow(dead_code)]
-                    fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
-                        MOVING.with(|moving| moving.set(true));
-                        let res = f();
-                        MOVING.with(|moving| moving.set(false));
-                        res
-                    }
+        // The imports component's jobs run in the executor: a line's step is the executor's run.
+        Some(HasExecutor::Exports) => parse_quote! {
+            #[allow(dead_code)]
+            const TRACE_TABLE: Table = Table::Imports;
+            #[allow(dead_code)]
+            fn trace_at() -> u32 { current_step() }
+            #[allow(dead_code)]
+            async fn trace_reach(at: Option<u32>) {
+                if let Some(at) = at {
+                    reach_step(at).await;
                 }
-            } else {
-                quote! {}
-            };
-            parse_quote! {
-                #[allow(dead_code)]
-                const TRACE_TABLE: Table = Table::Imports;
-                #[allow(dead_code)]
-                fn trace_at() -> u32 { current_step() }
-                #host_dropping
             }
-        }
-        Some(HasExecutor::Imports) => {
-            let host_dropping = if is_fuzz {
-                quote! {
-                    #[allow(dead_code)]
-                    fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
-                        proxy::conversion::executor::host_drops(true);
-                        let res = f();
-                        proxy::conversion::executor::host_drops(false);
-                        res
-                    }
+            #[allow(dead_code)]
+            fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
+                MOVING.with(|moving| moving.set(true));
+                let res = f();
+                MOVING.with(|moving| moving.set(false));
+                res
+            }
+        },
+        // The exports component's jobs run on the task of `start`: a line's step is the last
+        // step, which replay's waits for.
+        Some(HasExecutor::Imports) => parse_quote! {
+            #[allow(dead_code)]
+            const TRACE_TABLE: Table = Table::Exports;
+            #[allow(dead_code)]
+            fn trace_at() -> u32 { proxy::conversion::executor::current_step() }
+            #[allow(dead_code)]
+            async fn trace_reach(at: Option<u32>) {
+                if let Some(at) = at {
+                    proxy::conversion::executor::wait_until_step(at).await;
                 }
-            } else {
-                quote! {}
-            };
-            parse_quote! {
-                #[allow(dead_code)]
-                const TRACE_TABLE: Table = Table::Exports;
-                #[allow(dead_code)]
-                fn trace_at() -> u32 { proxy::conversion::executor::step() }
-                #host_dropping
             }
-        }
+            #[allow(dead_code)]
+            fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
+                proxy::conversion::executor::host_drops(true);
+                let res = f();
+                proxy::conversion::executor::host_drops(false);
+                res
+            }
+        },
         None => return Vec::new(),
     };
     let mut items = file.items;
@@ -605,6 +641,21 @@ fn job_defs(mode: &Mode, has_executor: Option<HasExecutor>) -> Vec<Item> {
         items.extend(file.items);
     }
     items
+}
+
+/// Sends the panics of the component to the recorder, which reports them (see `fail`), in
+/// fuzz and replay modes: the generated components have no stderr of their own to print them,
+/// e.g. when the main component's is virtualized.
+fn panic_hook(mode: &Mode) -> TokenStream {
+    let fail = match mode {
+        Mode::Fuzz => quote! { proxy::recorder::record::fail },
+        Mode::Replay => quote! { proxy::recorder::replay::fail },
+        _ => return quote! {},
+    };
+    quote! {
+        static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
+        PANIC_HOOK.call_once(|| std::panic::set_hook(Box::new(|info| #fail(&info.to_string()))));
+    }
 }
 
 /// Helpers of record, replay and fuzz modes, which make the lines of `proxy:recorder/types`. Each

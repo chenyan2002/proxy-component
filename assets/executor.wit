@@ -8,15 +8,17 @@ package proxy:conversion;
 interface executor {
   run: async func();
   stop: func();
-  // Counts a step that isn't a run of the executor, e.g. the arrival of an export call, which the
-  // exports component makes, and returns it (see `docs/p3-record-replay.md`, Steps).
+  // Counts a step that isn't a run of the executor, e.g. the host's drop of a guest's resource,
+  // which the exports component makes, and returns it (see `docs/p3-record-replay.md`, Steps).
   step: func() -> u32;
   // The last step.
   current-step: func() -> u32;
-  // Waits until the executor's run in `step`, or returns at once if the count is already there:
-  // `start` waits for the step before an export call's, which fuzz mode chooses, and replay's
-  // trace has.
+  // Waits until the executor's run in `step`, or returns at once if the count is already there.
   wait-until-step: async func(step: u32);
+  // Waits as `wait-until-step` does, and counts the next step, as `step` does, without a run of
+  // the executor in between: `start` waits for the step before an export call's, which fuzz mode
+  // chooses, and replay's trace has, and the call arrives in the next.
+  arrive-after: async func(step: u32) -> u32;
   // Whether the exports component is dropping mocks of the imports component itself, e.g. those
   // it made for the borrowed arguments of an export call: the host's drops, not the guest's.
   host-drops: func(dropping: bool);

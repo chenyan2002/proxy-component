@@ -31,8 +31,10 @@ impl Trait for FuzzTrait {
                 quote! {
                     fn consume(self, _u: &mut Unstructured<'_>) {
                         let name = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
+                        // `start` drops it, which takes a step, as an export call does.
                         let line = trace_drop(Party::Host, TRACE_TABLE, name);
-                        proxy::recorder::record::record(&Line { at: Some(trace_at()), ..line });
+                        let at = proxy::conversion::executor::step();
+                        proxy::recorder::record::record(&Line { at: Some(at), ..line });
                     }
                 }
             } else {
@@ -326,22 +328,31 @@ impl FuzzTrait {
                   // Writes fuzzed chunks, then ends the stream. A line is a chunk, which the
                   // guest may read in several copies.
                   fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
-                      let (mut writer, reader, name) = host_stream::<T>();
+                      let (mut writer, reader, name) = host_stream::<T>(true);
                       let label = Label { table: TRACE_TABLE, name };
                       let chunks: Vec<Vec<T>> = Fuzz::fuzz(u)?;
                       spawn(async move {
                           let mut chunks = chunks.into_iter().filter(|chunk| !chunk.is_empty());
                           while let Some(chunk) = chunks.next() {
-                              let items = wasm_wave::to_string(&chunk.to_value()).unwrap();
+                              // Each item's, for the part the guest read, if it drops the stream
+                              // first.
+                              let waves: Vec<_> = chunk
+                                  .iter()
+                                  .map(|item| wasm_wave::to_string(&item.to_value()).unwrap())
+                                  .collect();
                               let at = trace_at();
                               let rest = writer.write_all(chunk).await;
+                              let written = waves.len() - rest.len();
+                              if written > 0 {
+                                  let items = format!("[{}]", waves[..written].join(", "));
+                                  let chunk = Chunk { stream: label.clone(), items };
+                                  proxy::recorder::record::record(&host_line_at(at, Event::Write(chunk)));
+                              }
                               if !rest.is_empty() {
                                   proxy::recorder::record::record(&guest_line(Event::Drop(label)));
                                   host_dropping(move || drop((rest, chunks.collect::<Vec<_>>())));
                                   return;
                               }
-                              let chunk = Chunk { stream: label.clone(), items };
-                              proxy::recorder::record::record(&host_line_at(at, Event::Write(chunk)));
                           }
                           drop(writer);
                           proxy::recorder::record::record(&host_line(Event::Drop(label)));
@@ -363,14 +374,17 @@ impl FuzzTrait {
                           while reads != Some(count) {
                               let at = trace_at();
                               let (result, items) = self.read(Vec::with_capacity(capacity)).await;
+                              // The guest may write its last items as it drops the stream.
+                              if !items.is_empty() {
+                                  let wave = wasm_wave::to_string(&items.to_value()).unwrap();
+                                  let chunk = Chunk { stream: label.clone(), items: wave };
+                                  proxy::recorder::record::record(&host_line_at(at, Event::Read(chunk)));
+                                  host_dropping(move || drop(items));
+                              }
                               if let wit_bindgen::StreamResult::Dropped = result {
                                   proxy::recorder::record::record(&guest_line(Event::Drop(label)));
                                   return;
                               }
-                              let wave = wasm_wave::to_string(&items.to_value()).unwrap();
-                              let chunk = Chunk { stream: label.clone(), items: wave };
-                              proxy::recorder::record::record(&host_line_at(at, Event::Read(chunk)));
-                              host_dropping(move || drop(items));
                               count += 1;
                           }
                           drop(self);
@@ -390,7 +404,7 @@ impl FuzzTrait {
                   // Writes a fuzzed value.
                   fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
                       let value = T::fuzz(u)?;
-                      let (writer, reader, name) = host_future::<T>();
+                      let (writer, reader, name) = host_future::<T>(true);
                       let label = Label { table: TRACE_TABLE, name };
                       let wave = wasm_wave::to_string(&value.to_value()).unwrap();
                       spawn(async move {
@@ -433,6 +447,11 @@ impl FuzzTrait {
           impl Fuzz for wit_bindgen::rt::async_support::ErrorContext {
               fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
                   Ok(Self::new(&String::fuzz(u)?))
+              }
+              // The host drops one the guest gives it, which ends its label, as the trace says.
+              fn consume(self, _u: &mut Unstructured<'_>) {
+                  let name = wasm_wave::to_string(&self.to_value()).unwrap();
+                  proxy::recorder::record::record(&trace_drop(Party::Host, TRACE_TABLE, name));
               }
           }
         });

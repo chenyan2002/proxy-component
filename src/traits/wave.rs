@@ -1,12 +1,11 @@
 use crate::codegen::util::{is_wrapped_module, make_path};
 use crate::codegen::wit::WitType;
-use crate::traits::{Trait, new_mock};
+use crate::traits::Trait;
 use quote::{format_ident, quote};
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
 pub struct WaveTrait {
     pub to_value: bool,
-    pub to_rust: bool,
     pub has_replay_table: bool,
     /// Label wrapped host resources by their host handles, see `proxy:conversion`
     pub wrapped_labels: bool,
@@ -76,36 +75,6 @@ impl Trait for WaveTrait {
                 }
                 });
             }
-            if self.to_rust {
-                let mock = new_mock(wit, quote! { handle });
-                res.push(parse_quote! {
-                impl FromWave for #resource_path {
-                    fn from_wave(value: &Value) -> Self {
-                        let label = value.unwrap_handle();
-                        let handle = label
-                            .strip_prefix(&format!("{}-", #wit_name))
-                            .and_then(|s| s.parse::<u32>().ok())
-                            .expect("invalid handle label");
-                        #mock
-                    }
-                }
-                });
-                res.push(parse_quote! {
-                impl<'a> FromWave for &'a #resource_path {
-                    fn from_wave(value: &Value) -> Self {
-                        let label = value.unwrap_handle();
-                        let handle = label
-                            .strip_prefix(&format!("borrow-{}-", #wit_name))
-                            .and_then(|s| s.parse::<u32>().ok())
-                            .expect("invalid handle label");
-                        SCOPED_ALLOC.with(|alloc| {
-                            let mut alloc = alloc.borrow_mut();
-                            alloc.alloc(#mock)
-                        })
-                    }
-                }
-                });
-            }
         } else {
             let borrow_path = make_path(module_path, &format!("{}Borrow<'a>", resource.ident));
             res.push(parse_quote! {
@@ -155,35 +124,6 @@ impl Trait for WaveTrait {
                     });
                 }
             }
-            if self.to_rust && self.has_replay_table {
-                res.push(parse_quote! {
-                impl FromWave for #resource_path {
-                    fn from_wave(value: &Value) -> Self {
-                        let label = value.unwrap_handle();
-                        let expect_handle = label
-                            .strip_prefix(&format!("{}-", #wit_name))
-                            .and_then(|s| s.parse::<u32>().ok())
-                            .expect("invalid handle label");
-                        let handle = #resource_path::new(MockedResource {
-                            handle: expect_handle,
-                            name: #wit_name.to_string(),
-                        });
-                        // handle.handle() is not expected to match expect_handle, because each component
-                        // has its own resource table, and the order of resource creation can be different.
-                        // However, for the user component, the handle id should match, but we don't have a
-                        // way to check that at the moment.
-                        handle
-                    }
-                }
-                });
-                res.push(parse_quote! {
-                impl<'a> FromWave for #borrow_path {
-                    fn from_wave(_value: &Value) -> Self {
-                        unreachable!()
-                    }
-                }
-                });
-            }
         }
         res
     }
@@ -230,19 +170,6 @@ impl Trait for WaveTrait {
                         #((#wit_names, self.#field_names.to_value())),*
                     ];
                     Value::make_record(&ty, fields).unwrap()
-                }
-            }
-            });
-        }
-        if self.to_rust {
-            res.push(parse_quote! {
-            impl #impl_generics FromWave for #struct_name #ty_generics #where_clause {
-                #[allow(unused_variables)]
-                fn from_wave(value: &Value) -> Self {
-                    let fields: std::collections::BTreeMap<_, _> = value.unwrap_record().collect();
-                    #struct_name {
-                        #(#field_names: FromWave::from_wave(&fields[#wit_names])),*
-                    }
                 }
             }
             });
@@ -297,30 +224,6 @@ impl Trait for WaveTrait {
             }
             });
         }
-        if self.to_rust {
-            let arms = enum_item.variants.iter().zip(&wit.members).map(|(variant, wit_name)| {
-                let tag = &variant.ident;
-                match &variant.fields {
-                    syn::Fields::Unit => quote! {
-                        (ref case, None) if case == #wit_name => #enum_name::#tag
-                    },
-                    syn::Fields::Unnamed(_) => quote! {
-                        (ref case, Some(val)) if case == #wit_name => #enum_name::#tag(FromWave::from_wave(&val))
-                    },
-                    syn::Fields::Named(_) => unreachable!(),
-                }
-            });
-            res.push(parse_quote! {
-            impl #impl_generics FromWave for #enum_name #ty_generics #where_clause {
-                fn from_wave(value: &Value) -> Self {
-                    match value.unwrap_variant() {
-                        #(#arms),*,
-                        _ => unreachable!(),
-                    }
-                }
-            }
-            });
-        }
         res
     }
     fn flag_trait(
@@ -358,32 +261,13 @@ impl Trait for WaveTrait {
             }
             });
         }
-        if self.to_rust {
-            let set_flags = item.flags.iter().zip(&wit.members).map(|(f, wit_name)| {
-                quote! {
-                    if flags.iter().any(|flag| flag == #wit_name) {
-                        res |= #flag_path::#f;
-                    }
-                }
-            });
-            res.push(parse_quote! {
-            impl FromWave for #flag_path {
-                fn from_wave(value: &Value) -> Self {
-                    let flags: Vec<_> = value.unwrap_flags().map(|f| f.into_owned()).collect();
-                    let mut res = #flag_path::empty();
-                    #(#set_flags)*
-                    res
-                }
-            }
-            });
-        }
         res
     }
     fn trait_defs(&self) -> Vec<Item> {
         let mocked_resource = if self.has_replay_table {
             quote! {
                 use std::{alloc::Layout, cell::RefCell};
-                // Used to store borrowed resources when calling proxy::conversion during ToRust trait
+                // Used to store borrowed resources when calling proxy::conversion during `Replay`
                 #[allow(dead_code)]
                 struct ScopedAlloc {
                     ptrs: Vec<(*mut u8, Layout, fn(*mut u8))>,
@@ -451,121 +335,10 @@ impl Trait for WaveTrait {
         } else {
             quote! {}
         };
-        let mocked_from_wave = if self.has_replay_table {
-            quote! {
-            // Only called by constructor
-            impl FromWave for MockedResource {
-                fn from_wave(value: &Value) -> Self {
-                    let label = value.unwrap_handle();
-                    let (name, handle) = label
-                        .rsplit_once('-')
-                        .and_then(|(name, handle_str)| {
-                            handle_str.parse::<u32>().ok().map(|h| (name.to_string(), h))
-                        })
-                        .expect("invalid handle label");
-                    MockedResource {
-                        handle,
-                        name,
-                    }
-                }
-            }
-            }
-        } else {
-            quote! {}
-        };
-        let from_wave = if self.to_rust {
-            quote! {
-                /// A value of the trace, as the Rust type of the bindings: wasm-wave's `ToRust`, as a
-                /// local trait, so that it can be implemented for wit-bindgen's streams, futures and
-                /// error-contexts, as `Fuzz` is for `Arbitrary`.
-                trait FromWave: Sized {
-                    fn from_wave(value: &Value) -> Self;
-                    /// From the payload of a result's or a variant's case, which `()` has none of.
-                    fn from_payload(value: Option<&Value>) -> Self {
-                        Self::from_wave(value.expect("the case has a payload"))
-                    }
-                }
-                macro_rules! impl_from_wave_primitive {
-                    ($($t:ty),*) => {
-                        $(
-                            impl FromWave for $t {
-                                fn from_wave(value: &Value) -> Self {
-                                    value.to_rust()
-                                }
-                            }
-                        )*
-                    };
-                }
-                impl_from_wave_primitive!(bool, u8, u16, u32, u64, i8, i16, i32, i64, f32, f64, char, String);
-                impl FromWave for () {
-                    fn from_wave(_value: &Value) -> Self {}
-                    fn from_payload(_value: Option<&Value>) -> Self {}
-                }
-                impl<T: FromWave> FromWave for Vec<T> {
-                    fn from_wave(value: &Value) -> Self {
-                        value.unwrap_list().map(|x| T::from_wave(&x)).collect()
-                    }
-                }
-                impl<T: FromWave> FromWave for Option<T> {
-                    fn from_wave(value: &Value) -> Self {
-                        value.unwrap_option().map(|x| T::from_wave(&x))
-                    }
-                }
-                impl<T: FromWave, E: FromWave> FromWave for core::result::Result<T, E> {
-                    fn from_wave(value: &Value) -> Self {
-                        match value.unwrap_result() {
-                            Ok(x) => Ok(T::from_payload(x.as_deref())),
-                            Err(x) => Err(E::from_payload(x.as_deref())),
-                        }
-                    }
-                }
-                macro_rules! impl_from_wave_tuple {
-                    ($($T:ident),+) => {
-                        impl<$($T: FromWave),+> FromWave for ($($T,)+) {
-                            fn from_wave(value: &Value) -> Self {
-                                let mut items = value.unwrap_tuple();
-                                ($($T::from_wave(&items.next().unwrap()),)+)
-                            }
-                        }
-                    };
-                }
-                impl_from_wave_tuple!(T1);
-                impl_from_wave_tuple!(T1, T2);
-                impl_from_wave_tuple!(T1, T2, T3);
-                impl_from_wave_tuple!(T1, T2, T3, T4);
-                impl_from_wave_tuple!(T1, T2, T3, T4, T5);
-                impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6);
-                impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7);
-                impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
-                impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
-                // The host's ends of streams and futures, which replay makes from the trace (phase
-                // 3b-2 of `docs/p3-record-replay.md`).
-                impl<T: 'static> FromWave for wit_bindgen::StreamReader<T> {
-                    fn from_wave(_value: &Value) -> Self {
-                        unimplemented!("replaying a stream")
-                    }
-                }
-                impl<T: 'static> FromWave for wit_bindgen::FutureReader<T> {
-                    fn from_wave(_value: &Value) -> Self {
-                        unimplemented!("replaying a future")
-                    }
-                }
-                // The trace doesn't have an error-context's message, only its label.
-                impl FromWave for wit_bindgen::rt::async_support::ErrorContext {
-                    fn from_wave(_value: &Value) -> Self {
-                        Self::new("")
-                    }
-                }
-                #mocked_from_wave
-            }
-        } else {
-            quote! {}
-        };
         let ast: syn::File = parse_quote! {
           #[allow(unused_imports)]
           use wasm_wave::{wasm::WasmValue, value::{Value, Type, convert::{ToRust, ToValue, ValueTyped}}};
           #mocked_resource
-          #from_wave
         };
         ast.items
     }

@@ -35,6 +35,9 @@ impl exports::proxy::conversion::executor::Guest for Stub {
     async fn wait_until_step(step: u32) -> () {
         wait_until_step(step).await
     }
+    async fn arrive_after(step: u32) -> u32 {
+        arrive_after(step).await
+    }
     fn host_drops(dropping: bool) -> () {
         let _ = dropping;
     }
@@ -226,17 +229,6 @@ impl ToValue for exports::test::host::types::Point {
         Value::make_record(&ty, fields).unwrap()
     }
 }
-impl FromWave for exports::test::host::types::Point {
-    #[allow(unused_variables)]
-    fn from_wave(value: &Value) -> Self {
-        let fields: std::collections::BTreeMap<_, _> = value.unwrap_record().collect();
-        exports::test::host::types::Point {
-            x: FromWave::from_wave(&fields["x"]),
-            y: FromWave::from_wave(&fields["y"]),
-            label: FromWave::from_wave(&fields["label"]),
-        }
-    }
-}
 impl ValueTyped for exports::test::host::types::Shape {
     #[allow(unused_imports)]
     fn value_type() -> Type {
@@ -263,25 +255,6 @@ impl ToValue for exports::test::host::types::Shape {
             .unwrap()
     }
 }
-impl FromWave for exports::test::host::types::Shape {
-    fn from_wave(value: &Value) -> Self {
-        match value.unwrap_variant() {
-            (ref case, Some(val)) if case == "circle" => {
-                exports::test::host::types::Shape::Circle(FromWave::from_wave(&val))
-            }
-            (ref case, Some(val)) if case == "rect" => {
-                exports::test::host::types::Shape::Rect(FromWave::from_wave(&val))
-            }
-            (ref case, Some(val)) if case == "HTTP-error" => {
-                exports::test::host::types::Shape::HttpError(FromWave::from_wave(&val))
-            }
-            (ref case, None) if case == "empty" => {
-                exports::test::host::types::Shape::Empty
-            }
-            _ => unreachable!(),
-        }
-    }
-}
 impl ValueTyped for exports::test::host::types::Color {
     #[allow(unused_imports)]
     fn value_type() -> Type {
@@ -298,20 +271,6 @@ impl ToValue for exports::test::host::types::Color {
             Self::DnsBlue => Value::make_variant(&ty, "DNS-blue", None),
         }
             .unwrap()
-    }
-}
-impl FromWave for exports::test::host::types::Color {
-    fn from_wave(value: &Value) -> Self {
-        match value.unwrap_variant() {
-            (ref case, None) if case == "red" => exports::test::host::types::Color::Red,
-            (ref case, None) if case == "green" => {
-                exports::test::host::types::Color::Green
-            }
-            (ref case, None) if case == "DNS-blue" => {
-                exports::test::host::types::Color::DnsBlue
-            }
-            _ => unreachable!(),
-        }
     }
 }
 impl ValueTyped for exports::test::host::types::Perms {
@@ -333,22 +292,6 @@ impl ToValue for exports::test::host::types::Perms {
             flags.push("exec");
         }
         Value::make_flags(&ty, flags).unwrap()
-    }
-}
-impl FromWave for exports::test::host::types::Perms {
-    fn from_wave(value: &Value) -> Self {
-        let flags: Vec<_> = value.unwrap_flags().map(|f| f.into_owned()).collect();
-        let mut res = exports::test::host::types::Perms::empty();
-        if flags.iter().any(|flag| flag == "read") {
-            res |= exports::test::host::types::Perms::READ;
-        }
-        if flags.iter().any(|flag| flag == "write") {
-            res |= exports::test::host::types::Perms::WRITE;
-        }
-        if flags.iter().any(|flag| flag == "exec") {
-            res |= exports::test::host::types::Perms::EXEC;
-        }
-        res
     }
 }
 impl ValueTyped for exports::test::host::types::Counter {
@@ -373,25 +316,6 @@ impl<'a> ToValue for exports::test::host::types::CounterBorrow<'a> {
         let handle = self.get::<MockedResource>().handle;
         let label = format!("borrow-{}-{}", "counter", handle);
         Value::make_handle(label.into())
-    }
-}
-impl FromWave for exports::test::host::types::Counter {
-    fn from_wave(value: &Value) -> Self {
-        let label = value.unwrap_handle();
-        let expect_handle = label
-            .strip_prefix(&format!("{}-", "counter"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        let handle = exports::test::host::types::Counter::new(MockedResource {
-            handle: expect_handle,
-            name: "counter".to_string(),
-        });
-        handle
-    }
-}
-impl<'a> FromWave for exports::test::host::types::CounterBorrow<'a> {
-    fn from_wave(_value: &Value) -> Self {
-        unreachable!()
     }
 }
 #[allow(unused_imports)]
@@ -456,90 +380,6 @@ impl ToValue for &MockedResource {
     fn to_value(&self) -> Value {
         let label = format!("borrow-{}-{}", self.name, self.handle);
         Value::make_handle(label.into())
-    }
-}
-/// A value of the trace, as the Rust type of the bindings: wasm-wave's `ToRust`, as a
-/// local trait, so that it can be implemented for wit-bindgen's streams, futures and
-/// error-contexts, as `Fuzz` is for `Arbitrary`.
-trait FromWave: Sized {
-    fn from_wave(value: &Value) -> Self;
-    /// From the payload of a result's or a variant's case, which `()` has none of.
-    fn from_payload(value: Option<&Value>) -> Self {
-        Self::from_wave(value.expect("the case has a payload"))
-    }
-}
-macro_rules! impl_from_wave_primitive {
-    ($($t:ty),*) => {
-        $(impl FromWave for $t { fn from_wave(value : & Value) -> Self { value.to_rust()
-        } })*
-    };
-}
-impl_from_wave_primitive!(
-    bool, u8, u16, u32, u64, i8, i16, i32, i64, f32, f64, char, String
-);
-impl FromWave for () {
-    fn from_wave(_value: &Value) -> Self {}
-    fn from_payload(_value: Option<&Value>) -> Self {}
-}
-impl<T: FromWave> FromWave for Vec<T> {
-    fn from_wave(value: &Value) -> Self {
-        value.unwrap_list().map(|x| T::from_wave(&x)).collect()
-    }
-}
-impl<T: FromWave> FromWave for Option<T> {
-    fn from_wave(value: &Value) -> Self {
-        value.unwrap_option().map(|x| T::from_wave(&x))
-    }
-}
-impl<T: FromWave, E: FromWave> FromWave for core::result::Result<T, E> {
-    fn from_wave(value: &Value) -> Self {
-        match value.unwrap_result() {
-            Ok(x) => Ok(T::from_payload(x.as_deref())),
-            Err(x) => Err(E::from_payload(x.as_deref())),
-        }
-    }
-}
-macro_rules! impl_from_wave_tuple {
-    ($($T:ident),+) => {
-        impl < $($T : FromWave),+ > FromWave for ($($T,)+) { fn from_wave(value : &
-        Value) -> Self { let mut items = value.unwrap_tuple(); ($($T ::from_wave(& items
-        .next().unwrap()),)+) } }
-    };
-}
-impl_from_wave_tuple!(T1);
-impl_from_wave_tuple!(T1, T2);
-impl_from_wave_tuple!(T1, T2, T3);
-impl_from_wave_tuple!(T1, T2, T3, T4);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
-impl<T: 'static> FromWave for wit_bindgen::StreamReader<T> {
-    fn from_wave(_value: &Value) -> Self {
-        unimplemented!("replaying a stream")
-    }
-}
-impl<T: 'static> FromWave for wit_bindgen::FutureReader<T> {
-    fn from_wave(_value: &Value) -> Self {
-        unimplemented!("replaying a future")
-    }
-}
-impl FromWave for wit_bindgen::rt::async_support::ErrorContext {
-    fn from_wave(_value: &Value) -> Self {
-        Self::new("")
-    }
-}
-impl FromWave for MockedResource {
-    fn from_wave(value: &Value) -> Self {
-        let label = value.unwrap_handle();
-        let (name, handle) = label
-            .rsplit_once('-')
-            .and_then(|(name, handle_str)| {
-                handle_str.parse::<u32>().ok().map(|h| (name.to_string(), h))
-            })
-            .expect("invalid handle label");
-        MockedResource { handle, name }
     }
 }
 impl Dialog for exports::test::host::types::Point {
@@ -771,6 +611,8 @@ thread_local! {
     static EXECUTOR : std::cell::RefCell < Executor > =
     std::cell::RefCell::new(Executor::default()); static STEP : std::cell::Cell < u32 > =
     const { std::cell::Cell::new(0) }; static WAKE_AGAIN : std::cell::Cell < bool > =
+    const { std::cell::Cell::new(false) }; static HELD : std::cell::Cell < bool > = const
+    { std::cell::Cell::new(false) }; static WOKEN_WHILE_HELD : std::cell::Cell < bool > =
     const { std::cell::Cell::new(false) };
 }
 /// Counts a step, and returns it.
@@ -789,13 +631,16 @@ fn current_step() -> u32 {
 #[allow(dead_code)]
 async fn wait_for_runs(runs: u32) -> u32 {
     let mut left = runs;
-    wait_for_run(move || {
-            if left == 0 {
-                return true;
-            }
-            left -= 1;
-            false
-        })
+    wait_for_run(
+            move || {
+                if left == 0 {
+                    return true;
+                }
+                left -= 1;
+                false
+            },
+            false,
+        )
         .await
 }
 /// Waits, from any task, until a run of the executor in `step` or later, or returns at once if
@@ -806,11 +651,48 @@ async fn wait_until_step(step: u32) {
     if current_step() >= step {
         return;
     }
-    wait_for_run(move || current_step() >= step).await;
+    wait_for_run(move || current_step() >= step, false).await;
+}
+/// Waits, from any task, as `wait_until_step` does, and takes the next step, of a host line
+/// `start` makes, e.g. an export call's arrival, which it returns. The executor doesn't run in
+/// between, e.g. for a guest's event, so that the step follows the run it waited for, which
+/// replay waits for from the step alone.
+#[allow(dead_code)]
+async fn arrive_after(step: u32) -> u32 {
+    if current_step() < step {
+        wait_for_run(move || current_step() >= step, true).await;
+    }
+    HELD.set(false);
+    let step = next_step();
+    if WOKEN_WHILE_HELD.replace(false) {
+        wake_executor();
+    }
+    step
+}
+/// Waits, in a job of the executor, until its run in `step`, waking the executor itself until
+/// then, e.g. replay's job for a copy recorded in that step.
+///
+/// Panics if the count passed `step`: replay diverged from the recording.
+#[allow(dead_code)]
+async fn reach_step(step: u32) {
+    std::future::poll_fn(|_| {
+            let now = current_step();
+            assert!(
+                now <= step, "replay reached step {now} before the run in step {step}"
+            );
+            if now == step {
+                std::task::Poll::Ready(())
+            } else {
+                WAKE_AGAIN.set(true);
+                std::task::Poll::Pending
+            }
+        })
+        .await
 }
 /// Waits until a run of the executor in which `done` returns true, and returns its step. A job
-/// asks in each run, waking the executor itself in between, as no host event would.
-async fn wait_for_run(mut done: impl FnMut() -> bool + 'static) -> u32 {
+/// asks in each run, waking the executor itself in between, as no host event would. With `hold`,
+/// the executor doesn't run again until `arrive_after` releases it.
+async fn wait_for_run(mut done: impl FnMut() -> bool + 'static, hold: bool) -> u32 {
     #[derive(Default)]
     struct Done {
         step: Option<u32>,
@@ -821,6 +703,9 @@ async fn wait_for_run(mut done: impl FnMut() -> bool + 'static) -> u32 {
     spawn(
         std::future::poll_fn(move |_| {
             if done() {
+                if hold {
+                    HELD.set(true);
+                }
                 let mut shared = job_shared.borrow_mut();
                 shared.step = Some(current_step());
                 if let Some(waker) = shared.waker.take() {
@@ -850,16 +735,26 @@ fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
     EXECUTOR
         .with_borrow_mut(|e| {
             e.queue.push(Box::pin(job));
-            if let Some(waker) = e.waker.take() {
-                waker.wake();
-            }
         });
+    wake_executor();
+}
+/// Wakes `run_executor` from another task, with wit-bindgen's `inter-task-wakeup`.
+fn wake_executor() {
+    let waker = EXECUTOR.with_borrow_mut(|e| e.waker.take());
+    if let Some(waker) = waker {
+        waker.wake();
+    }
 }
 /// Polls the queued jobs until `stop_executor` is called and they are all done.
 #[allow(dead_code)]
 async fn run_executor() {
     let mut running: Vec<Job> = Vec::new();
     std::future::poll_fn(|cx| {
+            if HELD.get() {
+                WOKEN_WHILE_HELD.set(true);
+                EXECUTOR.with_borrow_mut(|e| e.waker = Some(cx.waker().clone()));
+                return std::task::Poll::Pending;
+            }
             next_step();
             WAKE_AGAIN.set(false);
             running.retain_mut(|job| job.as_mut().poll(cx).is_pending());
@@ -889,11 +784,6 @@ async fn run_executor() {
 }
 #[allow(dead_code)]
 fn stop_executor() {
-    EXECUTOR
-        .with_borrow_mut(|e| {
-            e.stopped = true;
-            if let Some(waker) = e.waker.take() {
-                waker.wake();
-            }
-        });
+    EXECUTOR.with_borrow_mut(|e| e.stopped = true);
+    wake_executor();
 }

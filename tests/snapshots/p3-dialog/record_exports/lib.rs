@@ -16,12 +16,6 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     "test:p3/api@0.1.0.handle".to_string(),
                     "test:p3/api@0.1.0.serve".to_string(),
                     "test:p3/api@0.1.0.echo".to_string(),
-                    "test:p3/host@0.1.0.fetch".to_string(),
-                    "test:p3/host@0.1.0.sleep".to_string(),
-                    "test:p3/host@0.1.0.report".to_string(),
-                    "test:p3/host@0.1.0.finish".to_string(),
-                    "new test:p3/host/body@0.1.0".to_string(),
-                    "test:p3/host/body@0.1.0.consume".to_string(),
                 ],
             ) as usize;
             match idx {
@@ -139,222 +133,6 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         proxy::conversion::executor::run(),
                     );
                 }
-                4usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("call export func {}", "test:p3/host@0.1.0.fetch"),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "provide argument for {}: {}", stringify!(url), "string"
-                        ),
-                    );
-                    let url: String = Dialog::read_value(0);
-                    __params
-                        .push(wasm_wave::to_string(&ToValue::to_value(&url)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "test:p3/host@0.1.0.fetch", __params
-                            .join(", ")
-                        ),
-                    );
-                    let res = test::p3::host::fetch(url).await;
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
-                            .unwrap()
-                        ),
-                    );
-                    let _ = res;
-                    join_spawned().await;
-                    proxy::conversion::executor::stop();
-                    __executor.await;
-                    __executor = wit_bindgen::spawn_local(
-                        proxy::conversion::executor::run(),
-                    );
-                }
-                5usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("call export func {}", "test:p3/host@0.1.0.sleep"),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(ms), "u64"),
-                    );
-                    let ms: u64 = Dialog::read_value(0);
-                    __params
-                        .push(wasm_wave::to_string(&ToValue::to_value(&ms)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "test:p3/host@0.1.0.sleep", __params
-                            .join(", ")
-                        ),
-                    );
-                    let res = test::p3::host::sleep(ms).await;
-                    let _ = res;
-                    join_spawned().await;
-                    proxy::conversion::executor::stop();
-                    __executor.await;
-                    __executor = wit_bindgen::spawn_local(
-                        proxy::conversion::executor::run(),
-                    );
-                }
-                6usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("call export func {}", "test:p3/host@0.1.0.report"),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "provide argument for {}: {}", stringify!(err),
-                            "error-context"
-                        ),
-                    );
-                    let err: wit_bindgen::rt::async_support::ErrorContext = Dialog::read_value(
-                        0,
-                    );
-                    __params
-                        .push(wasm_wave::to_string(&ToValue::to_value(&err)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "test:p3/host@0.1.0.report", __params
-                            .join(", ")
-                        ),
-                    );
-                    let res = test::p3::host::report(err);
-                    let _ = res;
-                    join_spawned().await;
-                    proxy::conversion::executor::stop();
-                    __executor.await;
-                    __executor = wit_bindgen::spawn_local(
-                        proxy::conversion::executor::run(),
-                    );
-                }
-                7usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("call export func {}", "test:p3/host@0.1.0.finish"),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "provide argument for {}: {}", stringify!(done),
-                            "future<result<_, error-code>>"
-                        ),
-                    );
-                    let done: wit_bindgen::rt::async_support::FutureReader<
-                        ::core::result::Result<(), test::p3::host::ErrorCode>,
-                    > = Dialog::read_value(0);
-                    __params
-                        .push(wasm_wave::to_string(&ToValue::to_value(&done)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "test:p3/host@0.1.0.finish", __params
-                            .join(", ")
-                        ),
-                    );
-                    let res = test::p3::host::finish(done);
-                    let _ = res;
-                    join_spawned().await;
-                    proxy::conversion::executor::stop();
-                    __executor.await;
-                    __executor = wit_bindgen::spawn_local(
-                        proxy::conversion::executor::run(),
-                    );
-                }
-                8usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("call export func {}", "new test:p3/host/body@0.1.0"),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "provide argument for {}: {}", stringify!(contents),
-                            "option<stream<u8>>"
-                        ),
-                    );
-                    let contents: ::core::option::Option<
-                        wit_bindgen::rt::async_support::StreamReader<u8>,
-                    > = Dialog::read_value(0);
-                    __params
-                        .push(
-                            wasm_wave::to_string(&ToValue::to_value(&contents)).unwrap(),
-                        );
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "new test:p3/host/body@0.1.0", __params
-                            .join(", ")
-                        ),
-                    );
-                    let res = test::p3::host::Body::new(contents);
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
-                            .unwrap()
-                        ),
-                    );
-                    let _ = res;
-                    join_spawned().await;
-                    proxy::conversion::executor::stop();
-                    __executor.await;
-                    __executor = wit_bindgen::spawn_local(
-                        proxy::conversion::executor::run(),
-                    );
-                }
-                9usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "call export func {}", "test:p3/host/body@0.1.0.consume"
-                        ),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(this), "body"),
-                    );
-                    let this: test::p3::host::Body = Dialog::read_value(0);
-                    __params
-                        .push(wasm_wave::to_string(&ToValue::to_value(&this)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "test:p3/host/body@0.1.0.consume", __params
-                            .join(", ")
-                        ),
-                    );
-                    let res = test::p3::host::Body::consume(this);
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
-                            .unwrap()
-                        ),
-                    );
-                    Dialog::consume(res, 0);
-                    join_spawned().await;
-                    proxy::conversion::executor::stop();
-                    __executor.await;
-                    __executor = wit_bindgen::spawn_local(
-                        proxy::conversion::executor::run(),
-                    );
-                }
                 _ => unreachable!(),
             }
             SCOPED_ALLOC
@@ -387,17 +165,6 @@ impl ToValue for test::p3::host::ErrorCode {
             .unwrap()
     }
 }
-impl FromWave for test::p3::host::ErrorCode {
-    fn from_wave(value: &Value) -> Self {
-        match value.unwrap_variant() {
-            (ref case, None) if case == "timeout" => test::p3::host::ErrorCode::Timeout,
-            (ref case, Some(val)) if case == "other" => {
-                test::p3::host::ErrorCode::Other(FromWave::from_wave(&val))
-            }
-            _ => unreachable!(),
-        }
-    }
-}
 impl ValueTyped for test::p3::host::Body {
     fn value_type() -> Type {
         Type::handle("body")
@@ -424,33 +191,6 @@ impl<'a> ToValue for &'a test::p3::host::Body {
             proxy::conversion::conversion::get_handle_mock_test_p3_host_body(self)
         );
         Value::make_handle(label.into())
-    }
-}
-impl FromWave for test::p3::host::Body {
-    fn from_wave(value: &Value) -> Self {
-        let label = value.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("{}-", "body"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        proxy::conversion::conversion::get_mock_test_p3_host_body(handle)
-    }
-}
-impl<'a> FromWave for &'a test::p3::host::Body {
-    fn from_wave(value: &Value) -> Self {
-        let label = value.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("borrow-{}-", "body"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        SCOPED_ALLOC
-            .with(|alloc| {
-                let mut alloc = alloc.borrow_mut();
-                alloc
-                    .alloc(
-                        proxy::conversion::conversion::get_mock_test_p3_host_body(handle),
-                    )
-            })
     }
 }
 #[allow(unused_imports)]
@@ -515,90 +255,6 @@ impl ToValue for &MockedResource {
     fn to_value(&self) -> Value {
         let label = format!("borrow-{}-{}", self.name, self.handle);
         Value::make_handle(label.into())
-    }
-}
-/// A value of the trace, as the Rust type of the bindings: wasm-wave's `ToRust`, as a
-/// local trait, so that it can be implemented for wit-bindgen's streams, futures and
-/// error-contexts, as `Fuzz` is for `Arbitrary`.
-trait FromWave: Sized {
-    fn from_wave(value: &Value) -> Self;
-    /// From the payload of a result's or a variant's case, which `()` has none of.
-    fn from_payload(value: Option<&Value>) -> Self {
-        Self::from_wave(value.expect("the case has a payload"))
-    }
-}
-macro_rules! impl_from_wave_primitive {
-    ($($t:ty),*) => {
-        $(impl FromWave for $t { fn from_wave(value : & Value) -> Self { value.to_rust()
-        } })*
-    };
-}
-impl_from_wave_primitive!(
-    bool, u8, u16, u32, u64, i8, i16, i32, i64, f32, f64, char, String
-);
-impl FromWave for () {
-    fn from_wave(_value: &Value) -> Self {}
-    fn from_payload(_value: Option<&Value>) -> Self {}
-}
-impl<T: FromWave> FromWave for Vec<T> {
-    fn from_wave(value: &Value) -> Self {
-        value.unwrap_list().map(|x| T::from_wave(&x)).collect()
-    }
-}
-impl<T: FromWave> FromWave for Option<T> {
-    fn from_wave(value: &Value) -> Self {
-        value.unwrap_option().map(|x| T::from_wave(&x))
-    }
-}
-impl<T: FromWave, E: FromWave> FromWave for core::result::Result<T, E> {
-    fn from_wave(value: &Value) -> Self {
-        match value.unwrap_result() {
-            Ok(x) => Ok(T::from_payload(x.as_deref())),
-            Err(x) => Err(E::from_payload(x.as_deref())),
-        }
-    }
-}
-macro_rules! impl_from_wave_tuple {
-    ($($T:ident),+) => {
-        impl < $($T : FromWave),+ > FromWave for ($($T,)+) { fn from_wave(value : &
-        Value) -> Self { let mut items = value.unwrap_tuple(); ($($T ::from_wave(& items
-        .next().unwrap()),)+) } }
-    };
-}
-impl_from_wave_tuple!(T1);
-impl_from_wave_tuple!(T1, T2);
-impl_from_wave_tuple!(T1, T2, T3);
-impl_from_wave_tuple!(T1, T2, T3, T4);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
-impl_from_wave_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
-impl<T: 'static> FromWave for wit_bindgen::StreamReader<T> {
-    fn from_wave(_value: &Value) -> Self {
-        unimplemented!("replaying a stream")
-    }
-}
-impl<T: 'static> FromWave for wit_bindgen::FutureReader<T> {
-    fn from_wave(_value: &Value) -> Self {
-        unimplemented!("replaying a future")
-    }
-}
-impl FromWave for wit_bindgen::rt::async_support::ErrorContext {
-    fn from_wave(_value: &Value) -> Self {
-        Self::new("")
-    }
-}
-impl FromWave for MockedResource {
-    fn from_wave(value: &Value) -> Self {
-        let label = value.unwrap_handle();
-        let (name, handle) = label
-            .rsplit_once('-')
-            .and_then(|(name, handle_str)| {
-                handle_str.parse::<u32>().ok().map(|h| (name.to_string(), h))
-            })
-            .expect("invalid handle label");
-        MockedResource { handle, name }
     }
 }
 impl Dialog for test::p3::host::ErrorCode {
@@ -756,27 +412,27 @@ fn handle_label(end: &impl ToValue) -> String {
     wasm_wave::to_string(&end.to_value()).unwrap()
 }
 /// A stream the host writes: its writer, its reader, to hand out, and its label.
-fn host_stream<T: wit_stream::StreamPayload + 'static>() -> (
-    wit_bindgen::StreamWriter<T>,
-    wit_bindgen::StreamReader<T>,
-    String,
-) {
+fn host_stream<T: wit_stream::StreamPayload + 'static>(
+    label_reader: bool,
+) -> (wit_bindgen::StreamWriter<T>, wit_bindgen::StreamReader<T>, String) {
     let (writer, reader) = wit_stream::new::<T>();
-    label_by_writer(reader.handle(), writer.handle());
+    if label_reader {
+        label_by_writer(reader.handle(), writer.handle());
+    }
     let label = handle_label(&writer);
     (writer, reader, label)
 }
 /// A future the host writes, which it always does: its writer, its reader, to hand
 /// out, and its label.
-fn host_future<T: wit_future::FuturePayload + 'static>() -> (
-    wit_bindgen::FutureWriter<T>,
-    wit_bindgen::FutureReader<T>,
-    String,
-) {
+fn host_future<T: wit_future::FuturePayload + 'static>(
+    label_reader: bool,
+) -> (wit_bindgen::FutureWriter<T>, wit_bindgen::FutureReader<T>, String) {
     let (writer, reader) = wit_future::new::<
         T,
     >(|| unreachable!("the value is always written"));
-    label_by_writer(reader.handle(), writer.handle());
+    if label_reader {
+        label_by_writer(reader.handle(), writer.handle());
+    }
     let label = handle_label(&writer);
     (writer, reader, label)
 }
@@ -785,7 +441,7 @@ where
     T: Dialog + ToValue + ValueTyped + wit_stream::StreamPayload + 'static,
 {
     fn read_value(_dep: u32) -> Self {
-        let (mut writer, reader, label) = host_stream::<T>();
+        let (mut writer, reader, label) = host_stream::<T>(true);
         spawn(async move {
             let choices = ["write a chunk".to_string(), "end the stream".to_string()];
             loop {
@@ -831,7 +487,7 @@ where
     T: Dialog + ToValue + ValueTyped + wit_future::FuturePayload,
 {
     fn read_value(_dep: u32) -> Self {
-        let (writer, reader, label) = host_future::<T>();
+        let (writer, reader, label) = host_future::<T>(true);
         spawn(async move {
             proxy::util::dialog::print(0, &format!("The host writes {label}"));
             let value: T = Dialog::read_value(1);

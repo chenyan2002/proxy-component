@@ -35,15 +35,20 @@ use bindings::proxy::recorder::types::Line;
 pub struct State {
     wasi_ctx: WasiCtx,
     resource_table: ResourceTable,
-    // The lines recorded, which `run` writes to `trace.out` at the end.
+    // The lines recorded, which `run` writes to `trace.out` at the end, with their labels'
+    // bindings named apart as they come.
     recorded: Vec<trace::Line>,
+    labels: trace::Labels,
     replay: Option<Replay>,
     exit_called: bool,
 }
 impl bindings::proxy::recorder::types::Host for State {}
 impl bindings::proxy::recorder::record::Host for State {
+    fn fail(&mut self, message: String) {
+        panic!("{message}");
+    }
     fn record(&mut self, line: Line) {
-        let line: trace::Line = trace::convert(line);
+        let line = self.labels.label(trace::convert(line));
         println!("{line}");
         self.recorded.push(line);
     }
@@ -59,6 +64,18 @@ impl bindings::proxy::recorder::replay::Host for State {
         let line = self.replay.as_mut().unwrap().take_host_line(&key)?;
         println!("{line}");
         Some(trace::convert(line))
+    }
+    fn pair(
+        &mut self,
+        trace: bindings::proxy::recorder::types::Label,
+        replay: bindings::proxy::recorder::types::Label,
+    ) {
+        let (trace, replay): (trace::Label, trace::Label) =
+            (trace::convert(trace), trace::convert(replay));
+        self.replay.as_mut().unwrap().pair(&trace, &replay);
+    }
+    fn fail(&mut self, message: String) {
+        panic!("{message}");
     }
     fn finish(&mut self) {
         self.replay.as_ref().unwrap().finish();
@@ -117,6 +134,7 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
         wasi_ctx: wasi,
         resource_table: ResourceTable::new(),
         recorded: Vec::new(),
+        labels: trace::Labels::default(),
         replay: None,
         exit_called: false,
     };
@@ -169,7 +187,12 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
             }
         })?;
         if args.trace.is_none() {
-            let lines: Vec<_> = store.data().recorded.iter().map(trace::Line::to_json).collect();
+            let lines: Vec<_> = store
+                .data()
+                .recorded
+                .iter()
+                .map(trace::Line::to_json)
+                .collect();
             std::fs::write("trace.out", lines.join("\n"))?;
         }
     }

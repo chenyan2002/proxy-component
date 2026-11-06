@@ -13,13 +13,22 @@ mod bindings {
 }
 
 use std::cell::RefCell;
-use trace::{Line, LineKey, Replay, Trace};
+use trace::{Label, Labels, Line, LineKey, Replay, Trace};
+
+thread_local! {
+    // The bindings of the labels recorded so far, which each line's are named apart by.
+    static LABELS: RefCell<Labels> = RefCell::new(Labels::default());
+}
 
 struct Component;
 impl bindings::exports::proxy::recorder::record::Guest for Component {
-    // Prints the stored form of the line, so that stdout is the trace.
+    // Prints the stored form of the line, so that stdout is the trace, also of a run that traps.
     fn record(line: Line) {
+        let line = LABELS.with_borrow_mut(|labels| labels.label(line));
         println!("{}", line.to_json());
+    }
+    fn fail(message: String) {
+        panic!("{message}");
     }
 }
 
@@ -50,6 +59,12 @@ impl bindings::exports::proxy::recorder::replay::Guest for Component {
         let line = with_replay(|replay| replay.take_host_line(&key))?;
         println!("{line}");
         Some(line)
+    }
+    fn pair(trace: Label, replay: Label) {
+        with_replay(|replay_| replay_.pair(&trace, &replay));
+    }
+    fn fail(message: String) {
+        panic!("{message}");
     }
     fn finish() {
         with_replay(|replay| replay.finish());

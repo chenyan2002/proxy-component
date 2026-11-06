@@ -20,6 +20,11 @@ impl exports::proxy::conversion::conversion::Guest for Stub {
 }
 impl exports::proxy::conversion::executor::Guest for Stub {
     async fn run() -> () {
+        static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
+        PANIC_HOOK
+            .call_once(|| std::panic::set_hook(
+                Box::new(|info| proxy::recorder::record::fail(&info.to_string())),
+            ));
         run_executor().await
     }
     fn stop() -> () {
@@ -33,6 +38,9 @@ impl exports::proxy::conversion::executor::Guest for Stub {
     }
     async fn wait_until_step(step: u32) -> () {
         wait_until_step(step).await
+    }
+    async fn arrive_after(step: u32) -> u32 {
+        arrive_after(step).await
     }
     fn host_drops(dropping: bool) -> () {
         MOVING.with(|moving| moving.set(dropping))
@@ -143,6 +151,7 @@ impl exports::test::p3::host::Guest for Stub {
         let __random = proxy::util::debug::get_random();
         let mut __host = Unstructured::new(&__random);
         MOVING.with(|moving| moving.set(true));
+        Fuzz::consume(err, &mut __host);
         MOVING.with(|moving| moving.set(false));
         let __at: Option<u32> = None;
         proxy::recorder::record::record(
@@ -566,27 +575,27 @@ fn handle_label(end: &impl ToValue) -> String {
     wasm_wave::to_string(&end.to_value()).unwrap()
 }
 /// A stream the host writes: its writer, its reader, to hand out, and its label.
-fn host_stream<T: wit_stream::StreamPayload + 'static>() -> (
-    wit_bindgen::StreamWriter<T>,
-    wit_bindgen::StreamReader<T>,
-    String,
-) {
+fn host_stream<T: wit_stream::StreamPayload + 'static>(
+    label_reader: bool,
+) -> (wit_bindgen::StreamWriter<T>, wit_bindgen::StreamReader<T>, String) {
     let (writer, reader) = wit_stream::new::<T>();
-    label_by_writer(reader.handle(), writer.handle());
+    if label_reader {
+        label_by_writer(reader.handle(), writer.handle());
+    }
     let label = handle_label(&writer);
     (writer, reader, label)
 }
 /// A future the host writes, which it always does: its writer, its reader, to hand
 /// out, and its label.
-fn host_future<T: wit_future::FuturePayload + 'static>() -> (
-    wit_bindgen::FutureWriter<T>,
-    wit_bindgen::FutureReader<T>,
-    String,
-) {
+fn host_future<T: wit_future::FuturePayload + 'static>(
+    label_reader: bool,
+) -> (wit_bindgen::FutureWriter<T>, wit_bindgen::FutureReader<T>, String) {
     let (writer, reader) = wit_future::new::<
         T,
     >(|| unreachable!("the value is always written"));
-    label_by_writer(reader.handle(), writer.handle());
+    if label_reader {
+        label_by_writer(reader.handle(), writer.handle());
+    }
     let label = handle_label(&writer);
     (writer, reader, label)
 }
@@ -621,25 +630,34 @@ where
     T: Fuzz + ToValue + ValueTyped + wit_stream::StreamPayload,
 {
     fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
-        let (mut writer, reader, name) = host_stream::<T>();
+        let (mut writer, reader, name) = host_stream::<T>(true);
         let label = Label { table: TRACE_TABLE, name };
         let chunks: Vec<Vec<T>> = Fuzz::fuzz(u)?;
         spawn(async move {
             let mut chunks = chunks.into_iter().filter(|chunk| !chunk.is_empty());
             while let Some(chunk) = chunks.next() {
-                let items = wasm_wave::to_string(&chunk.to_value()).unwrap();
+                let waves: Vec<_> = chunk
+                    .iter()
+                    .map(|item| wasm_wave::to_string(&item.to_value()).unwrap())
+                    .collect();
                 let at = trace_at();
                 let rest = writer.write_all(chunk).await;
+                let written = waves.len() - rest.len();
+                if written > 0 {
+                    let items = format!("[{}]", waves[..written].join(", "));
+                    let chunk = Chunk {
+                        stream: label.clone(),
+                        items,
+                    };
+                    proxy::recorder::record::record(
+                        &host_line_at(at, Event::Write(chunk)),
+                    );
+                }
                 if !rest.is_empty() {
                     proxy::recorder::record::record(&guest_line(Event::Drop(label)));
                     host_dropping(move || drop((rest, chunks.collect::<Vec<_>>())));
                     return;
                 }
-                let chunk = Chunk {
-                    stream: label.clone(),
-                    items,
-                };
-                proxy::recorder::record::record(&host_line_at(at, Event::Write(chunk)));
             }
             drop(writer);
             proxy::recorder::record::record(&host_line(Event::Drop(label)));
@@ -659,17 +677,21 @@ where
             while reads != Some(count) {
                 let at = trace_at();
                 let (result, items) = self.read(Vec::with_capacity(capacity)).await;
+                if !items.is_empty() {
+                    let wave = wasm_wave::to_string(&items.to_value()).unwrap();
+                    let chunk = Chunk {
+                        stream: label.clone(),
+                        items: wave,
+                    };
+                    proxy::recorder::record::record(
+                        &host_line_at(at, Event::Read(chunk)),
+                    );
+                    host_dropping(move || drop(items));
+                }
                 if let wit_bindgen::StreamResult::Dropped = result {
                     proxy::recorder::record::record(&guest_line(Event::Drop(label)));
                     return;
                 }
-                let wave = wasm_wave::to_string(&items.to_value()).unwrap();
-                let chunk = Chunk {
-                    stream: label.clone(),
-                    items: wave,
-                };
-                proxy::recorder::record::record(&host_line_at(at, Event::Read(chunk)));
-                host_dropping(move || drop(items));
                 count += 1;
             }
             drop(self);
@@ -683,7 +705,7 @@ where
 {
     fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
         let value = T::fuzz(u)?;
-        let (writer, reader, name) = host_future::<T>();
+        let (writer, reader, name) = host_future::<T>(true);
         let label = Label { table: TRACE_TABLE, name };
         let wave = wasm_wave::to_string(&value.to_value()).unwrap();
         spawn(async move {
@@ -731,6 +753,10 @@ where
 impl Fuzz for wit_bindgen::rt::async_support::ErrorContext {
     fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
         Ok(Self::new(&String::fuzz(u)?))
+    }
+    fn consume(self, _u: &mut Unstructured<'_>) {
+        let name = wasm_wave::to_string(&self.to_value()).unwrap();
+        proxy::recorder::record::record(&trace_drop(Party::Host, TRACE_TABLE, name));
     }
 }
 use bindings::proxy::recorder::types::*;
@@ -802,6 +828,12 @@ fn trace_at() -> u32 {
     current_step()
 }
 #[allow(dead_code)]
+async fn trace_reach(at: Option<u32>) {
+    if let Some(at) = at {
+        reach_step(at).await;
+    }
+}
+#[allow(dead_code)]
 fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
     MOVING.with(|moving| moving.set(true));
     let res = f();
@@ -832,6 +864,8 @@ thread_local! {
     static EXECUTOR : std::cell::RefCell < Executor > =
     std::cell::RefCell::new(Executor::default()); static STEP : std::cell::Cell < u32 > =
     const { std::cell::Cell::new(0) }; static WAKE_AGAIN : std::cell::Cell < bool > =
+    const { std::cell::Cell::new(false) }; static HELD : std::cell::Cell < bool > = const
+    { std::cell::Cell::new(false) }; static WOKEN_WHILE_HELD : std::cell::Cell < bool > =
     const { std::cell::Cell::new(false) };
 }
 /// Counts a step, and returns it.
@@ -850,13 +884,16 @@ fn current_step() -> u32 {
 #[allow(dead_code)]
 async fn wait_for_runs(runs: u32) -> u32 {
     let mut left = runs;
-    wait_for_run(move || {
-            if left == 0 {
-                return true;
-            }
-            left -= 1;
-            false
-        })
+    wait_for_run(
+            move || {
+                if left == 0 {
+                    return true;
+                }
+                left -= 1;
+                false
+            },
+            false,
+        )
         .await
 }
 /// Waits, from any task, until a run of the executor in `step` or later, or returns at once if
@@ -867,11 +904,48 @@ async fn wait_until_step(step: u32) {
     if current_step() >= step {
         return;
     }
-    wait_for_run(move || current_step() >= step).await;
+    wait_for_run(move || current_step() >= step, false).await;
+}
+/// Waits, from any task, as `wait_until_step` does, and takes the next step, of a host line
+/// `start` makes, e.g. an export call's arrival, which it returns. The executor doesn't run in
+/// between, e.g. for a guest's event, so that the step follows the run it waited for, which
+/// replay waits for from the step alone.
+#[allow(dead_code)]
+async fn arrive_after(step: u32) -> u32 {
+    if current_step() < step {
+        wait_for_run(move || current_step() >= step, true).await;
+    }
+    HELD.set(false);
+    let step = next_step();
+    if WOKEN_WHILE_HELD.replace(false) {
+        wake_executor();
+    }
+    step
+}
+/// Waits, in a job of the executor, until its run in `step`, waking the executor itself until
+/// then, e.g. replay's job for a copy recorded in that step.
+///
+/// Panics if the count passed `step`: replay diverged from the recording.
+#[allow(dead_code)]
+async fn reach_step(step: u32) {
+    std::future::poll_fn(|_| {
+            let now = current_step();
+            assert!(
+                now <= step, "replay reached step {now} before the run in step {step}"
+            );
+            if now == step {
+                std::task::Poll::Ready(())
+            } else {
+                WAKE_AGAIN.set(true);
+                std::task::Poll::Pending
+            }
+        })
+        .await
 }
 /// Waits until a run of the executor in which `done` returns true, and returns its step. A job
-/// asks in each run, waking the executor itself in between, as no host event would.
-async fn wait_for_run(mut done: impl FnMut() -> bool + 'static) -> u32 {
+/// asks in each run, waking the executor itself in between, as no host event would. With `hold`,
+/// the executor doesn't run again until `arrive_after` releases it.
+async fn wait_for_run(mut done: impl FnMut() -> bool + 'static, hold: bool) -> u32 {
     #[derive(Default)]
     struct Done {
         step: Option<u32>,
@@ -882,6 +956,9 @@ async fn wait_for_run(mut done: impl FnMut() -> bool + 'static) -> u32 {
     spawn(
         std::future::poll_fn(move |_| {
             if done() {
+                if hold {
+                    HELD.set(true);
+                }
                 let mut shared = job_shared.borrow_mut();
                 shared.step = Some(current_step());
                 if let Some(waker) = shared.waker.take() {
@@ -911,16 +988,26 @@ fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
     EXECUTOR
         .with_borrow_mut(|e| {
             e.queue.push(Box::pin(job));
-            if let Some(waker) = e.waker.take() {
-                waker.wake();
-            }
         });
+    wake_executor();
+}
+/// Wakes `run_executor` from another task, with wit-bindgen's `inter-task-wakeup`.
+fn wake_executor() {
+    let waker = EXECUTOR.with_borrow_mut(|e| e.waker.take());
+    if let Some(waker) = waker {
+        waker.wake();
+    }
 }
 /// Polls the queued jobs until `stop_executor` is called and they are all done.
 #[allow(dead_code)]
 async fn run_executor() {
     let mut running: Vec<Job> = Vec::new();
     std::future::poll_fn(|cx| {
+            if HELD.get() {
+                WOKEN_WHILE_HELD.set(true);
+                EXECUTOR.with_borrow_mut(|e| e.waker = Some(cx.waker().clone()));
+                return std::task::Poll::Pending;
+            }
             next_step();
             WAKE_AGAIN.set(false);
             running.retain_mut(|job| job.as_mut().poll(cx).is_pending());
@@ -950,11 +1037,6 @@ async fn run_executor() {
 }
 #[allow(dead_code)]
 fn stop_executor() {
-    EXECUTOR
-        .with_borrow_mut(|e| {
-            e.stopped = true;
-            if let Some(waker) = e.waker.take() {
-                waker.wake();
-            }
-        });
+    EXECUTOR.with_borrow_mut(|e| e.stopped = true);
+    wake_executor();
 }

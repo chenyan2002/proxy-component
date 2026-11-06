@@ -1,7 +1,8 @@
 # Record and replay of WASI p3 components
 
-proxy-component records and replays p2 components, and fuzzes and mocks (dialog mode) p3
-components. This file is the design for recording and replaying p3 components: the trace format,
+proxy-component records and replays p2 components, fuzzes and mocks (dialog mode) p3 components,
+and replays the traces fuzz mode writes for them. This file is the design for recording and
+replaying p3 components: the trace format,
 how the proxy records a run without changing it, how replay reproduces it, and what makes replay
 portable across runtimes. What is implemented so far is listed below, and in [Phases](#phases).
 
@@ -22,9 +23,10 @@ dialog support for p3.
   `start` itself, so it spawns on the task of `start`. Fuzz mode waits for both at the end of
   `start`; dialog mode drains them after each export call.
 - **The trace format** ([Trace format](#trace-format)) and its recorder interface. Fuzz mode
-  writes it for p2 and p3 components, with [steps](#steps) and [labels](#labels). Record and
-  replay modes write and read it for p2 components; they reject nothing up front, but don't handle
-  streams, futures or async functions yet.
+  writes it for p2 and p3 components, with [steps](#steps) and [labels](#labels), and record mode
+  for p2 components.
+- **Replay** of p2 and p3 traces ([Replay](#replay)): calls and steps, RETURNED and STARTED,
+  streams, futures and error-contexts. Recording p3 components is the next phase.
 
 ## Where nondeterminism comes from
 
@@ -143,8 +145,8 @@ What the types don't enforce:
     copy line, and the other end doesn't see it.
 - **Labels** are handles in the two generated components' tables, and tasks are numbered by the
   two components' counters, so the `table` of a label or a `TaskId` is part of what it names. A
-  handle's number is reused only after its handle has ended, which an earlier line records. A
-  label inside a value is written by its name alone; see [Labels](#labels) for its table.
+  label names one handle, from its first line to the one that ends it; see [Labels](#labels),
+  also for the table of a label inside a value, which is written by its name alone.
 - **Positions.** `at` is the step of a host line the guest observes outside its calls, including
   an export call's arrival; other lines have none. See [Steps](#steps).
 - **Copies.** A copy completes once, when both sides have acted, so it is one line. Copies are
@@ -253,18 +255,22 @@ Limits:
   labels: waitable sets and subtasks, which each mode makes its own, so the same value can have
   another number in replay. Replay pairs each of the trace's labels with the one it sees for the
   same value, one to one, per table, from the first guest line that has both, and requires every
-  later line to agree. A pair ends when its handle leaves the table, which frees its number: at a
-  `Drop`, a future's `Value`, or when the host hands it on, owned, to the guest, in an export
-  call's arguments or an import's result; the rule is the same for every label. The lines replay
-  performs it renames to its own labels, e.g. the guest's resource a host `Drop` names.
-  So replay checks that the labels are used consistently, not their numbers.
+  later line to agree. A label names a handle until the handle leaves the table, which frees its
+  number: at a `Drop`, a future's `Value`, or when the host hands it on, owned, to the guest, in
+  an export call's arguments or an import's result; the rule is the same for every label. After
+  that, the number may name another handle, as a variable may be bound again. So the recorder
+  names each binding apart, as it records each line, from the lines before it alone, which a
+  run that traps leaves too: the first keeps the number, e.g. `#stream-7`, and the next are
+  `#stream-7-2`, `#stream-7-3`, and so on. A trace's label then names one handle, whatever order
+  replay's jobs process the lines in. Replay's labels are its own numbers, which it reuses too: a
+  replay label is paired again once the trace's label it was paired with has ended. A stream or
+  future replay makes, from a value the trace hands out, first appears in a host line, which
+  replay doesn't check, so replay pairs its label explicitly, with the binding after that line:
+  the end the host keeps. The lines replay performs it renames to its own labels, e.g. the
+  guest's resource a host `Drop` names. So replay checks that the labels are used consistently,
+  not their numbers. For that, the trace has the end of every handle: fuzz mode records the
+  host's drops of error-contexts too.
 - `list<u8>` items are WAVE lists for now; p3.md's byte strings (`b"…"`) would be shorter.
-
-Mocks already use a counter. Extending it to every handle, shared by the two generated
-components, would make a number never reused, and the same in record and replay, so that replay
-could compare labels exactly, without renaming, and without a `table`; streams, futures and
-error-contexts would map each handle to its number with `set_handle_label`. It has the same limit
-for ends that come back.
 
 ## Recording
 
@@ -361,12 +367,25 @@ Replay has to know when to perform each host line. There are three kinds of line
 own. On each arrival, the exports component calls `step` on `proxy:conversion/executor`, a sync
 function that increments the counter and returns it, as the export `Call`'s `at`; the executor's
 later runs are numbered after it. In replay, `start` makes an export call recorded at step `n` once
-the count reaches `n - 1`, by calling `step` and then the export. An arrival can't fall within a
-run of the executor: the host only calls an export while no wasm is running, unless something
-suspends where the proxy can't see it, which the requirements below rule out. The exports
-component's other host lines take a step the same way: those of its jobs, e.g. reading a stream an
-export returned, which run on the task of `start`, not in the executor, and the host's drops of
-the guest's resources.
+the count reaches `n - 1`, by calling `step` and then the export. The wait and the step are one
+call, `arrive-after`, which holds the executor from the run it waited for until it counts the
+step: otherwise a run, e.g. for a guest's drop, could come in between, and replay, which knows
+only the step, would wait for that run instead, by waking the executor itself, which changes the
+order in which wasmtime delivers the guest's events. An arrival can't fall within a run of the
+executor: the host only calls an export while no wasm is running, unless something suspends where
+the proxy can't see it, which the requirements below rule out. The host's drops of the guest's
+resources, which `start` makes too, take a step the same way.
+
+`start` calls only the main component's exports, not the host's own functions, as the real host
+doesn't call those through the proxy. A call like `consume` of a body the host made would put
+both ends of its streams in the generated components, one in each: copies the guest never sees,
+which the imports component's executor can't take over, as wasmtime traps a copy between two
+ends of one component unless the payload is numeric.
+
+The exports component's jobs, e.g. reading a stream an export returned, run on the task of
+`start`, not in the executor: a line of theirs has the last step, and replay's job waits until
+the count is there. That places them less exactly than the executor's runs do; see open
+question 8.
 
 ### Why the step is enough, and a gate isn't needed
 
@@ -414,16 +433,15 @@ trace, the two results could reach the guest before or after a different one of 
 - **The same executor in record and replay**, with only the leaves different: host calls in
   record, futures that the trace makes ready in replay. Its work in a step depends only on its
   state and the trace's lines for that step. The same goes for `start`: fuzz mode's waits for
-  the steps it chooses before an export call, through `wait-until-step`, as replay's waits for the
-  trace's. When fuzz yielded instead, the two made different tasks, and a sixth of the spike
-  guest's traces replayed its two results in the other order.
+  the steps it chooses before an export call, through `arrive-after`, as replay's waits for the
+  trace's, so that the two make the same tasks.
 - **Steps in replay where the host woke the executor in the recording.** Replay has no host, so a
   job that waits for a later step makes the executor yield, and come back as the next step.
   wasmtime runs the ready tasks first, as it did before the host's completion in the recording.
 - **No suspension the proxy can't see**: no calls to other components where the recording calls
   the host, no blocking WASI 0.2 calls, and no epoch deadlines that yield, as above.
 - **One clock for both components.** The exports component takes its steps from the same
-  counter, through `step`, as [Steps](#steps) describes.
+  counter, through `step` and `arrive-after`, as [Steps](#steps) describes.
 
 ### What recording can't reach
 
@@ -508,8 +526,8 @@ guest's wakeups.
   `concurrent.rs:774`). Calling a host component in replay as well made other scenarios diverge,
   as a component host suspends differently in record and replay. Removing it, i.e. forwarding to
   host functions, fixed it.
-- **Sync WASI 0.2 calls change the schedule.** At first the proxy and the guest printed each line
-  with `println!`, and several scenarios diverged; buffering the output fixed them.
+- **Sync WASI 0.2 calls change the schedule.** With the proxy and the guest printing each line
+  with `println!`, several scenarios diverged; buffering the output fixed them.
 - **Two results never reached the guest in one wakeup**, through the proxy, nor, in one-off
   experiments outside the spike, through a component awaiting `wait-for` directly, or with the guest
   awaiting two `wait-for`s itself, as a wit-bindgen guest takes one event per wakeup. wasmtime gave
@@ -539,8 +557,10 @@ executor runs both.
   or the host's drop of a resource of the guest; `take-host-line`, the next host line about a task
   or a handle, e.g. the `Return` of a STARTED call, which its mock waits for; `check`, which
   checks a guest line, up to renaming, and returns the host lines that answer it at once, e.g. an
-  import's `Return`; and `finish`, which checks that replay reached every line. Waiting for a step
-  is the executor's, not the recorder's. The bundled recorder (`assets/recorder*.wasm`) and the
+  import's `Return`; `pair`, which pairs a label of a stream or future replay makes; `finish`,
+  which checks that replay reached every line; and, in both, `fail`, which reports a panic of a
+  generated component, which has no stderr of its own to print it. Waiting for a step is the
+  executor's, not the recorder's. The bundled recorder (`assets/recorder*.wasm`) and the
   host recorder of `run` (`--use-host-recorder`) implement it, with `Replay` of `crates/trace`.
 
 ## Correctness
@@ -596,11 +616,14 @@ shim](#portability) could provide; see No guest task on import calls, in
   as guest-internal streams, or what the guest's waits returned, which the shim could record.
 - **A fixpoint test**: record a run, replay it while recording, and require the two traces to be
   equal. The spike does this, for its scenarios.
+- **Fuzzed schedules, replayed**: `make test-fuzz-replay` fuzzes the p2 and p3 fixtures, and
+  replays each trace.
 - **Enumerated scenarios**: for small guests, every placement of host completions across steps,
-  rather than random delays; guests that merge nondeterministically, which are the ones steps
-  exist for; and schedules that fuzz mode generates, recorded and replayed.
-- **The assumptions, checked at run time**: in record mode, a host event that the guest observes
-  outside a step; in replay, a step count that differs from the recording's.
+  rather than random delays, and guests that merge nondeterministically, which are the ones steps
+  exist for.
+- **The assumptions, checked at run time**: in replay, a step count that differs from the
+  recording's, which replay reports; in record mode, a host event that the guest observes outside
+  a step.
 - **A model of the spec.** The canonical ABI's reference, `definitions.py`, is executable, and
   marks its nondeterministic choices. Modeling the guest, the proxy and the scheduler there, and
   checking exhaustively, for small programs, that replay at the recorded steps gives the same run,
@@ -651,12 +674,10 @@ depend on runtime patches. wasmtime 49 has the start of its own record and repla
 ## Phases
 
 1. **Spike, in wasmtime**: done, see [Spike results](#spike-results).
-2. **Trace format** in `crates/trace`, and the recorder interface: done, for p2 record and
-   replay.
-3. **Replay**, tested on traces that fuzz mode writes in this format, with the checks of
-   [Correctness](#checking-the-implementation). Fuzz mode writes the format, and replay
-   replays calls and steps, RETURNED and STARTED: done (`make test-fuzz-replay`). Streams and
-   futures remain.
+2. **Trace format** in `crates/trace`, and the recorder interface: done.
+3. **Replay**, tested on traces that fuzz mode writes, with the checks of
+   [Correctness](#checking-the-implementation): done. It replays 100 of 100 fuzz traces of the
+   p3 fixture, and 60 of 60 of `wasi_http_p3`.
 4. **Record**, with the executor and its pumps, under `wasmtime serve` and `run`.
 5. **Portability across runtimes**: the profile proposal, or the shim.
 
@@ -677,3 +698,8 @@ depend on runtime patches. wasmtime 49 has the start of its own record and repla
    `waitable-set.poll`, unlike wit-bindgen's; the spike covers only wit-bindgen guests.
 7. **The recorder's output**: buffering it to the end, or only a host recorder; and where to
    write a buffer when the run traps, or doesn't end, as under `wasmtime serve`.
+8. **The steps of the exports component's jobs**, e.g. reading the stream `serve` returned,
+   which run on the task of `start`, not in the executor, so that their lines have the last step
+   rather than their own. They replay in every test so far. To place them exactly, the exports
+   component could hand its ends of the guest's streams and futures to the imports component's
+   executor, with a function per payload type.

@@ -12,6 +12,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 mod renaming;
+pub use renaming::Labels;
 use renaming::Renaming;
 
 mod bindings {
@@ -35,6 +36,15 @@ pub fn convert<T: Serialize, U: DeserializeOwned>(value: T) -> U {
 }
 
 impl Event {
+    /// The stream, future or resource the event is about, for the events of a handle.
+    pub fn handle(&self) -> Option<&Label> {
+        match self {
+            Event::Write(chunk) | Event::Read(chunk) => Some(&chunk.stream),
+            Event::Value(value) => Some(&value.future),
+            Event::Drop(label) => Some(label),
+            _ => None,
+        }
+    }
     /// The task the event is about, for the events of a call.
     pub fn task(&self) -> Option<TaskId> {
         match self {
@@ -59,7 +69,10 @@ impl Line {
                 self.event,
                 Event::Started(_) | Event::Return(_) | Event::Cancelled(_)
             )
-            && self.event.task().is_some_and(|id| id.table == Table::Imports)
+            && self
+                .event
+                .task()
+                .is_some_and(|id| id.table == Table::Imports)
     }
     /// Whether the line is one the host performs from the exports component, which replay's
     /// `start` performs: an export call, or the host's drop of a resource of the guest. The
@@ -69,7 +82,12 @@ impl Line {
         self.by == Party::Host
             && match &self.event {
                 Event::Call(_) => true,
-                Event::Drop(label) => label.table == Table::Exports,
+                // Not a stream's or future's end, which the job that keeps it drops.
+                Event::Drop(label) => {
+                    label.table == Table::Exports
+                        && !label.name.starts_with("#stream-")
+                        && !label.name.starts_with("#future-")
+                }
                 _ => false,
             }
     }
@@ -77,12 +95,7 @@ impl Line {
     pub fn is_about(&self, key: &LineKey) -> bool {
         match (key, &self.event) {
             (LineKey::Task(task), event) => event.task() == Some(*task),
-            (LineKey::Handle(label), Event::Write(chunk) | Event::Read(chunk)) => {
-                &chunk.stream == label
-            }
-            (LineKey::Handle(label), Event::Value(value)) => &value.future == label,
-            (LineKey::Handle(label), Event::Drop(handle)) => handle == label,
-            _ => false,
+            (LineKey::Handle(label), event) => event.handle() == Some(label),
         }
     }
     /// The exit status of a call to `wasi:cli/exit`, which ends the run.
@@ -192,10 +205,11 @@ pub struct Replay {
 impl Replay {
     pub fn new(trace: Trace) -> Self {
         let done = vec![false; trace.0.len()];
+        let renaming = Renaming::new(&trace.0);
         Replay {
             lines: trace.0,
             done,
-            renaming: Renaming::default(),
+            renaming,
         }
     }
     fn pending(&self) -> impl Iterator<Item = (usize, &Line)> {
@@ -215,17 +229,30 @@ impl Replay {
     /// which the import's mock waits for, or a copy of a stream, which a job performs.
     pub fn take_host_line(&mut self, key: &LineKey) -> Option<Line> {
         let key = match key {
-            LineKey::Handle(label) => LineKey::Handle(self.renaming.to_trace_label(label)),
+            LineKey::Handle(label) => LineKey::Handle(self.renaming.to_trace(label)?),
             key => key.clone(),
         };
         self.take(|line| line.by == Party::Host && line.is_about(&key))
     }
     fn take(&mut self, matches: impl Fn(&Line) -> bool) -> Option<Line> {
-        let (idx, line) = self.pending().find(|(_, line)| matches(line))?;
-        let line = self.renaming.to_replay(line);
-        self.renaming.end(&self.lines[idx]);
+        let idx = self.pending().find(|(_, line)| matches(line))?.0;
+        Some(self.hand(idx))
+    }
+    /// Hands line `idx` to replay, in its labels.
+    fn hand(&mut self, idx: usize) -> Line {
         self.done[idx] = true;
-        Some(line)
+        self.renaming.to_replay(&self.lines[idx])
+    }
+    /// Pairs the trace's label of a stream or future replay makes, from the value of the host
+    /// line that hands it on, with its own, of the end it keeps, e.g. the writer of a stream a
+    /// mock returns: the trace's label first appears in a host line, which `check` doesn't pair.
+    ///
+    /// Panics if either is paired with another, or no line hands it on.
+    pub fn pair(&mut self, trace: &Label, replay: &Label) {
+        assert!(
+            self.renaming.pair_next(trace, replay),
+            "replay's {replay} can't be the one the trace's {trace} hands on"
+        );
     }
     /// Checks that replay reached every line, once it is done: all but the host's drops of its
     /// own resources, which replay has nothing to do for.
@@ -247,27 +274,33 @@ impl Replay {
     /// Panics on a mismatch, with the expected and the actual line.
     pub fn check(&mut self, actual: &Line) -> Vec<Line> {
         assert_eq!(actual.by, Party::Guest, "`{actual}` isn't a guest line");
-        let task = actual.event.task();
-        let key = match &actual.event {
-            Event::Write(chunk) | Event::Read(chunk) => Some(&chunk.stream),
-            Event::Value(value) => Some(&value.future),
-            Event::Drop(label) => Some(label),
-            _ => None,
-        }
-        .map(|label| LineKey::Handle(self.renaming.to_trace_label(label)));
-        let found = self.pending().find(|(_, line)| match (task, &key) {
+        let (task, handle) = (actual.event.task(), actual.event.handle());
+        // The trace's label of the handle, if replay's is paired, and otherwise a binding of
+        // replay's number, e.g. a mock's, which carries the trace's. A pair whose trace label
+        // ended, in a line replay has done, is of another handle, which had the number before.
+        let paired = handle.and_then(|label| {
+            let trace = self.renaming.to_trace(label)?;
+            let live = self.renaming.end_of(&trace).is_none_or(|end| !self.done[end]);
+            live.then_some(trace)
+        });
+        let found = self.pending().find(|(_, line)| match (task, handle) {
             (Some(task), _) => line.event.task() == Some(task),
-            (None, Some(key)) => line.by == Party::Guest && line.is_about(key),
+            (None, Some(replay)) => {
+                line.by == Party::Guest
+                    && line.event.handle().is_some_and(|trace| match &paired {
+                        Some(paired) => trace == paired,
+                        None => Renaming::binds(trace, replay),
+                    })
+            }
             (None, None) => line.by == Party::Guest,
         });
         let Some((idx, expected)) = found else {
             panic!("the guest did `{actual}`, which the trace doesn't have");
         };
         let expected = expected.clone();
-        if expected.by != Party::Guest || !self.renaming.matches(&expected, actual) {
+        if expected.by != Party::Guest || !self.renaming.matches(idx, &expected, actual) {
             panic!("the trace has `{expected}`, but the guest did `{actual}`");
         }
-        self.renaming.end(&expected);
         self.done[idx] = true;
         let Some(task) = task else {
             return Vec::new();
@@ -282,11 +315,9 @@ impl Replay {
             if !line.answers_guest() {
                 break;
             }
-            let line = line.clone();
-            answers.push(self.renaming.to_replay(&line));
-            self.renaming.end(&line);
-            self.done[idx] = true;
-            if !matches!(line.event, Event::Started(_)) {
+            let started = matches!(line.event, Event::Started(_));
+            answers.push(self.hand(idx));
+            if !started {
                 break;
             }
         }
@@ -302,7 +333,11 @@ mod tests {
         TaskId { table, id }
     }
     fn line(by: Party, event: Event) -> Line {
-        Line { by, at: None, event }
+        Line {
+            by,
+            at: None,
+            event,
+        }
     }
     fn call(id: TaskId, func: &str, args: &[&str]) -> Event {
         Event::Call(Call {
@@ -317,6 +352,11 @@ mod tests {
             id,
             value: value.map(str::to_string),
         })
+    }
+    /// The trace a recorder writes of `lines`, with their labels' bindings named apart.
+    fn recorded(lines: &[Line]) -> Trace {
+        let mut labels = Labels::default();
+        Trace(lines.iter().map(|line| labels.label(line.clone())).collect())
     }
 
     /// An export call `t1`, during which the guest calls an import `c1`, then the host drops a
@@ -431,14 +471,15 @@ mod tests {
             name: name.to_string(),
         };
         let (t1, t2) = (task(Table::Exports, 1), task(Table::Exports, 2));
-        let trace = Trace(vec![
+        let trace = recorded(&[
             line(Party::Host, call(t1, "new", &[])),
             line(Party::Guest, ret(t1, Some("#session-3"))),
             line(Party::Host, Event::Drop(session("#session-3"))),
             line(Party::Host, call(t2, "new", &[])),
             line(Party::Guest, ret(t2, Some("#session-3"))),
         ]);
-        let mut replay = Replay::new(trace.clone());
+        assert_eq!(trace.0[4].to_string(), "guest: return t2 #session-3-2");
+        let mut replay = Replay::new(trace);
         replay.next_host_line();
         // Replay's table numbers the session differently.
         replay.check(&line(Party::Guest, ret(t1, Some("#session-1"))));
@@ -452,8 +493,12 @@ mod tests {
 
     #[test]
     fn replay_ends_labels_handed_on() {
-        let (t1, t2, t3) = (task(Table::Exports, 1), task(Table::Exports, 2), task(Table::Exports, 3));
-        let trace = Trace(vec![
+        let (t1, t2, t3) = (
+            task(Table::Exports, 1),
+            task(Table::Exports, 2),
+            task(Table::Exports, 3),
+        );
+        let trace = recorded(&[
             line(Party::Host, call(t1, "new", &[])),
             line(Party::Guest, ret(t1, Some("#session-3"))),
             // The host hands the session back, which frees its number.
@@ -471,6 +516,32 @@ mod tests {
         replay.next_host_line();
         // The recording reused the number, and replay didn't, or the other way round.
         replay.check(&line(Party::Guest, ret(t3, Some("#session-2"))));
+        replay.finish();
+    }
+
+    #[test]
+    fn replay_finds_reused_labels() {
+        // The guest hands the counter on to the host, which returns another with its number, as
+        // record mode's trace has it.
+        let (c1, c2) = (task(Table::Imports, 1), task(Table::Imports, 2));
+        let counter = Label {
+            table: Table::Imports,
+            name: "#counter-2".to_string(),
+        };
+        let lines = [
+            line(Party::Guest, call(c1, "new", &[])),
+            line(Party::Host, ret(c1, Some("#counter-2"))),
+            line(Party::Guest, call(c2, "merge", &["#counter-2"])),
+            line(Party::Host, ret(c2, Some("#counter-2"))),
+            line(Party::Guest, Event::Drop(counter.clone())),
+        ];
+        let trace = recorded(&lines);
+        assert_eq!(trace.0[4].to_string(), "guest: drop #counter-2-3");
+        // Replay's own labels, which it reuses too.
+        let mut replay = Replay::new(trace);
+        assert_eq!(replay.check(&lines[0]), vec![lines[1].clone()]);
+        assert_eq!(replay.check(&lines[2]), vec![lines[3].clone()]);
+        replay.check(&lines[4]);
         replay.finish();
     }
 

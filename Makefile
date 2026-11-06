@@ -1,4 +1,4 @@
-.PHONY: all build-components build-cli test test-cargo test-record test-fixture test-fuzz-replay test-fuzz test-dialog run-fuzz run-record run-dialog run-viceroy
+.PHONY: all build-components build-cli test test-cargo test-record test-fixture test-fuzz-replay test-fuzz test-dialog run-fuzz run-fuzz-replay run-record run-dialog run-viceroy
 
 # `make test ONE_BYTE_PAGE=1` tests with 1-byte-page memories
 ifeq ($(ONE_BYTE_PAGE),1)
@@ -73,16 +73,21 @@ test-fixture:
 	$(INSTRUMENT) -m replay --use-host-recorder $(FIXTURE_WASM)/proxy_guest.wasm
 	target/release/proxy-component run composed.wasm --invoke 'start()' --trace $(FIXTURE_OUT)/trace.out
 
-# Fuzzes the main component of tests/fixtures/proxy-run/guest, and replays each trace it writes
+# Fuzzes the main components of tests/fixtures/proxy-run/guest and of the p3 fixture, and
+# replays each trace it writes.
 test-fuzz-replay:
 	cargo build --manifest-path $(FIXTURE)/guest/Cargo.toml --target wasm32-wasip2 --release --target-dir $(FIXTURE_OUT)
-	$(INSTRUMENT) -m fuzz $(FIXTURE_WASM)/proxy_guest.wasm
-	cp composed.wasm $(FIXTURE_OUT)/fuzz.wasm
-	$(INSTRUMENT) -m replay $(FIXTURE_WASM)/proxy_guest.wasm
-	cp composed.wasm $(FIXTURE_OUT)/replay.wasm
+	$(MAKE) run-fuzz-replay WASM=$(FIXTURE_WASM)/proxy_guest.wasm OUT=$(FIXTURE_OUT)
+	cargo build --manifest-path $(P3_GUEST)/Cargo.toml --target wasm32-wasip2 --release --target-dir $(P3_GUEST_OUT)
+	$(MAKE) run-fuzz-replay WASM=$(P3_GUEST_WASM) OUT=$(P3_GUEST_OUT) WASMTIME_FLAGS="$(WASMTIME_FLAGS) -W component-model-error-context=y"
+run-fuzz-replay:
+	$(INSTRUMENT) -m fuzz $(WASM)
+	cp composed.wasm $(OUT)/fuzz.wasm
+	$(INSTRUMENT) -m replay $(WASM)
+	cp composed.wasm $(OUT)/replay.wasm
 	for i in 1 2 3 4 5 6 7 8 9 10; do \
-		$(WASMTIME) --invoke 'start()' $(FIXTURE_OUT)/fuzz.wasm > $(FIXTURE_OUT)/fuzz-trace.out || exit 1; \
-		$(WASMTIME) --invoke 'start()' $(FIXTURE_OUT)/replay.wasm < $(FIXTURE_OUT)/fuzz-trace.out > /dev/null || exit 1; \
+		$(WASMTIME) --invoke 'start()' $(OUT)/fuzz.wasm > $(OUT)/fuzz-trace.out || exit 1; \
+		$(WASMTIME) --invoke 'start()' $(OUT)/replay.wasm < $(OUT)/fuzz-trace.out > /dev/null || exit 1; \
 	done
 
 test-dialog:

@@ -8,6 +8,7 @@ use syn::{Item, ItemEnum, ItemStruct};
 mod dialog;
 mod fuzz;
 mod proxy;
+mod replay;
 mod wave;
 
 pub struct TraitGenerator<'a> {
@@ -41,9 +42,11 @@ fn new_mock(wit: &WitType, handle: TokenStream) -> TokenStream {
 }
 
 /// Items for the virtualized host's ends of the streams and futures it gives the guest, which
-/// the fuzz and dialog traits make: `host_stream` and `host_future` make the pair, keep its
-/// writer, which labels it for its lifetime, and hand out its reader. The bindings only have the
-/// `wit_stream` and `wit_future` modules if the world has streams or futures.
+/// the fuzz, dialog and replay traits make: `host_stream` and `host_future` make the pair, keep
+/// its writer, which labels it for its lifetime, and hand out its reader. With `label_reader`,
+/// the reader is printed by the writer's label too, until it is printed, in the value that hands
+/// it out; replay doesn't print the values it hands out. The bindings only have the `wit_stream`
+/// and `wit_future` modules if the world has streams or futures.
 fn host_end_defs(has_streams: bool, has_futures: bool) -> Vec<Item> {
     let mut items = Vec::new();
     if !has_streams && !has_futures {
@@ -83,9 +86,12 @@ fn host_end_defs(has_streams: bool, has_futures: bool) -> Vec<Item> {
         let file: syn::File = syn::parse_quote! {
             /// A stream the host writes: its writer, its reader, to hand out, and its label.
             fn host_stream<T: wit_stream::StreamPayload + 'static>(
+                label_reader: bool,
             ) -> (wit_bindgen::StreamWriter<T>, wit_bindgen::StreamReader<T>, String) {
                 let (writer, reader) = wit_stream::new::<T>();
-                label_by_writer(reader.handle(), writer.handle());
+                if label_reader {
+                    label_by_writer(reader.handle(), writer.handle());
+                }
                 let label = handle_label(&writer);
                 (writer, reader, label)
             }
@@ -97,10 +103,13 @@ fn host_end_defs(has_streams: bool, has_futures: bool) -> Vec<Item> {
             /// A future the host writes, which it always does: its writer, its reader, to hand
             /// out, and its label.
             fn host_future<T: wit_future::FuturePayload + 'static>(
+                label_reader: bool,
             ) -> (wit_bindgen::FutureWriter<T>, wit_bindgen::FutureReader<T>, String) {
                 let (writer, reader) =
                     wit_future::new::<T>(|| unreachable!("the value is always written"));
-                label_by_writer(reader.handle(), writer.handle());
+                if label_reader {
+                    label_by_writer(reader.handle(), writer.handle());
+                }
                 let label = handle_label(&writer);
                 (writer, reader, label)
             }
@@ -127,7 +136,6 @@ impl<'a> TraitGenerator<'a> {
             Mode::Record => {
                 traits.push(Box::new(wave::WaveTrait {
                     to_value: true,
-                    to_rust: false,
                     has_replay_table: false,
                     wrapped_labels: true,
                     mock_labels: false,
@@ -138,16 +146,18 @@ impl<'a> TraitGenerator<'a> {
                 // A mock carries the trace's label, which the exports component prints it by too.
                 traits.push(Box::new(wave::WaveTrait {
                     to_value: true,
-                    to_rust: true,
                     has_replay_table: true,
                     wrapped_labels: false,
                     mock_labels: true,
+                }));
+                traits.push(Box::new(replay::ReplayTrait {
+                    has_streams: state.has_streams,
+                    has_futures: state.has_futures,
                 }));
             }
             Mode::Fuzz => {
                 traits.push(Box::new(wave::WaveTrait {
                     to_value: true,
-                    to_rust: false,
                     has_replay_table: true,
                     wrapped_labels: false,
                     mock_labels: true,
@@ -160,7 +170,6 @@ impl<'a> TraitGenerator<'a> {
             Mode::Dialog => {
                 traits.push(Box::new(wave::WaveTrait {
                     to_value: true,
-                    to_rust: true,
                     has_replay_table: true,
                     wrapped_labels: false,
                     mock_labels: true,

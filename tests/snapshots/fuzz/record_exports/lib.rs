@@ -4,6 +4,11 @@ struct Stub;
 bindings::export!(Stub with_types_in bindings);
 impl exports::proxy::recorder::start_replay::Guest for Stub {
     async fn start() -> () {
+        static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
+        PANIC_HOOK
+            .call_once(|| std::panic::set_hook(
+                Box::new(|info| proxy::recorder::record::fail(&info.to_string())),
+            ));
         /// A line of the guest, which fuzz mode records, and replay checks.
         #[allow(dead_code)]
         fn trace_guest(line: &Line) {
@@ -33,22 +38,19 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 })
                 .await
         }
-        /// Waits until the executor's step `step`, which lets the guest, and the host's
-        /// background work, run, and takes the next step, of a host line `start` makes,
-        /// e.g. an export call's arrival.
-        #[allow(dead_code)]
-        async fn arrive_after(step: u32) -> u32 {
-            proxy::conversion::executor::wait_until_step(step).await;
-            proxy::conversion::executor::step()
-        }
         let __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
         let __buf = proxy::util::debug::get_random();
         let mut u = Unstructured::new(&__buf);
         for _ in 0..10 {
-            let idx = u.int_in_range(1..=9usize).unwrap();
+            let idx = u.int_in_range(1..=4usize).unwrap();
             match idx {
                 1usize => {
                     let res = {
+                        let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
+                        let __at = proxy::conversion::executor::arrive_after(
+                                proxy::conversion::executor::current_step() + __runs,
+                            )
+                            .await;
                         let mut __params: Vec<String> = Vec::new();
                         let p: test::guest::api::Point = Fuzz::fuzz(&mut u).unwrap();
                         __params
@@ -57,11 +59,6 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         __params
                             .push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
                         let __id = trace_task_id(Table::Exports);
-                        let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
-                        let __at = arrive_after(
-                                proxy::conversion::executor::current_step() + __runs,
-                            )
-                            .await;
                         proxy::recorder::record::record(
                             &Line {
                                 at: Some(__at),
@@ -91,16 +88,16 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 }
                 2usize => {
                     let res = {
+                        let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
+                        let __at = proxy::conversion::executor::arrive_after(
+                                proxy::conversion::executor::current_step() + __runs,
+                            )
+                            .await;
                         let mut __params: Vec<String> = Vec::new();
                         let s: test::guest::api::Shape = Fuzz::fuzz(&mut u).unwrap();
                         __params
                             .push(wasm_wave::to_string(&ToValue::to_value(&s)).unwrap());
                         let __id = trace_task_id(Table::Exports);
-                        let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
-                        let __at = arrive_after(
-                                proxy::conversion::executor::current_step() + __runs,
-                            )
-                            .await;
                         proxy::recorder::record::record(
                             &Line {
                                 at: Some(__at),
@@ -130,16 +127,16 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 }
                 3usize => {
                     let res = {
+                        let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
+                        let __at = proxy::conversion::executor::arrive_after(
+                                proxy::conversion::executor::current_step() + __runs,
+                            )
+                            .await;
                         let mut __params: Vec<String> = Vec::new();
                         let c: test::guest::api::Counter = Fuzz::fuzz(&mut u).unwrap();
                         __params
                             .push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
                         let __id = trace_task_id(Table::Exports);
-                        let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
-                        let __at = arrive_after(
-                                proxy::conversion::executor::current_step() + __runs,
-                            )
-                            .await;
                         proxy::recorder::record::record(
                             &Line {
                                 at: Some(__at),
@@ -169,6 +166,11 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                 }
                 4usize => {
                     let res = {
+                        let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
+                        let __at = proxy::conversion::executor::arrive_after(
+                                proxy::conversion::executor::current_step() + __runs,
+                            )
+                            .await;
                         let mut __params: Vec<String> = Vec::new();
                         let name: String = Fuzz::fuzz(&mut u).unwrap();
                         __params
@@ -176,11 +178,6 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                                 wasm_wave::to_string(&ToValue::to_value(&name)).unwrap(),
                             );
                         let __id = trace_task_id(Table::Exports);
-                        let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
-                        let __at = arrive_after(
-                                proxy::conversion::executor::current_step() + __runs,
-                            )
-                            .await;
                         proxy::recorder::record::record(
                             &Line {
                                 at: Some(__at),
@@ -194,214 +191,6 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             },
                         );
                         let res = test::guest::api::Session::new(&name);
-                        trace_guest(
-                            &trace_return(
-                                Party::Guest,
-                                __id,
-                                Some(wasm_wave::to_string(&res.to_value()).unwrap()),
-                            ),
-                        );
-                        proxy::conversion::executor::host_drops(true);
-                        res
-                    };
-                    Fuzz::consume(res, &mut u);
-                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
-                    proxy::conversion::executor::host_drops(false);
-                }
-                5usize => {
-                    let res = {
-                        let mut __params: Vec<String> = Vec::new();
-                        let x: i32 = Fuzz::fuzz(&mut u).unwrap();
-                        __params
-                            .push(wasm_wave::to_string(&ToValue::to_value(&x)).unwrap());
-                        let y: i32 = Fuzz::fuzz(&mut u).unwrap();
-                        __params
-                            .push(wasm_wave::to_string(&ToValue::to_value(&y)).unwrap());
-                        let __id = trace_task_id(Table::Exports);
-                        let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
-                        let __at = arrive_after(
-                                proxy::conversion::executor::current_step() + __runs,
-                            )
-                            .await;
-                        proxy::recorder::record::record(
-                            &Line {
-                                at: Some(__at),
-                                ..trace_call(
-                                    Party::Host,
-                                    __id,
-                                    "test:host/types@0.1.0.make-point",
-                                    false,
-                                    __params,
-                                )
-                            },
-                        );
-                        let res = test::host::types::make_point(x, y);
-                        trace_guest(
-                            &trace_return(
-                                Party::Guest,
-                                __id,
-                                Some(wasm_wave::to_string(&res.to_value()).unwrap()),
-                            ),
-                        );
-                        proxy::conversion::executor::host_drops(true);
-                        res
-                    };
-                    Fuzz::consume(res, &mut u);
-                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
-                    proxy::conversion::executor::host_drops(false);
-                }
-                6usize => {
-                    let res = {
-                        let mut __params: Vec<String> = Vec::new();
-                        let p: test::host::types::Perms = Fuzz::fuzz(&mut u).unwrap();
-                        __params
-                            .push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
-                        let c: test::host::types::Color = Fuzz::fuzz(&mut u).unwrap();
-                        __params
-                            .push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
-                        let __id = trace_task_id(Table::Exports);
-                        let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
-                        let __at = arrive_after(
-                                proxy::conversion::executor::current_step() + __runs,
-                            )
-                            .await;
-                        proxy::recorder::record::record(
-                            &Line {
-                                at: Some(__at),
-                                ..trace_call(
-                                    Party::Host,
-                                    __id,
-                                    "test:host/types@0.1.0.check",
-                                    false,
-                                    __params,
-                                )
-                            },
-                        );
-                        let res = test::host::types::check(p, c);
-                        trace_guest(
-                            &trace_return(
-                                Party::Guest,
-                                __id,
-                                Some(wasm_wave::to_string(&res.to_value()).unwrap()),
-                            ),
-                        );
-                        proxy::conversion::executor::host_drops(true);
-                        res
-                    };
-                    Fuzz::consume(res, &mut u);
-                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
-                    proxy::conversion::executor::host_drops(false);
-                }
-                7usize => {
-                    let res = {
-                        let mut __params: Vec<String> = Vec::new();
-                        let name: String = Fuzz::fuzz(&mut u).unwrap();
-                        __params
-                            .push(
-                                wasm_wave::to_string(&ToValue::to_value(&name)).unwrap(),
-                            );
-                        let __id = trace_task_id(Table::Exports);
-                        let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
-                        let __at = arrive_after(
-                                proxy::conversion::executor::current_step() + __runs,
-                            )
-                            .await;
-                        proxy::recorder::record::record(
-                            &Line {
-                                at: Some(__at),
-                                ..trace_call(
-                                    Party::Host,
-                                    __id,
-                                    "test:host/types@0.1.0.open",
-                                    false,
-                                    __params,
-                                )
-                            },
-                        );
-                        let res = test::host::types::open(&name);
-                        trace_guest(
-                            &trace_return(
-                                Party::Guest,
-                                __id,
-                                Some(wasm_wave::to_string(&res.to_value()).unwrap()),
-                            ),
-                        );
-                        proxy::conversion::executor::host_drops(true);
-                        res
-                    };
-                    Fuzz::consume(res, &mut u);
-                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
-                    proxy::conversion::executor::host_drops(false);
-                }
-                8usize => {
-                    let res = {
-                        let mut __params: Vec<String> = Vec::new();
-                        let start: u32 = Fuzz::fuzz(&mut u).unwrap();
-                        __params
-                            .push(
-                                wasm_wave::to_string(&ToValue::to_value(&start)).unwrap(),
-                            );
-                        let __id = trace_task_id(Table::Exports);
-                        let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
-                        let __at = arrive_after(
-                                proxy::conversion::executor::current_step() + __runs,
-                            )
-                            .await;
-                        proxy::recorder::record::record(
-                            &Line {
-                                at: Some(__at),
-                                ..trace_call(
-                                    Party::Host,
-                                    __id,
-                                    "new test:host/types/counter@0.1.0",
-                                    false,
-                                    __params,
-                                )
-                            },
-                        );
-                        let res = test::host::types::Counter::new(start);
-                        trace_guest(
-                            &trace_return(
-                                Party::Guest,
-                                __id,
-                                Some(wasm_wave::to_string(&res.to_value()).unwrap()),
-                            ),
-                        );
-                        proxy::conversion::executor::host_drops(true);
-                        res
-                    };
-                    Fuzz::consume(res, &mut u);
-                    SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
-                    proxy::conversion::executor::host_drops(false);
-                }
-                9usize => {
-                    let res = {
-                        let mut __params: Vec<String> = Vec::new();
-                        let a: test::host::types::Counter = Fuzz::fuzz(&mut u).unwrap();
-                        __params
-                            .push(wasm_wave::to_string(&ToValue::to_value(&a)).unwrap());
-                        let b: test::host::types::Counter = Fuzz::fuzz(&mut u).unwrap();
-                        __params
-                            .push(wasm_wave::to_string(&ToValue::to_value(&b)).unwrap());
-                        let __id = trace_task_id(Table::Exports);
-                        let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
-                        let __at = arrive_after(
-                                proxy::conversion::executor::current_step() + __runs,
-                            )
-                            .await;
-                        proxy::recorder::record::record(
-                            &Line {
-                                at: Some(__at),
-                                ..trace_call(
-                                    Party::Host,
-                                    __id,
-                                    "test:host/types/counter@0.1.0.merge",
-                                    false,
-                                    __params,
-                                )
-                            },
-                        );
-                        let res = test::host::types::Counter::merge(&a, b);
                         trace_guest(
                             &trace_return(
                                 Party::Guest,
@@ -636,12 +425,8 @@ impl Fuzz for test::guest::api::Session {
     fn consume(self, _u: &mut Unstructured<'_>) {
         let name = wasm_wave::to_string(&ToValue::to_value(&self)).unwrap();
         let line = trace_drop(Party::Host, TRACE_TABLE, name);
-        proxy::recorder::record::record(
-            &Line {
-                at: Some(trace_at()),
-                ..line
-            },
-        );
+        let at = proxy::conversion::executor::step();
+        proxy::recorder::record::record(&Line { at: Some(at), ..line });
     }
 }
 impl<'a> Fuzz for &'a test::guest::api::Session {
@@ -836,6 +621,10 @@ impl Fuzz for wit_bindgen::rt::async_support::ErrorContext {
     fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
         Ok(Self::new(&String::fuzz(u)?))
     }
+    fn consume(self, _u: &mut Unstructured<'_>) {
+        let name = wasm_wave::to_string(&self.to_value()).unwrap();
+        proxy::recorder::record::record(&trace_drop(Party::Host, TRACE_TABLE, name));
+    }
 }
 use bindings::proxy::recorder::types::*;
 thread_local! {
@@ -903,7 +692,13 @@ fn trace_return_value(answers: Vec<Line>) -> Option<String> {
 const TRACE_TABLE: Table = Table::Exports;
 #[allow(dead_code)]
 fn trace_at() -> u32 {
-    proxy::conversion::executor::step()
+    proxy::conversion::executor::current_step()
+}
+#[allow(dead_code)]
+async fn trace_reach(at: Option<u32>) {
+    if let Some(at) = at {
+        proxy::conversion::executor::wait_until_step(at).await;
+    }
 }
 #[allow(dead_code)]
 fn host_dropping<R>(f: impl FnOnce() -> R) -> R {

@@ -133,22 +133,8 @@ pub fn generate_sources<'a>(args: &'a InstrumentArgs, dir: &Path) -> Result<crat
     }
 
     // 5. Generate Rust binding for both import and export interface
-    bindgen(
-        dir,
-        &wit_dir,
-        &args.mode,
-        "imports",
-        "record_imports",
-        args.one_byte_page_size,
-    )?;
-    bindgen(
-        dir,
-        &wit_dir,
-        &args.mode,
-        "exports",
-        "record_exports",
-        args.one_byte_page_size,
-    )?;
+    bindgen(dir, &wit_dir, args, "imports", "record_imports")?;
+    bindgen(dir, &wit_dir, args, "exports", "record_exports")?;
     Ok(opts)
 }
 
@@ -166,17 +152,22 @@ fn parse_wit(dir: &Path, world: Option<&str>) -> Result<(Resolve, WorldId)> {
 fn bindgen(
     tmp_dir: &Path,
     wit_dir: &Path,
-    mode: &Mode,
+    args: &InstrumentArgs,
     world_name: &str,
     dest_name: &str,
-    use_custom_allocator: bool,
 ) -> Result<()> {
     let out_dir = tmp_dir.join(dest_name);
     fs::create_dir_all(&out_dir)?;
     let (mut resolve, world) = parse_wit(wit_dir, Some(world_name))?;
     let bindings = crate::wit_util::generate_bindings(&mut resolve, world)?;
     fs::write(out_dir.join("bindings.rs"), &bindings)?;
-    let lib = codegen::generate(mode, resolve, world, &bindings, use_custom_allocator)?;
+    let lib = codegen::generate(
+        &args.mode,
+        resolve,
+        world,
+        &bindings,
+        args.one_byte_page_size,
+    )?;
     fs::write(out_dir.join("lib.rs"), lib)?;
     Ok(())
 }

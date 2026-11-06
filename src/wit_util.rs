@@ -78,8 +78,13 @@ fn is_keyword(name: &str) -> bool {
     )
 }
 
-/// Whether a value of `ty` has a stream or future, which the host reads or writes.
+/// Whether a value of `ty` has a stream or future, which the host reads or writes, or an
+/// error-context: what the host consumes, rather than just drops, of a value the guest gives it,
+/// as its handle's end is part of the trace.
 pub fn has_async_value(resolve: &Resolve, ty: &Type) -> bool {
+    if matches!(ty, Type::ErrorContext) {
+        return true;
+    }
     let Type::Id(id) = ty else {
         return false;
     };
