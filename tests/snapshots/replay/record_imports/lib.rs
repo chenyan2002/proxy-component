@@ -38,8 +38,8 @@ impl exports::proxy::conversion::executor::Guest for Stub {
     async fn wait_until_step(step: u32) -> () {
         wait_until_step(step).await
     }
-    async fn arrive_after(step: u32) -> u32 {
-        arrive_after(step).await
+    async fn step_after(step: u32) -> u32 {
+        step_after(step).await
     }
     fn host_drops(dropping: bool) -> () {
         MOVING.with(|moving| moving.set(dropping))
@@ -764,8 +764,8 @@ thread_local! {
     static EXECUTOR : std::cell::RefCell < Executor > =
     std::cell::RefCell::new(Executor::default()); static STEP : std::cell::Cell < u32 > =
     const { std::cell::Cell::new(0) }; static WAKE_AGAIN : std::cell::Cell < bool > =
-    const { std::cell::Cell::new(false) }; static HELD : std::cell::Cell < bool > = const
-    { std::cell::Cell::new(false) }; static WOKEN_WHILE_HELD : std::cell::Cell < bool > =
+    const { std::cell::Cell::new(false) }; static HELD : std::cell::Cell < u32 > = const
+    { std::cell::Cell::new(0) }; static WOKEN_WHILE_HELD : std::cell::Cell < bool > =
     const { std::cell::Cell::new(false) };
 }
 /// Counts a step, and returns it.
@@ -784,16 +784,13 @@ fn current_step() -> u32 {
 #[allow(dead_code)]
 async fn wait_for_runs(runs: u32) -> u32 {
     let mut left = runs;
-    wait_for_run(
-            move || {
-                if left == 0 {
-                    return true;
-                }
-                left -= 1;
-                false
-            },
-            false,
-        )
+    wait_for_run(move || {
+            if left == 0 {
+                return true;
+            }
+            left -= 1;
+            false
+        })
         .await
 }
 /// Waits, from any task, until a run of the executor in `step` or later, or returns at once if
@@ -804,23 +801,15 @@ async fn wait_until_step(step: u32) {
     if current_step() >= step {
         return;
     }
-    wait_for_run(move || current_step() >= step, false).await;
+    wait_for_run(move || current_step() >= step).await;
 }
 /// Waits, from any task, as `wait_until_step` does, and takes the next step, of a host line
-/// `start` makes, e.g. an export call's arrival, which it returns. The executor doesn't run in
-/// between, e.g. for a guest's event, so that the step follows the run it waited for, which
-/// replay waits for from the step alone.
+/// `start` makes, e.g. an export call's arrival, which it returns: the one after the run it
+/// waited for, as the executor doesn't run in between (see `wait_for_run`).
 #[allow(dead_code)]
-async fn arrive_after(step: u32) -> u32 {
-    if current_step() < step {
-        wait_for_run(move || current_step() >= step, true).await;
-    }
-    HELD.set(false);
-    let step = next_step();
-    if WOKEN_WHILE_HELD.replace(false) {
-        wake_executor();
-    }
-    step
+async fn step_after(step: u32) -> u32 {
+    wait_until_step(step).await;
+    next_step()
 }
 /// Waits, in a job of the executor, until its run in `step`, waking the executor itself until
 /// then, e.g. replay's job for a copy recorded in that step.
@@ -843,24 +832,40 @@ async fn reach_step(step: u32) {
         .await
 }
 /// Waits until a run of the executor in which `done` returns true, and returns its step. A job
-/// asks in each run, waking the executor itself in between, as no host event would. With `hold`,
-/// the executor doesn't run again until `arrive_after` releases it.
-async fn wait_for_run(mut done: impl FnMut() -> bool + 'static, hold: bool) -> u32 {
+/// asks in each run, waking the executor itself in between, as no host event would.
+///
+/// The executor doesn't run again until the waiting task resumes, e.g. for a guest's event, so
+/// that what the task does next, e.g. return a STARTED call, or take an export call's step,
+/// follows the run it waited for, in record and replay alike: replay knows only the step.
+async fn wait_for_run(mut done: impl FnMut() -> bool + 'static) -> u32 {
     #[derive(Default)]
     struct Done {
         step: Option<u32>,
         waker: Option<std::task::Waker>,
+        held: bool,
     }
-    let shared = std::rc::Rc::new(std::cell::RefCell::new(Done::default()));
-    let job_shared = shared.clone();
+    /// The waiter's side, which releases the executor once it resumes, or is dropped first, e.g.
+    /// the mock of an import the guest cancelled.
+    struct Waiter(std::rc::Rc<std::cell::RefCell<Done>>);
+    impl Drop for Waiter {
+        fn drop(&mut self) {
+            if std::mem::take(&mut self.0.borrow_mut().held) {
+                HELD.set(HELD.get() - 1);
+                if HELD.get() == 0 && WOKEN_WHILE_HELD.replace(false) {
+                    wake_executor();
+                }
+            }
+        }
+    }
+    let waiter = Waiter(std::rc::Rc::new(std::cell::RefCell::new(Done::default())));
+    let job_shared = waiter.0.clone();
     spawn(
         std::future::poll_fn(move |_| {
             if done() {
-                if hold {
-                    HELD.set(true);
-                }
+                HELD.set(HELD.get() + 1);
                 let mut shared = job_shared.borrow_mut();
                 shared.step = Some(current_step());
+                shared.held = true;
                 if let Some(waker) = shared.waker.take() {
                     waker.wake();
                 }
@@ -870,8 +875,8 @@ async fn wait_for_run(mut done: impl FnMut() -> bool + 'static, hold: bool) -> u
             std::task::Poll::Pending
         }),
     );
-    std::future::poll_fn(move |cx| {
-            let mut shared = shared.borrow_mut();
+    let step = std::future::poll_fn(|cx| {
+            let mut shared = waiter.0.borrow_mut();
             match shared.step {
                 Some(step) => std::task::Poll::Ready(step),
                 None => {
@@ -880,7 +885,9 @@ async fn wait_for_run(mut done: impl FnMut() -> bool + 'static, hold: bool) -> u
                 }
             }
         })
-        .await
+        .await;
+    drop(waiter);
+    step
 }
 /// Queues `job`, from any function, sync or async.
 #[allow(dead_code)]
@@ -903,7 +910,7 @@ fn wake_executor() {
 async fn run_executor() {
     let mut running: Vec<Job> = Vec::new();
     std::future::poll_fn(|cx| {
-            if HELD.get() {
+            if HELD.get() > 0 {
                 WOKEN_WHILE_HELD.set(true);
                 EXECUTOR.with_borrow_mut(|e| e.waker = Some(cx.waker().clone()));
                 return std::task::Poll::Pending;

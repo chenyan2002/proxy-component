@@ -7,6 +7,9 @@ WASMTIME_FLAGS = -W custom-page-sizes=y
 endif
 INSTRUMENT = target/release/proxy-component instrument $(INSTRUMENT_FLAGS)
 WASMTIME = wasmtime $(WASMTIME_FLAGS)
+# Runs wasmtime, and exits with 2 if the main component trapped, rather than the proxy failed
+# (see tests/run-wasm.sh)
+RUN_WASM = tests/run-wasm.sh
 
 all: build-components build-cli
 build-cli:
@@ -74,7 +77,8 @@ test-fixture:
 	target/release/proxy-component run composed.wasm --invoke 'start()' --trace $(FIXTURE_OUT)/trace.out
 
 # Fuzzes the main components of tests/fixtures/proxy-run/guest and of the p3 fixture, and
-# replays each trace it writes.
+# replays each trace it writes, which ends as the fuzzing run did: to the end, or in the main
+# component's trap, e.g. a guest's panic on a fuzzed error.
 test-fuzz-replay:
 	cargo build --manifest-path $(FIXTURE)/guest/Cargo.toml --target wasm32-wasip2 --release --target-dir $(FIXTURE_OUT)
 	$(MAKE) run-fuzz-replay WASM=$(FIXTURE_WASM)/proxy_guest.wasm OUT=$(FIXTURE_OUT)
@@ -86,8 +90,10 @@ run-fuzz-replay:
 	$(INSTRUMENT) -m replay $(WASM)
 	cp composed.wasm $(OUT)/replay.wasm
 	for i in 1 2 3 4 5 6 7 8 9 10; do \
-		$(WASMTIME) --invoke 'start()' $(OUT)/fuzz.wasm > $(OUT)/fuzz-trace.out || exit 1; \
-		$(WASMTIME) --invoke 'start()' $(OUT)/replay.wasm < $(OUT)/fuzz-trace.out > /dev/null || exit 1; \
+		$(RUN_WASM) $(OUT)/fuzz-trace.out $(WASMTIME_FLAGS) --invoke 'start()' $(OUT)/fuzz.wasm > /dev/null; fuzz=$$?; \
+		[ $$fuzz -ne 1 ] || exit 1; \
+		$(RUN_WASM) $(OUT)/replay.out $(WASMTIME_FLAGS) --invoke 'start()' $(OUT)/replay.wasm < $(OUT)/fuzz-trace.out > /dev/null; \
+		[ $$? -eq $$fuzz ] || exit 1; \
 	done
 
 test-dialog:
@@ -98,9 +104,10 @@ test-dialog:
 	cargo build --manifest-path $(P3_GUEST)/Cargo.toml --target wasm32-wasip2 --release --target-dir $(P3_GUEST_OUT)
 	$(MAKE) run-dialog WASM=$(P3_GUEST_WASM)
 
+# A trap of the main component is what fuzzing finds, not a failure.
 run-fuzz:
 	$(INSTRUMENT) -m fuzz $(WASM)
-	$(WASMTIME) --invoke 'start()' composed.wasm
+	$(RUN_WASM) /tmp/composed.out $(WASMTIME_FLAGS) --invoke 'start()' composed.wasm; [ $$? -ne 1 ]
 
 run-record:
 	$(INSTRUMENT) -m record $(WASM)

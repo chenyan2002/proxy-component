@@ -41,7 +41,7 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
         let __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
         while let Some(line) = proxy::recorder::replay::next_host_line() {
             if let Some(at) = line.at {
-                let step = proxy::conversion::executor::arrive_after(at - 1).await;
+                let step = proxy::conversion::executor::step_after(at - 1).await;
                 assert_eq!(step, at, "replay came to {:?} in step {step}", line.event);
             }
             match line.event {

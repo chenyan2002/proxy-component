@@ -18,14 +18,21 @@ use trace::{Label, Labels, Line, LineKey, Replay, Trace};
 thread_local! {
     // The bindings of the labels recorded so far, which each line's are named apart by.
     static LABELS: RefCell<Labels> = RefCell::new(Labels::default());
+    // Whether to print the lines as text, with `PROXY_TRACE=text`, e.g. to read a fuzz run,
+    // rather than in their stored form, which replay reads.
+    static AS_TEXT: bool = std::env::var("PROXY_TRACE").is_ok_and(|format| format == "text");
 }
 
 struct Component;
 impl bindings::exports::proxy::recorder::record::Guest for Component {
-    // Prints the stored form of the line, so that stdout is the trace, also of a run that traps.
+    // Prints the line, so that stdout is the trace, also of a run that traps.
     fn record(line: Line) {
         let line = LABELS.with_borrow_mut(|labels| labels.label(line));
-        println!("{}", line.to_json());
+        if AS_TEXT.with(|as_text| *as_text) {
+            println!("{line}");
+        } else {
+            println!("{}", line.to_json());
+        }
     }
     fn fail(message: String) {
         panic!("{message}");

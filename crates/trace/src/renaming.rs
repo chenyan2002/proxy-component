@@ -14,7 +14,7 @@
 //! Replay's labels are its own handle numbers, which it reuses too: a replay label can be paired
 //! again once the trace's label it was paired with has ended. The rule is the same for every
 //! label, whatever it names.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{Event, Label, Line, Party, Table};
 
@@ -22,24 +22,53 @@ use crate::{Event, Label, Line, Party, Table};
 type Handle = (Table, String);
 
 /// Names the bindings of labels apart, as a recorder records the lines (see the module's doc).
+///
+/// A line can come after the guest acted on a handle it brings in: the host records a copy once
+/// its job sees it complete, e.g. a future's value with a mock in it, which the guest may have
+/// taken and dropped by then. Lines about different handles may come in any order. So a `Drop`
+/// or `Value` of a label that no line has mentioned yet ends the binding of the line that brings
+/// it in, which comes later. A line that brings a handle in and hands it on, e.g. a mock an
+/// import returns, ends it at its first mention.
 #[derive(Default)]
 pub struct Labels {
     /// The number of bindings of each handle that have ended.
     ended: HashMap<Handle, u32>,
+    /// The handles the lines so far mention.
+    seen: HashSet<Handle>,
+    /// The handles a line ended before any line brought them in.
+    early: HashSet<Handle>,
 }
 
 impl Labels {
     /// `line`, with each label renamed to its binding's, and the bindings it ends ended.
     pub fn label(&mut self, line: Line) -> Line {
-        let ends = ends_of(&line);
-        let line = map_labels(&line, |table, handle| {
+        let renamed = map_labels(&line, |table, handle| {
             let ended = *self.ended.get(&(table, handle.to_string()))?;
             Some(format!("{handle}-{}", ended + 1))
         });
-        for handle in ends {
-            *self.ended.entry(handle).or_insert(0) += 1;
+        let mentioned = handles_of(&line).0;
+        // The line that brings in a handle an earlier line ended, whose binding then ends.
+        let late: Vec<_> = mentioned
+            .iter()
+            .filter(|handle| self.early.remove(*handle))
+            .cloned()
+            .collect();
+        for handle in &late {
+            *self.ended.entry(handle.clone()).or_insert(0) += 1;
         }
-        line
+        for handle in ends_of(&line) {
+            if late.contains(&handle) {
+                continue;
+            }
+            let brings_in = matches!(line.event, Event::Call(_) | Event::Return(_));
+            if brings_in || self.seen.contains(&handle) {
+                *self.ended.entry(handle).or_insert(0) += 1;
+            } else {
+                self.early.insert(handle);
+            }
+        }
+        self.seen.extend(mentioned);
+        renamed
     }
 }
 
@@ -480,6 +509,25 @@ mod tests {
         assert_eq!(next_binding("error-context-1"), "error-context-1-2");
         assert_eq!(binding_of("session-3-2"), ("session-3", 2));
         assert_eq!(binding_of("error-context-1"), ("error-context-1", 1));
+    }
+
+    #[test]
+    fn labels_end_before_the_line_that_brings_them_in() {
+        // The guest dropped a mock in a value the host's line about it comes after.
+        let mut labels = Labels::default();
+        let drop = Line {
+            by: Party::Guest,
+            at: None,
+            event: Event::Drop(Label {
+                table: Table::Exports,
+                name: "#body-2".to_string(),
+            }),
+        };
+        let value = guest_return(1, "ok(#body-2)");
+        assert_eq!(labels.label(drop.clone()), drop);
+        assert_eq!(labels.label(value.clone()), value);
+        // Its binding has ended, then.
+        assert_eq!(labels.label(value), guest_return(1, "ok(#body-2-2)"));
     }
 
     #[test]

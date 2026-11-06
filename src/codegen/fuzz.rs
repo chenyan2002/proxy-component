@@ -26,8 +26,8 @@ impl State {
         let params = params_to_wave(kind.as_ref(), &args);
         // What the host does, rather than returns: how it reads the streams and futures, and when
         // an async import returns, at once (RETURNED), or after the executor ran a few times
-        // (STARTED), in whose last run the `return` happens. Random, rather than drawn from the
-        // text of the arguments, whose first byte is mostly the `#` of a label.
+        // (STARTED), in whose last run the `return` happens. Random for each call, rather than
+        // drawn from its arguments, as the same call may take its time differently.
         let delay = if is_async {
             quote! {
                 let __runs = __host.int_in_range(0..=3u8).unwrap_or(0);
@@ -71,8 +71,9 @@ impl State {
                 #[allow(unused_variables)]
                 #sig {
                     #preamble
-                    let __buf = __params.join(",") + #display_name;
-                    let mut u = Unstructured::new(&__buf.as_bytes());
+                    // The result, drawn from the arguments (see `fuzz_data`).
+                    let __data = fuzz_data(&(__params.join(",") + #display_name));
+                    let mut u = Unstructured::new(&__data);
                     let res = #gen_ret;
                     #ret
                     res
@@ -107,7 +108,7 @@ impl State {
                 // the jobs of their streams and futures come after the call that hands them out.
                 let args = quote! {
                     let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
-                    let __at = proxy::conversion::executor::arrive_after(proxy::conversion::executor::current_step() + __runs).await;
+                    let __at = proxy::conversion::executor::step_after(proxy::conversion::executor::current_step() + __runs).await;
                     let mut __params: Vec<String> = Vec::new();
                     #(
                         let #arg_names: #arg_tys = Fuzz::fuzz(&mut u).unwrap();

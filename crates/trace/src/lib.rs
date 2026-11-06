@@ -118,7 +118,8 @@ impl Trace {
     /// Reads a trace from its stored form, ignoring the lines that aren't trace lines, e.g. the
     /// guest's output: those that aren't JSON objects with a `by` and an `event`.
     ///
-    /// Panics on a trace line that doesn't parse, e.g. of another version of the format.
+    /// Panics on a trace line that doesn't parse, e.g. of another version of the format, and on
+    /// text without trace lines, e.g. a trace printed as text.
     pub fn parse(text: &str) -> Self {
         let lines = text.lines().filter_map(|text| {
             let value: serde_json::Value = serde_json::from_str(text).ok()?;
@@ -131,7 +132,12 @@ impl Trace {
                 Err(err) => panic!("invalid trace line `{text}`: {err}"),
             }
         });
-        Trace(lines.collect())
+        let trace = Trace(lines.collect());
+        assert!(
+            !trace.0.is_empty() || text.trim().is_empty(),
+            "no trace lines: was it printed with `PROXY_TRACE=text`?"
+        );
+        trace
     }
 }
 
@@ -399,6 +405,13 @@ mod tests {
     #[should_panic(expected = "invalid trace line")]
     fn stored_form_mismatch() {
         Trace::parse(r##"{"by":"Guest","at":null,"event":{"Drop":{"handle":"#x-1"}}}"##);
+    }
+
+    #[test]
+    #[should_panic(expected = "no trace lines")]
+    fn stored_form_as_text() {
+        let text: Vec<_> = p2_trace().0.iter().map(Line::to_string).collect();
+        Trace::parse(&text.join("\n"));
     }
 
     #[test]

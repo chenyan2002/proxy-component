@@ -145,7 +145,7 @@ impl State {
                     // A line in step `at` follows the step before it, and takes its own step, as
                     // an export call's arrival does.
                     if let Some(at) = line.at {
-                        let step = proxy::conversion::executor::arrive_after(at - 1).await;
+                        let step = proxy::conversion::executor::step_after(at - 1).await;
                         assert_eq!(step, at, "replay came to {:?} in step {step}", line.event);
                     }
                     match line.event {

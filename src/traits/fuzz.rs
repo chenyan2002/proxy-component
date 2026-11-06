@@ -199,6 +199,33 @@ impl Trait for FuzzTrait {
               #[allow(dead_code)]
               fn consume(self, _u: &mut Unstructured<'_>) {}
           }
+          thread_local! {
+              // The run's seed, which `fuzz_data` hashes with its text, so that runs differ.
+              static FUZZ_SEED: u64 = {
+                  let random = proxy::util::debug::get_random();
+                  u64::from_le_bytes(random[..8].try_into().unwrap())
+              };
+          }
+          /// Fuzz data drawn from `text`, e.g. a call's arguments: the same for the same text in
+          /// a run, so that the host answers alike, and different in another run. The text's
+          /// hash seeds splitmix64, which makes as much data as `get-random` gives.
+          #[allow(dead_code)]
+          fn fuzz_data(text: &str) -> Vec<u8> {
+              use std::hash::{Hash, Hasher};
+              let mut hasher = std::hash::DefaultHasher::new();
+              FUZZ_SEED.with(|seed| seed.hash(&mut hasher));
+              text.hash(&mut hasher);
+              let mut state = hasher.finish();
+              (0..128)
+                  .flat_map(|_| {
+                      state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+                      let mut z = state;
+                      z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+                      z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+                      (z ^ (z >> 31)).to_le_bytes()
+                  })
+                  .collect()
+          }
           impl Fuzz for MockedResource {
               fn fuzz(_u: &mut Unstructured<'_>) -> Result<Self> {
                   // A constructor's.

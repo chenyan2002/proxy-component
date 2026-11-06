@@ -530,7 +530,7 @@ impl State {
             ("step", _) => quote! { next_step() },
             ("current_step", _) => quote! { current_step() },
             ("wait_until_step", _) => quote! { wait_until_step(step).await },
-            ("arrive_after", _) => quote! { arrive_after(step).await },
+            ("step_after", _) => quote! { step_after(step).await },
             ("host_drops", Mode::Replay | Mode::Fuzz) => {
                 quote! { MOVING.with(|moving| moving.set(dropping)) }
             }

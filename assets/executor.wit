@@ -18,7 +18,7 @@ interface executor {
   // Waits as `wait-until-step` does, and counts the next step, as `step` does, without a run of
   // the executor in between: `start` waits for the step before an export call's, which fuzz mode
   // chooses, and replay's trace has, and the call arrives in the next.
-  arrive-after: async func(step: u32) -> u32;
+  step-after: async func(step: u32) -> u32;
   // Whether the exports component is dropping mocks of the imports component itself, e.g. those
   // it made for the borrowed arguments of an export call: the host's drops, not the guest's.
   host-drops: func(dropping: bool);
