@@ -1,0 +1,54 @@
+// The spike of docs/p3-record-replay.md: whether replaying each host event at the wakeup of the
+// proxy's executor that observed it reproduces a run.
+package spike:race;
+
+interface host {
+  fetch: async func(key: string) -> string;
+}
+
+// The host, as the proxy imports it, so that the proxy can import and export `fetch`.
+interface upstream {
+  fetch: async func(key: string) -> string;
+}
+
+interface guest {
+  run: async func() -> string;
+}
+
+interface executor {
+  run: async func();
+  stop: func();
+}
+
+world race-guest {
+  import host;
+  export guest;
+}
+
+world race-host {
+  export host;
+}
+
+// The record proxy whose host is another component, `race-host`, rather than wasmtime's own host
+// functions; see `proxy-record`.
+world proxy-record-component-host {
+  import upstream;
+  export host;
+  export executor;
+}
+
+world proxy-record {
+  export host;
+  export executor;
+}
+
+world proxy-replay {
+  export host;
+  export executor;
+}
+
+world driver {
+  import executor;
+  import guest;
+  export guest;
+}

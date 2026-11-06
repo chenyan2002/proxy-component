@@ -267,8 +267,9 @@ Limits:
   replay's jobs process the lines in. A host line can come after the guest acted on a handle the
   line brings in, as the host records a copy once its job sees it complete: e.g. a future's value
   with a mock in it, which the guest took and dropped first. So a `Drop` or a `Value` of a label
-  no line has mentioned yet ends the binding of the line that brings it in. Replay's labels are its own numbers, which it reuses too: a
-  replay label is paired again once the trace's label it was paired with has ended. A stream or
+  no line has mentioned yet ends the binding of the line that brings it in. Replay's labels are
+  its own numbers, which it reuses too: a replay label is paired again once the trace's label it
+  was paired with has ended. A stream or
   future replay makes, from a value the trace hands out, first appears in a host line, which
   replay doesn't check, so replay pairs its label explicitly, with the binding after that line:
   the end the host keeps. The lines replay performs it renames to its own labels, e.g. the
@@ -376,9 +377,10 @@ Replay has to know when to perform each host line. There are three kinds of line
 own. On each arrival, the exports component calls `step` on `proxy:conversion/executor`, a sync
 function that increments the counter and returns it, as the export `Call`'s `at`; the executor's
 later runs are numbered after it. In replay, `start` makes an export call recorded at step `n` once
-the count reaches `n - 1`, by calling `step` and then the export. The wait and the step are one call, `step-after`, which takes the step in the imports
-component's task as soon as its wait resumes, while the executor is still held, as above. As two
-calls, the executor could run between the wait's return and `start`'s call of `step`. An arrival can't fall within a run of the
+the count reaches `n - 1`, by calling `step` and then the export. The wait and the step are one
+call, `step-after`, which takes the step in the imports component's task as soon as its wait
+resumes, while the executor is still held, as above. As two calls, the executor could run between
+the wait's return and `start`'s call of `step`. An arrival can't fall within a run of the
 executor: the host only calls an export while no wasm is running, unless something suspends where
 the proxy can't see it, which the requirements below rule out. The host's drops of the guest's
 resources, which `start` makes too, take a step the same way.
@@ -514,25 +516,25 @@ or blocks first.
 
 ## Spike results
 
-[`tests/spike-p3-race`](../tests/spike-p3-race) tests steps in wasmtime 49, with
+[`tests/fixtures/spike-p3-race`](../tests/fixtures/spike-p3-race) tests steps in wasmtime 49, with
 hand-written components: a guest whose `run` calls `fetch("a")` and `fetch("b")` concurrently and
 joins the results in the order its wakeups receive them; a record proxy whose `fetch` forwards to
 wasmtime's `wait-for`, with delays from `DELAY_A` and `DELAY_B` or random, and whose executor
 counts its steps; a replay proxy that delivers each result in its recorded step; and a driver
-that runs the executor alongside the guest. `make -C tests/spike-p3-race` records each scenario,
-replays it, and requires the same result, the same trace, and the same results in each of the
-guest's wakeups.
+that runs the executor alongside the guest. `make -C tests/fixtures/spike-p3-race` records each
+scenario, replays it, and requires the same result, the same trace, and the same results in each
+of the guest's wakeups.
 
 - **The clock works.** All scenarios replay exactly: each result first (`"AB"`, `"BA"`), each call
   RETURNED, both RETURNED, the guest busy until both results are ready, and random delays.
 - **RETURNED needs the host to be host functions.** With the host as a component instead
-  (`make -C tests/spike-p3-race component-host`), a call the proxy saw RETURNED reached the guest
-  as STARTED, and the guest got the two results in separate wakeups, while replay gave them
-  together. wasmtime runs the proxy's call into a component as a queued work item, which suspends
-  the proxy while it is entered, and holds back the guest's next call into it (`do_not_enter`,
-  `concurrent.rs:774`). Calling a host component in replay as well made other scenarios diverge,
-  as a component host suspends differently in record and replay. Removing it, i.e. forwarding to
-  host functions, fixed it.
+  (`make -C tests/fixtures/spike-p3-race component-host`), a call the proxy saw RETURNED reached
+  the guest as STARTED, and the guest got the two results in separate wakeups, while replay gave
+  them together. wasmtime runs the proxy's call into a component as a queued work item, which
+  suspends the proxy while it is entered, and holds back the guest's next call into it
+  (`do_not_enter`, `concurrent.rs:774`). Calling a host component in replay as well made other
+  scenarios diverge, as a component host suspends differently in record and replay. Removing it,
+  i.e. forwarding to host functions, fixed it.
 - **Sync WASI 0.2 calls change the schedule.** With the proxy and the guest printing each line
   with `println!`, several scenarios diverged; buffering the output fixed them.
 - **Two results never reached the guest in one wakeup**, through the proxy, nor, in one-off
@@ -623,10 +625,11 @@ shim](#portability) could provide; see No guest task on import calls, in
   as guest-internal streams, or what the guest's waits returned, which the shim could record.
 - **A fixpoint test**: record a run, replay it while recording, and require the two traces to be
   equal. The spike does this, for its scenarios.
-- **Fuzzed schedules, replayed**: `make test-fuzz-replay` fuzzes the p2 and p3 fixtures, and
-  replays each trace, which has to end as the fuzzing run did: to the end, or in the guest's trap,
-  e.g. a panic on an error the fuzzed host returned, which is what fuzzing finds. A trap in a
-  generated component or the recorder, e.g. a divergence, fails it (`tests/run-wasm.sh`).
+- **Fuzzed schedules, replayed**: `make test-fuzz-replay` fuzzes the p2 and p3 fixtures,
+  `wasi_http_p3`, and the spike's guest, and replays each trace, which has to end as the fuzzing
+  run did: to the end, or in the guest's trap, e.g. a panic on an error the fuzzed host returned,
+  which is what fuzzing finds. A trap in a generated component or the recorder, e.g. a
+  divergence, fails it (`tests/run-wasm.sh`).
 - **Enumerated scenarios**: for small guests, every placement of host completions across steps,
   rather than random delays, and guests that merge nondeterministically, which are the ones steps
   exist for.

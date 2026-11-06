@@ -1,0 +1,17 @@
+[package]
+name = "race-proxy-record"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+# Forwards to the `race-host` component instead of wasmtime's own host functions.
+component-host = []
+
+[dependencies]
+wit-bindgen.workspace = true
+wasip3 = "0.10.0"
+futures-channel.workspace = true
