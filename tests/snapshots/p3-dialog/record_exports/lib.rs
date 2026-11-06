@@ -543,6 +543,7 @@ fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
     let handle = wit_bindgen::spawn_local(job);
     SPAWNED.with_borrow_mut(|spawned| spawned.push(handle));
 }
+#[allow(dead_code)]
 async fn join_spawned() {
     loop {
         let spawned = SPAWNED.with_borrow_mut(std::mem::take);

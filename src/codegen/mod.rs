@@ -103,6 +103,12 @@ pub fn generate(
     if matches!(mode, Mode::Replay | Mode::Fuzz) {
         state.output.extend(job_defs(mode, has_executor));
     }
+    if matches!(has_executor, Some(HasExecutor::Imports)) {
+        state.output.extend(export_call_defs(mode));
+    }
+    if matches!(mode, Mode::Record) {
+        state.output.extend(record_defs(has_executor));
+    }
     if matches!(mode, Mode::Replay | Mode::Fuzz) {
         let defs = state.replay_defs();
         state.output.extend(defs);
@@ -364,8 +370,8 @@ impl State {
         }
         res
     }
-    /// Whether this component exports `proxy:conversion/executor` or imports it; `None` in record
-    /// mode, which has no executor.
+    /// Whether this component exports `proxy:conversion/executor` or imports it; `None` for
+    /// bindings without it, e.g. of the tests.
     fn has_executor(&self) -> Option<HasExecutor> {
         let import = EXECUTOR_MODULE.strip_prefix("exports::").unwrap();
         self.module_paths
@@ -391,43 +397,10 @@ impl State {
             Mode::Replay => quote! { proxy::recorder::replay::finish(); },
             _ => quote! {},
         };
-        // What the export calls of fuzz and replay modes share (see `start_call`), so that they
-        // stay alike, as replay requires: fuzz mode records a guest line, which replay checks.
-        let trace_guest = match self.mode {
-            Mode::Fuzz => quote! { proxy::recorder::record::record(line); },
-            Mode::Replay => quote! { proxy::recorder::replay::check(line); },
-            _ => quote! {},
-        };
-        let start_defs = match self.mode {
-            Mode::Fuzz | Mode::Replay => quote! {
-                /// A line of the guest, which fuzz mode records, and replay checks.
-                #[allow(dead_code)]
-                fn trace_guest(line: &Line) {
-                    #trace_guest
-                }
-                /// Calls an async export, and reports that the guest started it, if it blocks.
-                #[allow(dead_code)]
-                async fn call_export<T>(id: TaskId, call: impl std::future::Future<Output = T>) -> T {
-                    let mut call = std::pin::pin!(call);
-                    let mut started = false;
-                    std::future::poll_fn(|cx| {
-                        let poll = call.as_mut().poll(cx);
-                        if poll.is_pending() && !started {
-                            started = true;
-                            trace_guest(&Line { by: Party::Guest, at: None, event: Event::Started(id) });
-                        }
-                        poll
-                    })
-                    .await
-                }
-            },
-            _ => quote! {},
-        };
         let panic_hook = panic_hook(&self.mode);
         parse_quote! {
             #sig {
                 #panic_hook
-                #start_defs
                 let #executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
                 #body
                 join_spawned().await;
@@ -517,6 +490,21 @@ impl State {
             // In dialog mode, `start` runs the executor again after each export call.
             ("run", Mode::Dialog) => quote! {
                 run_executor().await;
+                EXECUTOR.with_borrow_mut(|e| e.stopped = false);
+            },
+            // In record mode, the exports component runs it for each call of an async export (see
+            // `call_export_recorded`): a call while it runs, or still finishes its jobs after a
+            // `stop`, keeps it running instead.
+            ("run", Mode::Record) => quote! {
+                thread_local! {
+                    static RUNNING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+                }
+                if RUNNING.replace(true) {
+                    EXECUTOR.with_borrow_mut(|e| e.stopped = false);
+                    return;
+                }
+                run_executor().await;
+                RUNNING.set(false);
                 EXECUTOR.with_borrow_mut(|e| e.stopped = false);
             },
             ("run", _) => {
@@ -643,6 +631,91 @@ fn job_defs(mode: &Mode, has_executor: Option<HasExecutor>) -> Vec<Item> {
     items
 }
 
+/// Helpers of the exports component's calls of the main component's exports, which record,
+/// fuzz and replay modes share, so that they stay alike, as replay requires: record and fuzz
+/// modes record a guest line, which replay checks.
+fn export_call_defs(mode: &Mode) -> Vec<Item> {
+    let trace_guest = match mode {
+        Mode::Record | Mode::Fuzz => quote! { proxy::recorder::record::record(line); },
+        Mode::Replay => quote! { proxy::recorder::replay::check(line); },
+        Mode::Dialog => return Vec::new(),
+    };
+    let file: File = parse_quote! {
+        /// A line of the guest, which record and fuzz modes record, and replay checks.
+        #[allow(dead_code)]
+        fn trace_guest(line: &Line) {
+            #trace_guest
+        }
+        /// Calls an async export, and reports that the guest started it, if it blocks.
+        #[allow(dead_code)]
+        async fn call_export<T>(id: TaskId, call: impl std::future::Future<Output = T>) -> T {
+            let mut call = std::pin::pin!(call);
+            let mut started = false;
+            std::future::poll_fn(|cx| {
+                let poll = call.as_mut().poll(cx);
+                if poll.is_pending() && !started {
+                    started = true;
+                    trace_guest(&Line { by: Party::Guest, at: None, event: Event::Started(id) });
+                }
+                poll
+            })
+            .await
+        }
+    };
+    file.items
+}
+
+/// Helpers of record mode, which forwards the main component's calls to the host, and the host's
+/// to it, for each component.
+fn record_defs(has_executor: Option<HasExecutor>) -> Vec<Item> {
+    let file: File = match has_executor {
+        // The imports component, whose executor awaits the host's async calls.
+        Some(HasExecutor::Exports) => parse_quote! {
+            /// The host's result of an async call: at once, if it is ready on the first poll, so
+            /// that the guest sees RETURNED, and otherwise from an executor job, which awaits the
+            /// host's subtask, with the step of the run it completed in, as replay returns it in
+            /// that step. The call may borrow the guest's arguments, e.g. a method's `self`.
+            #[allow(dead_code)]
+            async fn host_result<T: 'static>(
+                id: TaskId,
+                call: impl std::future::Future<Output = T>,
+            ) -> (T, Option<u32>) {
+                let mut call = Box::pin(call);
+                let first = std::future::poll_fn(|cx| std::task::Poll::Ready(call.as_mut().poll(cx))).await;
+                if let std::task::Poll::Ready(value) = first {
+                    return (value, None);
+                }
+                proxy::recorder::record::record(&Line { by: Party::Host, at: None, event: Event::Started(id) });
+                let (value, at) = wait_for_job(call).await;
+                (value, Some(at))
+            }
+        },
+        // The exports component, which runs the imports component's executor while the host's
+        // calls of async exports are pending: there is no `start` to run it.
+        Some(HasExecutor::Imports) => parse_quote! {
+            thread_local! {
+                // The host's calls of async exports that haven't returned.
+                static PENDING_CALLS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+            }
+            /// Calls an async export, as `call_export` does, running the executor until the last
+            /// pending call returns, then stopping it, which lets it finish its jobs and return.
+            #[allow(dead_code)]
+            async fn call_export_recorded<T>(id: TaskId, call: impl std::future::Future<Output = T>) -> T {
+                PENDING_CALLS.set(PENDING_CALLS.get() + 1);
+                spawn(proxy::conversion::executor::run());
+                let res = call_export(id, call).await;
+                PENDING_CALLS.set(PENDING_CALLS.get() - 1);
+                if PENDING_CALLS.get() == 0 {
+                    proxy::conversion::executor::stop();
+                }
+                res
+            }
+        },
+        None => return Vec::new(),
+    };
+    file.items
+}
+
 /// Sends the panics of the component to the recorder, which reports them (see `fail`), in
 /// fuzz and replay modes: the generated components have no stderr of their own to print them,
 /// e.g. when the main component's is virtualized.
@@ -723,6 +796,7 @@ fn start_spawn_defs() -> Vec<Item> {
             SPAWNED.with_borrow_mut(|spawned| spawned.push(handle));
         }
         // Awaits the spawned jobs, including those they spawn.
+        #[allow(dead_code)]
         async fn join_spawned() {
             loop {
                 let spawned = SPAWNED.with_borrow_mut(std::mem::take);

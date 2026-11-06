@@ -56,21 +56,41 @@ impl State {
         let is_async = wit_func.is_async;
         // The host calls the exports, which the exports component numbers, and the guest the
         // imports, which the imports component numbers.
-        let (table, caller, callee) = if is_wrapped_module(&module_path[1]) {
+        let is_import = is_wrapped_module(&module_path[1]);
+        let (table, caller, callee) = if is_import {
             (quote! { Imports }, quote! { Guest }, quote! { Host })
         } else {
             (quote! { Exports }, quote! { Host }, quote! { Guest })
         };
+        let call = quote! { #func(#(#call_args),*) };
+        let (record_call, call) = match (is_import, is_async) {
+            (true, false) => (quote! { None }, quote! { (#call, None) }),
+            // The host's result, at once (RETURNED), or in the step of the executor's run in which
+            // it completed (see `host_result`).
+            (true, true) => (
+                quote! { None },
+                quote! { host_result(__id, async move { #call.await }).await },
+            ),
+            // An export call's arrival is a step, as in fuzz and replay modes.
+            (false, false) => (
+                quote! { Some(proxy::conversion::executor::step()) },
+                quote! { (#call, None) },
+            ),
+            (false, true) => (
+                quote! { Some(proxy::conversion::executor::step()) },
+                quote! { (call_export_recorded(__id, #call).await, None) },
+            ),
+        };
         let record_ret = if get_return_type(&sig.output).is_none() {
             quote! {
-                #func(#(#call_args),*);
-                proxy::recorder::record::record(&trace_return(Party::#callee, __id, None));
+                let ((), __at) = #call;
+                proxy::recorder::record::record(&Line { at: __at, ..trace_return(Party::#callee, __id, None) });
             }
         } else {
             quote! {
-               let res = #func(#(#call_args),*);
+               let (res, __at) = #call;
                let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-               proxy::recorder::record::record(&trace_return(Party::#callee, __id, Some(wave_res)));
+               proxy::recorder::record::record(&Line { at: __at, ..trace_return(Party::#callee, __id, Some(wave_res)) });
                #res
             }
         };
@@ -82,7 +102,11 @@ impl State {
                     let #arg_names = #arg_names.to_proxy();
                     params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                 )*
-                proxy::recorder::record::record(&trace_call(Party::#caller, __id, #display_name, #is_async, params));
+                let __at: Option<u32> = #record_call;
+                proxy::recorder::record::record(&Line {
+                    at: __at,
+                    ..trace_call(Party::#caller, __id, #display_name, #is_async, params)
+                });
                 #record_ret
             }
         }

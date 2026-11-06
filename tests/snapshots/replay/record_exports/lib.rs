@@ -9,35 +9,6 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
             .call_once(|| std::panic::set_hook(
                 Box::new(|info| proxy::recorder::replay::fail(&info.to_string())),
             ));
-        /// A line of the guest, which fuzz mode records, and replay checks.
-        #[allow(dead_code)]
-        fn trace_guest(line: &Line) {
-            proxy::recorder::replay::check(line);
-        }
-        /// Calls an async export, and reports that the guest started it, if it blocks.
-        #[allow(dead_code)]
-        async fn call_export<T>(
-            id: TaskId,
-            call: impl std::future::Future<Output = T>,
-        ) -> T {
-            let mut call = std::pin::pin!(call);
-            let mut started = false;
-            std::future::poll_fn(|cx| {
-                    let poll = call.as_mut().poll(cx);
-                    if poll.is_pending() && !started {
-                        started = true;
-                        trace_guest(
-                            &Line {
-                                by: Party::Guest,
-                                at: None,
-                                event: Event::Started(id),
-                            },
-                        );
-                    }
-                    poll
-                })
-                .await
-        }
         let __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
         while let Some(line) = proxy::recorder::replay::next_host_line() {
             if let Some(at) = line.at {
@@ -695,6 +666,32 @@ fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
     proxy::conversion::executor::host_drops(false);
     res
 }
+/// A line of the guest, which record and fuzz modes record, and replay checks.
+#[allow(dead_code)]
+fn trace_guest(line: &Line) {
+    proxy::recorder::replay::check(line);
+}
+/// Calls an async export, and reports that the guest started it, if it blocks.
+#[allow(dead_code)]
+async fn call_export<T>(id: TaskId, call: impl std::future::Future<Output = T>) -> T {
+    let mut call = std::pin::pin!(call);
+    let mut started = false;
+    std::future::poll_fn(|cx| {
+            let poll = call.as_mut().poll(cx);
+            if poll.is_pending() && !started {
+                started = true;
+                trace_guest(
+                    &Line {
+                        by: Party::Guest,
+                        at: None,
+                        event: Event::Started(id),
+                    },
+                );
+            }
+            poll
+        })
+        .await
+}
 thread_local! {
     #[allow(dead_code)] static MOVING : std::cell::Cell < bool > = const {
     std::cell::Cell::new(false) };
@@ -708,6 +705,7 @@ fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
     let handle = wit_bindgen::spawn_local(job);
     SPAWNED.with_borrow_mut(|spawned| spawned.push(handle));
 }
+#[allow(dead_code)]
 async fn join_spawned() {
     loop {
         let spawned = SPAWNED.with_borrow_mut(std::mem::take);

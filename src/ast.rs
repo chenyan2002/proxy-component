@@ -44,7 +44,7 @@ impl<'a> Opt<'a> {
         }
     }
     /// Whether the main component's exports are driven by the generated `start`, rather than
-    /// by the host, which also runs `proxy:conversion/executor`.
+    /// by the host. Either way, the exports component runs `proxy:conversion/executor`.
     fn has_start(&self) -> bool {
         matches!(self.mode, Mode::Replay | Mode::Fuzz | Mode::Dialog)
     }
@@ -76,9 +76,7 @@ impl<'a> Opt<'a> {
         out.push_str("world imports {\n");
         self.push_mode_imports(&mut out);
         out.push_str("export proxy:conversion/conversion;\n");
-        if self.has_start() {
-            out.push_str("export proxy:conversion/executor;\n");
-        }
+        out.push_str("export proxy:conversion/executor;\n");
         for name in interface_names(resolve, &world.imports)? {
             // Don't virtualize util imports
             if name.starts_with("proxy:util/") {
@@ -130,9 +128,7 @@ impl<'a> Opt<'a> {
         out.push_str("world exports {\n");
         self.push_mode_imports(&mut out);
         out.push_str("import proxy:conversion/conversion;\n");
-        if self.has_start() {
-            out.push_str("import proxy:conversion/executor;\n");
-        }
+        out.push_str("import proxy:conversion/executor;\n");
         for name in interface_names(resolve, &world.imports)? {
             out.push_str(&format!("import {name};\n"));
         }

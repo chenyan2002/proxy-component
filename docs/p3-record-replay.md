@@ -26,7 +26,9 @@ dialog support for p3.
   writes it for p2 and p3 components, with [steps](#steps) and [labels](#labels), and record mode
   for p2 components.
 - **Replay** of p2 and p3 traces ([Replay](#replay)): calls and steps, RETURNED and STARTED,
-  streams, futures and error-contexts. Recording p3 components is the next phase.
+  streams, futures and error-contexts.
+- **Record mode for p3**: async imports, RETURNED or STARTED, with their steps. Streams and
+  futures are next.
 
 ## Where nondeterminism comes from
 
@@ -289,8 +291,16 @@ component.
 In record mode, the imports component routes every interaction with the host through one
 executor task, like fuzz mode's:
 
-- **Async imports.** The executor's job awaits the host's subtask, and completes the proxy's
-  export call with the result (its `task.return`).
+- **Async imports.** The proxy's export polls the host's call once: if the result is ready, it
+  returns it at once. Otherwise it records `Started`, and hands the call to an executor job,
+  which awaits the host's subtask and records the `Return` in the step of the run it completed
+  in, then gives the result back to the proxy's export, which returns it (its `task.return`). It
+  waits for the job as replay's mock waits for the step, holding the executor until it resumes
+  (see [Steps](#steps)). The job may borrow the guest's arguments, e.g. a method's `self`: if the
+  guest cancels the call, the job is dropped with it, which cancels the host's call too.
+- **Running the executor.** There is no `start` in record mode, so the exports component runs
+  the executor while the host's calls of async exports are pending, and stops it when the last
+  one returns, which lets it finish its jobs; a call that comes meanwhile keeps it running.
 - **Streams and futures, by pumps.** The proxy doesn't pass a stream end through, as the copies
   would then go between the host and the guest without it. It keeps the end it received, creates
   a pair of its own, and passes on that pair's other end. A pump is the executor job between the
@@ -690,7 +700,10 @@ depend on runtime patches. wasmtime 49 has the start of its own record and repla
 3. **Replay**, tested on traces that fuzz mode writes, with the checks of
    [Correctness](#checking-the-implementation): done. It replays 100 of 100 fuzz traces of the
    p3 fixture, and 60 of 60 of `wasi_http_p3`.
-4. **Record**, with the executor and its pumps, under `wasmtime serve` and `run`.
+4. **Record**, with the executor and its pumps, under `wasmtime serve` and `run`. Async imports
+   are done: `make test-record-p3` records `tests/fixtures/proxy-p3-record` under `wasmtime run`,
+   with delays that make its calls RETURNED or STARTED, and replays each trace. Next are streams
+   and futures, through pumps.
 5. **Portability across runtimes**: the profile proposal, or the shim.
 
 ## Open questions
