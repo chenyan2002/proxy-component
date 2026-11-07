@@ -1,4 +1,4 @@
-.PHONY: all build-components build-cli test test-cargo test-record test-fixture test-record-p3 test-fuzz-replay test-fuzz test-dialog run-fuzz run-fuzz-replay run-record run-dialog run-viceroy
+.PHONY: all build-components build-cli test test-cargo test-record test-fixture test-record-p3 test-record-http-p3 test-fuzz-replay test-fuzz test-dialog run-fuzz run-fuzz-replay run-record run-dialog run-viceroy
 
 # `make test ONE_BYTE_PAGE=1` tests with 1-byte-page memories
 ifeq ($(ONE_BYTE_PAGE),1)
@@ -23,7 +23,7 @@ build-components:
 	cp target/one-byte-page/wasm32-wasip2/release/debug.wasm assets/debug.one_byte_page.wasm
 	cp target/one-byte-page/wasm32-wasip2/release/recorder.wasm assets/recorder.one_byte_page.wasm
 
-test: test-cargo test-fuzz test-record test-fixture test-record-p3 test-fuzz-replay test-dialog
+test: test-cargo test-fuzz test-record test-fixture test-record-p3 test-record-http-p3 test-fuzz-replay test-dialog
 
 # Snapshot tests of the generated sources
 test-cargo:
@@ -101,6 +101,26 @@ test-record-p3:
 		$(WASMTIME) --invoke 'start()' $(P3_RECORD_OUT)/replay.wasm < $(P3_RECORD_OUT)/trace.out > $(P3_RECORD_OUT)/replay.out 2>&1 || { \
 			cat $(P3_RECORD_OUT)/replay.out; echo "replay failed, with the output above, of the trace in $(P3_RECORD_OUT)/trace.out"; exit 1; }; \
 	done
+
+# Records tests/wasi_http_p3.wasm under `wasmtime serve`, which reuses an instance for the requests,
+# so its trace has an export call for each, and replays it. Not its echo (see
+# docs/p3-record-replay.md, Labels), nor a fetch, which needs the network.
+HTTP_OUT = target/fixture-http-p3
+HTTP_ADDR = 127.0.0.1:8789
+test-record-http-p3:
+	mkdir -p $(HTTP_OUT)
+	$(INSTRUMENT) -m record tests/wasi_http_p3.wasm
+	cp composed.wasm $(HTTP_OUT)/record.wasm
+	$(INSTRUMENT) -m replay tests/wasi_http_p3.wasm
+	cp composed.wasm $(HTTP_OUT)/replay.wasm
+	wasmtime serve $(WASMTIME_FLAGS) -S p3,http,cli --no-logging-prefix --addr $(HTTP_ADDR) $(HTTP_OUT)/record.wasm > $(HTTP_OUT)/trace.out 2> $(HTTP_OUT)/serve.err & echo $$! > $(HTTP_OUT)/serve.pid; \
+	sleep 2; \
+	for path in / "/wait?ms=20" /random "/wait?ms=5" /; do \
+		curl -sf -m 10 "http://$(HTTP_ADDR)$$path" > /dev/null || { kill `cat $(HTTP_OUT)/serve.pid`; cat $(HTTP_OUT)/serve.err; echo "GET $$path failed"; exit 1; }; \
+	done; \
+	kill `cat $(HTTP_OUT)/serve.pid`
+	$(WASMTIME) --invoke 'start()' $(HTTP_OUT)/replay.wasm < $(HTTP_OUT)/trace.out > $(HTTP_OUT)/replay.out 2>&1 || { \
+		cat $(HTTP_OUT)/replay.out; echo "replay failed, with the output above, of the trace in $(HTTP_OUT)/trace.out"; exit 1; }
 
 # The spike's guest, which joins two concurrent results in the order its wakeups receive them
 RACE = tests/fixtures/spike-p3-race

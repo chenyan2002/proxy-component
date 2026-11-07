@@ -449,8 +449,8 @@ impl FuzzTrait {
                   T: Fuzz + ToValue + ValueTyped + wit_future::FuturePayload,
               {
                   // Writes a fuzzed value, whose line is recorded as it is written, before the guest
-                  // can take it and go on, e.g. trap; a guest's drop of the future follows it if
-                  // the guest drops its end instead.
+                  // can take it and go on, e.g. trap. The guest may drop its end instead, which
+                  // isn't recorded: the line ends the label, and replay writes the value alike.
                   fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
                       let value = T::fuzz(u)?;
                       let (writer, reader, name) = host_future::<T>(true);
@@ -460,7 +460,6 @@ impl FuzzTrait {
                           let line = FutureValue { future: label.clone(), value: wave };
                           proxy::recorder::record::record(&host_line(Event::Value(line)));
                           if let Err(unwritten) = writer.write(value).await {
-                              proxy::recorder::record::record(&guest_line(Event::Drop(label)));
                               host_dropping(move || drop(unwritten));
                           }
                       });

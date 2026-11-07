@@ -582,7 +582,6 @@ where
             };
             proxy::recorder::record::record(&host_line(Event::Value(line)));
             if let Err(unwritten) = writer.write(value).await {
-                proxy::recorder::record::record(&guest_line(Event::Drop(label)));
                 host_dropping(move || drop(unwritten));
             }
         });

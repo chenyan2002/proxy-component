@@ -546,7 +546,7 @@ impl Replay for exports::test::host::types::Counter {
         let label = value.unwrap_handle();
         let handle = label
             .strip_prefix(&format!("{}-", "counter"))
-            .and_then(|s| s.parse::<u32>().ok())
+            .and_then(|s| s.split('-').next()?.parse::<u32>().ok())
             .expect("invalid handle label");
         exports::test::host::types::Counter::new(MockedResource {
             handle,

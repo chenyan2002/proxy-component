@@ -511,10 +511,10 @@ fn pump_defs(has_streams: bool, has_futures: bool) -> Vec<Item> {
                 }
             }
             /// Passes the value of a future from `from`, which `sender` writes, to `to`, which
-            /// the other party reads, unless it drops it first. The value's line is recorded as
-            /// the pump writes it, before the reader can take it and go on, e.g. trap; a drop
-            /// follows if the reader drops its end instead. A future can't wait until the other
-            /// side reads: the host's read of the guest's value is recorded once it completes.
+            /// the other party reads, unless it drops it first, which isn't recorded. The value's
+            /// line is recorded as the pump writes it, before the reader can take it and go on,
+            /// e.g. trap. A future can't wait until the other side reads, so the guest's value is
+            /// recorded once the pump's read of it completes.
             async fn pump_future<T, U>(
                 from: wit_bindgen::FutureReader<T>,
                 to: wit_bindgen::FutureWriter<U>,
@@ -534,10 +534,7 @@ fn pump_defs(has_streams: bool, has_futures: bool) -> Vec<Item> {
                 };
                 let value_line = Event::Value(FutureValue { future: label.clone(), value: wave });
                 proxy::recorder::record::record(&pump_line(sender, trace_at(), value_line));
-                if to.write(value).await.is_err() {
-                    let line = pump_line(trace_receiver(sender), trace_at(), Event::Drop(label));
-                    proxy::recorder::record::record(&line);
-                }
+                drop(to.write(value).await);
             }
         };
         items.extend(file.items);

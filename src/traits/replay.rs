@@ -41,10 +41,12 @@ impl Trait for ReplayTrait {
                 parse_quote! {
                 impl Replay for #resource_path {
                     fn replay(value: &Value) -> Self {
+                        // The number, also of a later binding of it, e.g. `request-1-2` (see
+                        // `crates/trace`'s renaming).
                         let label = value.unwrap_handle();
                         let handle = label
                             .strip_prefix(&format!("{}-", #wit_name))
-                            .and_then(|s| s.parse::<u32>().ok())
+                            .and_then(|s| s.split('-').next()?.parse::<u32>().ok())
                             .expect("invalid handle label");
                         #mock
                     }
@@ -57,7 +59,7 @@ impl Trait for ReplayTrait {
                         let label = value.unwrap_handle();
                         let handle = label
                             .strip_prefix(&format!("borrow-{}-", #wit_name))
-                            .and_then(|s| s.parse::<u32>().ok())
+                            .and_then(|s| s.split('-').next()?.parse::<u32>().ok())
                             .expect("invalid handle label");
                         SCOPED_ALLOC.with(|alloc| {
                             let mut alloc = alloc.borrow_mut();
@@ -74,10 +76,12 @@ impl Trait for ReplayTrait {
                 parse_quote! {
                 impl Replay for #resource_path {
                     fn replay(value: &Value) -> Self {
+                        // The number, also of a later binding of it, e.g. `request-1-2` (see
+                        // `crates/trace`'s renaming).
                         let label = value.unwrap_handle();
                         let handle = label
                             .strip_prefix(&format!("{}-", #wit_name))
-                            .and_then(|s| s.parse::<u32>().ok())
+                            .and_then(|s| s.split('-').next()?.parse::<u32>().ok())
                             .expect("invalid handle label");
                         #resource_path::new(MockedResource {
                             handle,
@@ -461,18 +465,17 @@ impl ReplayTrait {
                 where
                     T: Replay + ToValue + ValueTyped + wit_future::FuturePayload,
                 {
-                    // Writes the trace's value, which the trace has as the host wrote it, so a
-                    // guest's drop of the future follows if the guest dropped its end instead.
+                    // Writes the trace's value, which the trace has as the host wrote it, whether
+                    // the guest took it, or dropped its end instead.
                     fn replay(value: &Value) -> Self {
                         let (writer, reader, name) = host_future::<T>(false);
                         let label = Label { table: TRACE_TABLE, name };
                         proxy::recorder::replay::pair(&trace_label(value), &label);
                         spawn(async move {
                             let Some(line) = next_line(&label).await else {
-                                // The trace has no value to write; the guest dropped its end, so
-                                // nothing sees the writer that is kept unwritten.
+                                // The host never wrote it, e.g. the run ended first, so nothing
+                                // sees the writer that is kept unwritten.
                                 std::mem::forget(writer);
-                                proxy::recorder::replay::check(&guest_line(Event::Drop(label)));
                                 return;
                             };
                             let Event::Value(value) = line.event else {
@@ -480,7 +483,6 @@ impl ReplayTrait {
                             };
                             let value: T = Replay::replay(&wave_value::<T>(&value.value));
                             if let Err(unwritten) = writer.write(value).await {
-                                proxy::recorder::replay::check(&guest_line(Event::Drop(label)));
                                 host_dropping(move || drop(unwritten));
                             }
                         });

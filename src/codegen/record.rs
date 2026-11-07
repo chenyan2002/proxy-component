@@ -29,6 +29,9 @@ impl State {
                 let ident = &arg.ident;
                 if import_arg.is_borrowed {
                     parse_quote! { &#ident }
+                } else if is_option_of_ref(&import_arg.ty) {
+                    // E.g. `Option<&str>` of an `Option<String>`, or `Option<&T>` of an `Option<T>`.
+                    parse_quote! { #ident.as_ref().map(std::borrow::Borrow::borrow) }
                 } else {
                     parse_quote! { #ident }
                 }
@@ -135,4 +138,20 @@ impl State {
             }
         }
     }
+}
+
+/// Whether `ty` is an `Option` of a reference, e.g. `Option<&str>`, as wit-bindgen borrows inside
+/// an `option` the parameters of imports.
+fn is_option_of_ref(ty: &syn::Type) -> bool {
+    let syn::Type::Path(path) = ty else {
+        return false;
+    };
+    let Some(segment) = path.path.segments.last() else {
+        return false;
+    };
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return false;
+    };
+    segment.ident == "Option"
+        && matches!(args.args.first(), Some(syn::GenericArgument::Type(syn::Type::Reference(_))))
 }

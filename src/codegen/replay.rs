@@ -101,13 +101,16 @@ impl State {
         });
         Some(quote! {
             Event::Drop(label) => {
-                let (name, handle) = label
-                    .name
-                    .strip_prefix('#')
-                    .and_then(|label| label.rsplit_once('-'))
-                    .and_then(|(name, handle)| Some((name, handle.parse::<u32>().ok()?)))
+                // E.g. `#session-1`, or `#session-1-2` for a later binding of the number (see
+                // `crates/trace`'s renaming): the name ends before the first number.
+                let label = label.name.strip_prefix('#').expect("invalid handle label");
+                let words: Vec<&str> = label.split('-').collect();
+                let number = words
+                    .iter()
+                    .position(|word| word.parse::<u32>().is_ok())
                     .expect("invalid handle label");
-                match name {
+                let (name, handle) = (words[..number].join("-"), words[number].parse::<u32>().unwrap());
+                match name.as_str() {
                     #(#arms)*
                     _ => unreachable!(),
                 }

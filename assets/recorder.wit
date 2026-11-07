@@ -32,9 +32,8 @@ interface types {
     // The host read `items`, which the guest wrote.
     read(chunk),
     // A future's value, and who wrote it (`by`). If the host wrote it, the line is recorded when
-    // the host writes, before the guest can read it; if the guest then drops its end without
-    // reading, a `drop` by the guest follows. If the guest wrote it, the line is recorded when
-    // the host reads it.
+    // the host writes, before the guest can read it; the guest may drop its end instead, which
+    // isn't recorded. If the guest wrote it, the line is recorded when the host reads it.
     value(future-value),
     // `by` is who dropped it.
     drop(label),

@@ -124,16 +124,20 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     }
                 }
                 Event::Drop(label) => {
-                    let (name, handle) = label
+                    let label = label
                         .name
                         .strip_prefix('#')
-                        .and_then(|label| label.rsplit_once('-'))
-                        .and_then(|(name, handle)| Some((
-                            name,
-                            handle.parse::<u32>().ok()?,
-                        )))
                         .expect("invalid handle label");
-                    match name {
+                    let words: Vec<&str> = label.split('-').collect();
+                    let number = words
+                        .iter()
+                        .position(|word| word.parse::<u32>().is_ok())
+                        .expect("invalid handle label");
+                    let (name, handle) = (
+                        words[..number].join("-"),
+                        words[number].parse::<u32>().unwrap(),
+                    );
+                    match name.as_str() {
                         "session" => {
                             drop(unsafe {
                                 test::guest::api::Session::from_handle(handle)
@@ -355,7 +359,7 @@ impl Replay for test::guest::api::Session {
         let label = value.unwrap_handle();
         let handle = label
             .strip_prefix(&format!("{}-", "session"))
-            .and_then(|s| s.parse::<u32>().ok())
+            .and_then(|s| s.split('-').next()?.parse::<u32>().ok())
             .expect("invalid handle label");
         {
             fn cannot_mock<T>() -> T {
@@ -374,7 +378,7 @@ impl<'a> Replay for &'a test::guest::api::Session {
         let label = value.unwrap_handle();
         let handle = label
             .strip_prefix(&format!("borrow-{}-", "session"))
-            .and_then(|s| s.parse::<u32>().ok())
+            .and_then(|s| s.split('-').next()?.parse::<u32>().ok())
             .expect("invalid handle label");
         SCOPED_ALLOC
             .with(|alloc| {
@@ -472,7 +476,7 @@ impl Replay for test::host::types::Counter {
         let label = value.unwrap_handle();
         let handle = label
             .strip_prefix(&format!("{}-", "counter"))
-            .and_then(|s| s.parse::<u32>().ok())
+            .and_then(|s| s.split('-').next()?.parse::<u32>().ok())
             .expect("invalid handle label");
         proxy::conversion::conversion::get_mock_test_host_types_counter(handle)
     }
@@ -482,7 +486,7 @@ impl<'a> Replay for &'a test::host::types::Counter {
         let label = value.unwrap_handle();
         let handle = label
             .strip_prefix(&format!("borrow-{}-", "counter"))
-            .and_then(|s| s.parse::<u32>().ok())
+            .and_then(|s| s.split('-').next()?.parse::<u32>().ok())
             .expect("invalid handle label");
         SCOPED_ALLOC
             .with(|alloc| {

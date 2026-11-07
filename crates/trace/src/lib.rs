@@ -160,6 +160,10 @@ impl fmt::Display for Label {
     }
 }
 
+/// An event as text, after the party that did it (see `Line`'s): a call's, by its task, e.g.
+/// `t1.call run(#request-1)` or `c2.return ok`, and a copy's by the direction its data moves
+/// for that party, `<--` into the stream or future, `-->` out of it, e.g. the host's write
+/// `#stream-6 <-- [52]`, its read `#stream-3 --> [97]`, or a writer's `#future-4 <-- ok`.
 impl fmt::Display for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -170,17 +174,17 @@ impl fmt::Display for Event {
                 args,
             }) => {
                 let is_async = if *is_async { "async " } else { "" };
-                write!(f, "call {id} {is_async}{func}({})", args.join(", "))
+                write!(f, "{id}.call {is_async}{func}({})", args.join(", "))
             }
-            Event::Started(id) => write!(f, "started {id}"),
+            Event::Started(id) => write!(f, "{id}.started"),
             Event::Return(ReturnValue { id, value }) => {
-                write!(f, "return {id} {}", value.as_deref().unwrap_or("()"))
+                write!(f, "{id}.return {}", value.as_deref().unwrap_or("()"))
             }
-            Event::Cancel(id) => write!(f, "cancel {id}"),
-            Event::Cancelled(id) => write!(f, "cancelled {id}"),
-            Event::Write(Chunk { stream, items }) => write!(f, "write {stream} {items}"),
-            Event::Read(Chunk { stream, items }) => write!(f, "read {stream} {items}"),
-            Event::Value(FutureValue { future, value }) => write!(f, "value {future} {value}"),
+            Event::Cancel(id) => write!(f, "{id}.cancel"),
+            Event::Cancelled(id) => write!(f, "{id}.cancelled"),
+            Event::Write(Chunk { stream, items }) => write!(f, "{stream} <-- {items}"),
+            Event::Read(Chunk { stream, items }) => write!(f, "{stream} --> {items}"),
+            Event::Value(FutureValue { future, value }) => write!(f, "{future} <-- {value}"),
             Event::Drop(handle) => write!(f, "drop {handle}"),
         }
     }
@@ -446,11 +450,41 @@ mod tests {
         assert_eq!(
             lines,
             [
-                "host: call t1 run(#request-1)",
-                "guest: call c1 get(1)",
-                "host: return c1 \"a\"",
-                "guest: return t1 ()",
+                "host: t1.call run(#request-1)",
+                "guest: c1.call get(1)",
+                "host: c1.return \"a\"",
+                "guest: t1.return ()",
                 "host: drop #session-1 (exports)",
+            ]
+        );
+        let label = |name: &str| Label {
+            table: Table::Imports,
+            name: name.to_string(),
+        };
+        let chunk = |name: &str, items: &str| Chunk {
+            stream: label(name),
+            items: items.to_string(),
+        };
+        let copies = [
+            line(Party::Host, Event::Started(task(Table::Imports, 2))),
+            line(Party::Host, Event::Write(chunk("#stream-6", "[52]"))),
+            line(Party::Host, Event::Read(chunk("#stream-3", "[97]"))),
+            line(
+                Party::Guest,
+                Event::Value(FutureValue {
+                    future: label("#future-4"),
+                    value: "ok".to_string(),
+                }),
+            ),
+        ];
+        let lines: Vec<_> = copies.iter().map(Line::to_string).collect();
+        assert_eq!(
+            lines,
+            [
+                "host: c2.started",
+                "host: #stream-6 <-- [52]",
+                "host: #stream-3 --> [97]",
+                "guest: #future-4 <-- ok",
             ]
         );
     }
@@ -468,7 +502,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "the trace has `guest: call c1 get(1)`, but the guest did `guest: call c1 get(2)`"
+        expected = "the trace has `guest: c1.call get(1)`, but the guest did `guest: c1.call get(2)`"
     )]
     fn replay_mismatch() {
         let mut replay = Replay::new(p2_trace());
@@ -480,7 +514,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "the trace has `guest: call c1 get(1)`, which replay didn't reach")]
+    #[should_panic(expected = "the trace has `guest: c1.call get(1)`, which replay didn't reach")]
     fn replay_missing_guest_line() {
         let mut replay = Replay::new(p2_trace());
         // The guest's lines may still come while `start` waits for the next line's step.
@@ -517,7 +551,7 @@ mod tests {
             line(Party::Host, call(t2, "new", &[])),
             line(Party::Guest, ret(t2, Some("#session-3"))),
         ]);
-        assert_eq!(trace.0[4].to_string(), "guest: return t2 #session-3-2");
+        assert_eq!(trace.0[4].to_string(), "guest: t2.return #session-3-2");
         let mut replay = Replay::new(trace);
         replay.next_host_line();
         // Replay's table numbers the session differently.
@@ -585,7 +619,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "the trace has `guest: return t2 #session-3`")]
+    #[should_panic(expected = "the trace has `guest: t2.return #session-3`")]
     fn replay_checks_labels() {
         let (t1, t2) = (task(Table::Exports, 1), task(Table::Exports, 2));
         let trace = Trace(vec![

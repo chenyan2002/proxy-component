@@ -54,7 +54,7 @@ in component-ui's `docs/p3.md`.
 Backward compatibility with p2 traces is not a goal; the format is redesigned. A trace is the list
 of lines the proxy observed, in the order it observed them. Replay relies on only part of that
 order; see Order, below. How a trace is stored is up to the implementation: the recorders write
-one JSON line per line, and the bundled recorder prints text instead, e.g. `host @2: call t1 …`,
+one JSON line per line, and the bundled recorder prints text instead, e.g. `host @2: t1.call …`,
 with `PROXY_TRACE=text`, for reading a fuzz run.
 
 The format is defined once, as the WIT interface `proxy:recorder/types`
@@ -104,9 +104,8 @@ variant event {
   // A copy: the host read the items, which the guest wrote.
   read(chunk),
   // A future's value, and who wrote it (`by`). If the host wrote it, the line is recorded when
-  // the host writes, before the guest can read it; if the guest then drops its end without
-  // reading, a `drop` by the guest follows. If the guest wrote it, the line is recorded when
-  // the host reads it.
+  // the host writes, before the guest can read it; the guest may drop its end instead, which
+  // isn't recorded. If the guest wrote it, the line is recorded when the host reads it.
   value(future-value),
   // A stream or future end, or a resource, was dropped; `by` is who dropped it.
   drop(label),
@@ -264,6 +263,16 @@ Limits:
   reader of it just doesn't see the two labels as one stream. The [core-level shim](#portability)
   could carry the label through, as the end keeps one handle in the guest's table from when it
   arrives until the guest passes it on.
+- **An end the proxy gave the guest, coming back, can't be copied from, unless its payload is
+  numeric.** The end is the reader of a pair the proxy made, e.g. a pump's, or a mock's in fuzz
+  and replay modes, whose writer the proxy keeps. Reading it in the proxy copies between two ends
+  of one component instance, which wasmtime traps for a payload that isn't numeric ("cannot read
+  from and write to intra-component future/stream with non-numeric payload"), as the component
+  model requires. So recording a guest that hands such a future or stream back traps, e.g. an
+  HTTP echo that passes a request's trailers, a `future<result<option<trailers>, error-code>>`,
+  on to its response; a `stream<u8>`, e.g. the body, is copied. The proxy can't tell that the end
+  is its own, as it comes back as a new handle. Pairs made in another component instance would
+  avoid the trap, at the cost of a function per payload type to make them and pump them there.
 - **Replay compares labels up to renaming.** A table holds more than the values the trace
   labels: waitable sets and subtasks, which each mode makes its own, so the same value can have
   another number in replay. Replay pairs each of the trace's labels with the one it sees for the
@@ -547,7 +556,13 @@ or blocks first.
 
 ### Hosts
 
-- Recording a wasi-http component under `wasmtime serve -S p3,http`, or viceroy, needs no change.
+- Recording a wasi-http component under `wasmtime serve -S p3,http,cli --no-logging-prefix`
+  needs no change: `cli` for the WASI 0.2 interfaces a component built for `wasm32-wasip2` also
+  imports, and no prefix so that the output is the trace. wasmtime reuses an instance for several
+  requests of a p3 component, so a trace has an export call for each of them, which replay
+  makes in turn; an instance's trace is one recording. Recording `tests/wasi_http_p3.wasm` this
+  way replays, for each of its routes but its echo (see [Labels](#labels)). Viceroy is for p2
+  components.
 - Recording under `proxy-component run` passes the main component's p3 imports through to the
   host, so `run` needs `wasmtime_wasi::p3` and wasmtime-wasi-http's p3 linker, and, for
   `wasi:http/handler`, a way to receive requests, as `--invoke` can't build one.
@@ -666,10 +681,10 @@ shim](#portability) could provide; see No guest task on import calls, in
 - **A fixpoint test**: record a run, replay it while recording, and require the two traces to be
   equal. The spike does this, for its scenarios.
 - **Fuzzed schedules, replayed**: `make test-fuzz-replay` fuzzes the p2, p3 and p3-record
-  fixtures, `wasi_http_p3`, and the spike's guest, and replays each trace, which has to end as the fuzzing
-  run did: to the end, or in the guest's trap, e.g. a panic on an error the fuzzed host returned,
-  which is what fuzzing finds. A trap in a generated component or the recorder, e.g. a
-  divergence, fails it (`tests/run-wasm.sh`).
+  fixtures, `wasi_http_p3`, and the spike's guest, and replays each trace, which has to end as
+  the fuzzing run did: to the end, or in the guest's trap, e.g. a panic on an error the fuzzed
+  host returned, which is what fuzzing finds. A trap in a generated component or the recorder,
+  e.g. a divergence, fails it (`tests/run-wasm.sh`).
 - **Enumerated scenarios**: for small guests, every placement of host completions across steps,
   rather than random delays, and guests that merge nondeterministically, which are the ones steps
   exist for.
@@ -733,8 +748,10 @@ depend on runtime patches. wasmtime 49 has the start of its own record and repla
 4. **Record**, with the executor and its pumps, under `wasmtime serve` and `run`. Async imports,
    streams and futures are done: `make test-record-p3` records `tests/fixtures/p3-record`
    under `wasmtime run`, with delays that make its calls RETURNED or STARTED, and stdin copied to
-   stderr through their streams, and replays each trace. Next are the hosts: `wasmtime serve`,
-   and `proxy-component run`.
+   stderr through their streams, and replays each trace; `make test-record-http-p3` records
+   `tests/wasi_http_p3.wasm` under `wasmtime serve`, for several requests, and replays it. Next
+   are `proxy-component run` as a host, and the ends the guest hands back (see
+   [Labels](#labels)).
 5. **Portability across runtimes**: the profile proposal, or the shim.
 
 ## Open questions
