@@ -1380,6 +1380,36 @@ fn trace_return_value(answers: Vec<Line>) -> Option<String> {
         })
         .expect("the trace doesn't answer the call")
 }
+/// The guard over an async import call while its wrapper waits (see `cancel_defs` in the
+/// generator); `done` once it returns.
+#[allow(dead_code)]
+struct TraceCancel(Option<TaskId>);
+impl TraceCancel {
+    #[allow(dead_code)]
+    fn done(mut self) {
+        self.0 = None;
+    }
+}
+impl Drop for TraceCancel {
+    fn drop(&mut self) {
+        if let Some(id) = self.0 {
+            proxy::recorder::record::record(
+                &Line {
+                    by: Party::Guest,
+                    at: None,
+                    event: Event::Cancel(id),
+                },
+            );
+            proxy::recorder::record::record(
+                &Line {
+                    by: Party::Host,
+                    at: None,
+                    event: Event::Cancelled(id),
+                },
+            );
+        }
+    }
+}
 /// A line of the guest, which record and fuzz modes record, and replay checks.
 #[allow(dead_code)]
 fn trace_guest(line: &Line) {

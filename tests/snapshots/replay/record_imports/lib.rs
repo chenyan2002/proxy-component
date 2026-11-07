@@ -710,6 +710,29 @@ fn trace_return_value(answers: Vec<Line>) -> Option<String> {
         })
         .expect("the trace doesn't answer the call")
 }
+/// The guard over an async import call while its wrapper waits (see `cancel_defs` in the
+/// generator); `done` once it returns.
+#[allow(dead_code)]
+struct TraceCancel(Option<TaskId>);
+impl TraceCancel {
+    #[allow(dead_code)]
+    fn done(mut self) {
+        self.0 = None;
+    }
+}
+impl Drop for TraceCancel {
+    fn drop(&mut self) {
+        if let Some(id) = self.0 {
+            proxy::recorder::replay::check(
+                &Line {
+                    by: Party::Guest,
+                    at: None,
+                    event: Event::Cancel(id),
+                },
+            );
+        }
+    }
+}
 #[allow(dead_code)]
 const TRACE_TABLE: Table = Table::Imports;
 #[allow(dead_code)]
@@ -738,8 +761,10 @@ async fn trace_answer(id: TaskId, answers: Vec<Line>) -> Option<String> {
     }
     let line = proxy::recorder::replay::take_host_line(&LineKey::Task(id))
         .expect("the trace doesn't return the call");
-    let Event::Return(ret) = line.event else {
-        panic!("the trace answers the call with {:?}", line.event);
+    let ret = match line.event {
+        Event::Return(ret) => ret,
+        Event::Cancelled(_) => return std::future::pending().await,
+        event => panic!("the trace answers the call with {event:?}"),
     };
     let at = line.at.expect("a STARTED call returns in a step");
     let now = current_step();

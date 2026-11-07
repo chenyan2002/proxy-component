@@ -78,7 +78,8 @@ test-fixture:
 
 # Records the main component of tests/fixtures/p3-record/guest, whose async imports, streams
 # and futures wasmtime implements itself, and replays each trace: `run` with each pair of delays,
-# RETURNED for 0, or random ones, and `cat` with stdin in one chunk, in several, or none.
+# RETURNED for 0, or random ones, `race`, which cancels the call that loses, and `cat` with stdin
+# in one chunk, in several, or none.
 P3_RECORD = tests/fixtures/p3-record/guest
 P3_RECORD_OUT = target/fixture-p3-record
 P3_RECORD_WASM = $(P3_RECORD_OUT)/wasm32-wasip2/release/proxy_p3_record_guest.wasm
@@ -88,9 +89,10 @@ test-record-p3:
 	cp composed.wasm $(P3_RECORD_OUT)/record.wasm
 	$(INSTRUMENT) -m replay $(P3_RECORD_WASM)
 	cp composed.wasm $(P3_RECORD_OUT)/replay.wasm
-	for delays in "5 15" "15 5" "0 10" "10 0" "0 0" "5 5" random random random random random; do \
-		set -- $$delays; env=""; [ "$$1" = random ] || env="--env DELAY_A=$$1 --env DELAY_B=$$2"; \
-		$(WASMTIME) $$env --invoke 'run()' $(P3_RECORD_OUT)/record.wasm > $(P3_RECORD_OUT)/trace.out 2>&1 || { \
+	for call in "run 5 15" "run 15 5" "run 0 10" "run 10 0" "run 0 0" "run 5 5" "run random" "run random" "run random" "run random" "run random" \
+			"race 5 30" "race 30 5" "race 10 0" "race 0 0" "race random" "race random" "race random"; do \
+		set -- $$call; env=""; [ "$$2" = random ] || env="--env DELAY_A=$$2 --env DELAY_B=$$3"; \
+		$(WASMTIME) $$env --invoke "$$1()" $(P3_RECORD_OUT)/record.wasm > $(P3_RECORD_OUT)/trace.out 2>&1 || { \
 			cat $(P3_RECORD_OUT)/trace.out; echo "recording failed, with the output above"; exit 1; }; \
 		$(WASMTIME) --invoke 'start()' $(P3_RECORD_OUT)/replay.wasm < $(P3_RECORD_OUT)/trace.out > $(P3_RECORD_OUT)/replay.out 2>&1 || { \
 			cat $(P3_RECORD_OUT)/replay.out; echo "replay failed, with the output above, of the trace in $(P3_RECORD_OUT)/trace.out"; exit 1; }; \

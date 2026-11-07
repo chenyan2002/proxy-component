@@ -1,13 +1,15 @@
 //! A WASI p3 main component for record mode, whose async imports, streams and futures wasmtime
 //! implements itself: `run` waits for `a` and `b` concurrently, with `wait-for`, and joins them in
 //! the order its wakeups receive them, as the spike's guest does (see
-//! tests/fixtures/spike-p3-race); `cat` copies stdin to stderr, through their streams.
+//! tests/fixtures/spike-p3-race); `cat` copies stdin to stderr, through their streams; `race`
+//! waits for `a` and `b`, and cancels the one that hasn't returned by the time the other has.
 wit_bindgen::generate!({
     inline: r#"
         package test:rec@0.1.0;
         interface api {
             run: async func() -> string;
             cat: async func() -> string;
+            race: async func() -> string;
         }
         world root {
             export api;
@@ -61,6 +63,20 @@ impl exports::test::rec::api::Guest for Guest {
         })
         .await;
         format!("{out} (wakeups: {})", wakeups.join(" "))
+    }
+    async fn race() -> String {
+        let mut a = Box::pin(wait("a"));
+        let mut b = Box::pin(wait("b"));
+        let first = std::future::poll_fn(|cx| {
+            if let Poll::Ready(value) = a.as_mut().poll(cx) {
+                return Poll::Ready(value);
+            }
+            b.as_mut().poll(cx)
+        })
+        .await;
+        // Drops the other, which cancels it if it's still pending.
+        drop((a, b));
+        format!("{first} first")
     }
     async fn cat() -> String {
         let (mut stdin, stdin_done) = wasip3::cli::stdin::read_via_stream();

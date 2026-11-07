@@ -98,6 +98,7 @@ pub fn generate(
     state.output.extend(traits);
     if matches!(mode, Mode::Record | Mode::Replay | Mode::Fuzz) {
         state.output.extend(trace_defs());
+        state.output.extend(cancel_defs(mode));
     }
     let has_executor = state.has_executor();
     if matches!(mode, Mode::Replay | Mode::Fuzz) {
@@ -612,8 +613,12 @@ fn job_defs(mode: &Mode, has_executor: Option<HasExecutor>) -> Vec<Item> {
                 }
                 let line = proxy::recorder::replay::take_host_line(&LineKey::Task(id))
                     .expect("the trace doesn't return the call");
-                let Event::Return(ret) = line.event else {
-                    panic!("the trace answers the call with {:?}", line.event);
+                let ret = match line.event {
+                    Event::Return(ret) => ret,
+                    // The guest cancels the call, which the mock waits for, as the recording's
+                    // didn't return (see `TraceCancel`).
+                    Event::Cancelled(_) => return std::future::pending().await,
+                    event => panic!("the trace answers the call with {event:?}"),
                 };
                 // A STARTED call blocks, so it returns in a later step than the one it was
                 // called in; if replay is there already, it is ahead of the recording.
@@ -746,6 +751,45 @@ fn panic_hook(mode: &Mode) -> TokenStream {
         static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
         PANIC_HOOK.call_once(|| std::panic::set_hook(Box::new(|info| #fail(&info.to_string()))));
     }
+}
+
+/// `TraceCancel`, which an async import's wrapper holds while it waits for its answer, in
+/// record, replay and fuzz modes. The guest cancels the call by dropping it while it waits, which
+/// drops the wrapper's future, and wit-bindgen answers with `task.cancel`, at once. So the
+/// guard's drop, before it returns, is the guest's `cancel`, and the host's `cancelled` that
+/// answers it, which record and fuzz modes record, and replay checks. In record mode, the host's
+/// call is dropped with the wrapper, which cancels it too.
+fn cancel_defs(mode: &Mode) -> Vec<Item> {
+    let on_cancel = match mode {
+        Mode::Record | Mode::Fuzz => quote! {
+            proxy::recorder::record::record(&Line { by: Party::Guest, at: None, event: Event::Cancel(id) });
+            proxy::recorder::record::record(&Line { by: Party::Host, at: None, event: Event::Cancelled(id) });
+        },
+        Mode::Replay => quote! {
+            proxy::recorder::replay::check(&Line { by: Party::Guest, at: None, event: Event::Cancel(id) });
+        },
+        Mode::Dialog => return Vec::new(),
+    };
+    let file: File = parse_quote! {
+        /// The guard over an async import call while its wrapper waits (see `cancel_defs` in the
+        /// generator); `done` once it returns.
+        #[allow(dead_code)]
+        struct TraceCancel(Option<TaskId>);
+        impl TraceCancel {
+            #[allow(dead_code)]
+            fn done(mut self) {
+                self.0 = None;
+            }
+        }
+        impl Drop for TraceCancel {
+            fn drop(&mut self) {
+                if let Some(id) = self.0 {
+                    #on_cancel
+                }
+            }
+        }
+    };
+    file.items
 }
 
 /// Helpers of record, replay and fuzz modes, which make the lines of `proxy:recorder/types`. Each

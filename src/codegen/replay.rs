@@ -24,7 +24,12 @@ impl State {
         // The value of the `return` that answers the call: for an async call, at once or in its
         // step, as the trace has it RETURNED or STARTED.
         let answer = if is_async {
-            quote! { trace_answer(__id, __answers).await }
+            quote! {{
+                let __cancel = TraceCancel(Some(__id));
+                let answer = trace_answer(__id, __answers).await;
+                __cancel.done();
+                answer
+            }}
         } else {
             quote! { trace_return_value(__answers) }
         };

@@ -80,7 +80,10 @@ impl exports::test::p3::host::Guest for Stub {
                     event: Event::Started(__id),
                 },
             );
-            Some(wait_for_runs(__runs as u32).await)
+            let __cancel = TraceCancel(Some(__id));
+            let at = wait_for_runs(__runs as u32).await;
+            __cancel.done();
+            Some(at)
         } else {
             None
         };
@@ -123,7 +126,10 @@ impl exports::test::p3::host::Guest for Stub {
                     event: Event::Started(__id),
                 },
             );
-            Some(wait_for_runs(__runs as u32).await)
+            let __cancel = TraceCancel(Some(__id));
+            let at = wait_for_runs(__runs as u32).await;
+            __cancel.done();
+            Some(at)
         } else {
             None
         };
@@ -261,7 +267,10 @@ impl exports::test::p3::host::GuestBody for MockedResource {
                     event: Event::Started(__id),
                 },
             );
-            Some(wait_for_runs(__runs as u32).await)
+            let __cancel = TraceCancel(Some(__id));
+            let at = wait_for_runs(__runs as u32).await;
+            __cancel.done();
+            Some(at)
         } else {
             None
         };
@@ -859,6 +868,36 @@ fn trace_return_value(answers: Vec<Line>) -> Option<String> {
             _ => None,
         })
         .expect("the trace doesn't answer the call")
+}
+/// The guard over an async import call while its wrapper waits (see `cancel_defs` in the
+/// generator); `done` once it returns.
+#[allow(dead_code)]
+struct TraceCancel(Option<TaskId>);
+impl TraceCancel {
+    #[allow(dead_code)]
+    fn done(mut self) {
+        self.0 = None;
+    }
+}
+impl Drop for TraceCancel {
+    fn drop(&mut self) {
+        if let Some(id) = self.0 {
+            proxy::recorder::record::record(
+                &Line {
+                    by: Party::Guest,
+                    at: None,
+                    event: Event::Cancel(id),
+                },
+            );
+            proxy::recorder::record::record(
+                &Line {
+                    by: Party::Host,
+                    at: None,
+                    event: Event::Cancelled(id),
+                },
+            );
+        }
+    }
 }
 #[allow(dead_code)]
 const TRACE_TABLE: Table = Table::Imports;

@@ -138,6 +138,14 @@ What the types don't enforce:
   `Cancelled`, or return anyway, which is a `Return`, also when its result was already on its
   way. A call that hasn't started yet is cancelled without the callee seeing it. It goes both
   ways: the guest can cancel a pending import, and the host a pending export call.
+  - **The guest's cancel of an import** reaches the proxy as its export's cancellation, which
+    drops the call's wrapper, and wit-bindgen acknowledges it at once. So the host answers
+    `Cancelled`, without an `at`, as it answers a call; in record mode, the host's call is
+    cancelled with it, and a result it returned meanwhile is dropped, which the guest wouldn't
+    have read either, as it dropped the call. Only a STARTED call can be cancelled. Replay's mock
+    of a call the trace answers with `Cancelled` waits until the guest cancels it.
+  - **The host's cancel of an export** isn't recorded yet: the proxy would have to tell whether
+    the guest then returned or acknowledged it, which wit-bindgen doesn't say.
 - **Cancel and Drop** are about different things: `Cancel` about a pending call, `Drop` about a
   handle.
   - **`Cancel`.** In wit-bindgen, an async import call is a Rust `Future`; dropping it while the

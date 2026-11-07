@@ -72,7 +72,12 @@ impl State {
             // it completed (see `host_result`).
             (true, true) => (
                 quote! { None },
-                quote! { host_result(__id, async move { #call.await }).await },
+                quote! {{
+                    let __cancel = TraceCancel(Some(__id));
+                    let res = host_result(__id, async move { #call.await }).await;
+                    __cancel.done();
+                    res
+                }},
             ),
             // An export call's arrival is a step, as in fuzz and replay modes.
             (false, false) => (

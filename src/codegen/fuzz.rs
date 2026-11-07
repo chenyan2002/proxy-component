@@ -33,7 +33,10 @@ impl State {
                 let __runs = __host.int_in_range(0..=3u8).unwrap_or(0);
                 let __at = if __runs > 0 {
                     proxy::recorder::record::record(&Line { by: Party::Host, at: None, event: Event::Started(__id) });
-                    Some(wait_for_runs(__runs as u32).await)
+                    let __cancel = TraceCancel(Some(__id));
+                    let at = wait_for_runs(__runs as u32).await;
+                    __cancel.done();
+                    Some(at)
                 } else {
                     None
                 };
