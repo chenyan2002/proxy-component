@@ -1,0 +1,4 @@
+/target
+/record.wasm
+/replay.wasm
+/record-component-host.wasm

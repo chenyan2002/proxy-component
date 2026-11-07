@@ -16,8 +16,15 @@ impl State {
         let display_name = &wit_func.display_name;
         let args = extract_arg_info(sig);
         let ret_ty = get_return_type(&sig.output);
+        // The streams and futures the guest gives the host, whose reading the user decides.
+        let consumed = wit_func.consumed_args(&args);
+        let params = params_to_wave(kind.as_ref(), &args);
+        let preamble = quote! {
+            #params
+            proxy::util::dialog::print(0, &format!("import: {}({})", #display_name, __params.join(", ")));
+            #(Dialog::consume(#consumed, 0);)*
+        };
         if ret_ty.is_some() {
-            let params = params_to_wave(kind.as_ref(), &args);
             let ret_name = wit_func.result.as_ref().unwrap();
             let read_ret = match wit_func.constructor_resource() {
                 Some(name) => {
@@ -25,14 +32,23 @@ impl State {
                 }
                 None => quote! { Dialog::read_value(0) },
             };
+            let print_ret = quote! {
+                proxy::util::dialog::print(0, &format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&ret)).unwrap()));
+            };
             parse_quote! {
                 #sig {
-                    #params
-                    proxy::util::dialog::print(0, &format!("import: {}({})", #display_name, __params.join(", ")));
+                    #preamble
                     proxy::util::dialog::print(0, &format!("return type: {}", #ret_name));
                     let ret = #read_ret;
-                    proxy::util::dialog::print(0, &format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&ret)).unwrap()));
+                    #print_ret
                     ret
+                }
+            }
+        } else if !consumed.is_empty() || wit_func.is_async {
+            // Async imports return at once.
+            parse_quote! {
+                #sig {
+                    #preamble
                 }
             }
         } else {
@@ -49,15 +65,35 @@ impl State {
         let arms: Vec<_> = funcs
             .iter()
             .map(|func| {
+                let call = func.call();
                 let ExportFunc {
                     display_name,
-                    func,
                     arg_names,
                     arg_wit_tys,
                     arg_tys,
-                    call_params,
+                    has_ret,
+                    ret_async,
                     ..
                 } = func;
+                // The result, as the mocks print theirs; then the streams and futures in it, whose
+                // reading the user decides.
+                let print_ret = if *has_ret {
+                    quote! {
+                        proxy::util::dialog::print(0, &format!("ret: {}", wasm_wave::to_string(&ToValue::to_value(&res)).unwrap()));
+                    }
+                } else {
+                    quote! {}
+                };
+                let consume = if *ret_async {
+                    quote! { Dialog::consume(res, 0); }
+                } else {
+                    quote! { let _ = res; }
+                };
+                let ret = quote! {
+                    let res = #call;
+                    #print_ret
+                    #consume
+                };
                 quote! {
                     {
                         proxy::util::dialog::print(0, &format!("call export func {}", #display_name));
@@ -68,28 +104,38 @@ impl State {
                             __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
                         )*
                         proxy::util::dialog::print(0, &format!("export: {}({})", #display_name, __params.join(", ")));
-                        let _ = #func(#(#call_params),*);
+                        #ret
+                        // The user is done with the streams and futures of this call, e.g. the
+                        // stream it returned, before choosing the next one: the jobs of this
+                        // component, then the imports component's, whose executor runs until then,
+                        // as this component's jobs may need the guest, and the guest the imports
+                        // component's jobs.
+                        join_spawned().await;
+                        proxy::conversion::executor::stop();
+                        __executor.await;
+                        __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
                     }
                 }
             })
             .collect();
         let func_len = arms.len();
         let idxs = 1..=func_len;
-        parse_quote! {
-          #sig {
-            loop {
-              let idx = proxy::util::dialog::read_select(0, "Select an export function to call", &#display_names) as usize;
-              match idx {
-                      0 => break,
-                      #(#idxs => #arms)*
-                      _ => unreachable!(),
+        self.generate_start(
+            sig,
+            quote! {
+              loop {
+                let idx = proxy::util::dialog::read_select(0, "Select an export function to call", &#display_names) as usize;
+                match idx {
+                        0 => break,
+                        #(#idxs => #arms)*
+                        _ => unreachable!(),
+                }
+                // clean up borrowed resources from input args
+                SCOPED_ALLOC.with(|alloc| {
+                        alloc.borrow_mut().clear();
+                });
               }
-              // clean up borrowed resources from input args
-              SCOPED_ALLOC.with(|alloc| {
-                      alloc.borrow_mut().clear();
-              });
-            }
-          }
-        }
+            },
+        )
     }
 }

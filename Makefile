@@ -1,4 +1,4 @@
-.PHONY: all build-components build-cli test test-cargo test-record test-fixture test-fuzz test-dialog run-fuzz run-record run-dialog run-viceroy
+.PHONY: all build-components build-cli test test-cargo test-record test-fixture test-record-p3 test-record-http-p3 test-fuzz-replay test-fuzz test-dialog run-fuzz run-fuzz-replay run-record run-dialog run-viceroy
 
 # `make test ONE_BYTE_PAGE=1` tests with 1-byte-page memories
 ifeq ($(ONE_BYTE_PAGE),1)
@@ -7,6 +7,9 @@ WASMTIME_FLAGS = -W custom-page-sizes=y
 endif
 INSTRUMENT = target/release/proxy-component instrument $(INSTRUMENT_FLAGS)
 WASMTIME = wasmtime $(WASMTIME_FLAGS)
+# Runs wasmtime, and exits with 2 if the main component trapped, rather than the proxy failed
+# (see tests/run-wasm.sh)
+RUN_WASM = tests/run-wasm.sh
 
 all: build-components build-cli
 build-cli:
@@ -20,15 +23,22 @@ build-components:
 	cp target/one-byte-page/wasm32-wasip2/release/debug.wasm assets/debug.one_byte_page.wasm
 	cp target/one-byte-page/wasm32-wasip2/release/recorder.wasm assets/recorder.one_byte_page.wasm
 
-test: test-cargo test-fuzz test-record test-fixture test-dialog
+test: test-cargo test-fuzz test-record test-fixture test-record-p3 test-record-http-p3 test-fuzz-replay test-dialog
 
 # Snapshot tests of the generated sources
 test-cargo:
 	cargo test
 
+# The WASI p3 main component of tests/fixtures/p3, which uses error-context
+P3_GUEST = tests/fixtures/p3/guest
+P3_GUEST_OUT = target/fixture-p3
+P3_GUEST_WASM = $(P3_GUEST_OUT)/wasm32-wasip2/release/proxy_p3_guest.wasm
 test-fuzz:
 	$(MAKE) run-fuzz WASM=tests/calculator.wasm
 	$(MAKE) run-fuzz WASM=tests/wasi_http.wasm
+	$(MAKE) run-fuzz WASM=tests/wasi_http_p3.wasm
+	cargo build --manifest-path $(P3_GUEST)/Cargo.toml --target wasm32-wasip2 --release --target-dir $(P3_GUEST_OUT)
+	$(MAKE) run-fuzz WASM=$(P3_GUEST_WASM) WASMTIME_FLAGS="$(WASMTIME_FLAGS) -W component-model-error-context=y"
 	# build-only test
 	$(INSTRUMENT) -m fuzz tests/rust.wasm
 	$(INSTRUMENT) -m fuzz tests/go.wasm
@@ -47,9 +57,9 @@ test-record:
 	$(INSTRUMENT) -m record tests/wasi_http.wasm
 	$(INSTRUMENT) -m replay tests/wasi_http.wasm
 
-# Records and replays the main component of tests/fixtures/proxy-run/guest, whose resources are
+# Records and replays the main component of tests/fixtures/p2/guest, whose resources are
 # dropped by the guest and by the host, in a composition with a host and a driver (see compose.wac)
-FIXTURE = tests/fixtures/proxy-run
+FIXTURE = tests/fixtures/p2
 FIXTURE_OUT = target/fixture
 FIXTURE_WASM = $(FIXTURE_OUT)/wasm32-wasip2/release
 test-fixture:
@@ -60,21 +70,106 @@ test-fixture:
 	wac compose $(FIXTURE)/compose.wac -d test:mockhost=$(FIXTURE_WASM)/proxy_host.wasm -d test:driver=$(FIXTURE_WASM)/proxy_driver.wasm -d test:main=composed.wasm -o $(FIXTURE_OUT)/record.wasm
 	$(WASMTIME) --invoke 'run()' $(FIXTURE_OUT)/record.wasm > $(FIXTURE_OUT)/trace.out
 	# the host's drops of the guest's sessions
-	grep -c '"ExportArgs":{"method":"drop"' $(FIXTURE_OUT)/trace.out | grep -qx 2
+	grep -c '"by":"Host","at":null,"event":{"Drop"' $(FIXTURE_OUT)/trace.out | grep -qx 2
 	$(INSTRUMENT) -m replay $(FIXTURE_WASM)/proxy_guest.wasm
 	$(WASMTIME) --invoke 'start()' composed.wasm < $(FIXTURE_OUT)/trace.out
 	$(INSTRUMENT) -m replay --use-host-recorder $(FIXTURE_WASM)/proxy_guest.wasm
 	target/release/proxy-component run composed.wasm --invoke 'start()' --trace $(FIXTURE_OUT)/trace.out
 
+# Records the main component of tests/fixtures/p3-record/guest, whose async imports, streams
+# and futures wasmtime implements itself, and replays each trace: `run` with each pair of delays,
+# RETURNED for 0, or random ones, `race`, which cancels the call that loses, and `cat` with stdin
+# in one chunk, in several, or none.
+P3_RECORD = tests/fixtures/p3-record/guest
+P3_RECORD_OUT = target/fixture-p3-record
+P3_RECORD_WASM = $(P3_RECORD_OUT)/wasm32-wasip2/release/proxy_p3_record_guest.wasm
+test-record-p3:
+	cargo build --manifest-path $(P3_RECORD)/Cargo.toml --target wasm32-wasip2 --release --target-dir $(P3_RECORD_OUT)
+	$(INSTRUMENT) -m record $(P3_RECORD_WASM)
+	cp composed.wasm $(P3_RECORD_OUT)/record.wasm
+	$(INSTRUMENT) -m replay $(P3_RECORD_WASM)
+	cp composed.wasm $(P3_RECORD_OUT)/replay.wasm
+	for call in "run 5 15" "run 15 5" "run 0 10" "run 10 0" "run 0 0" "run 5 5" "run random" "run random" "run random" "run random" "run random" \
+			"race 5 30" "race 30 5" "race 10 0" "race 0 0" "race random" "race random" "race random"; do \
+		set -- $$call; env=""; [ "$$2" = random ] || env="--env DELAY_A=$$2 --env DELAY_B=$$3"; \
+		$(WASMTIME) $$env --invoke "$$1()" $(P3_RECORD_OUT)/record.wasm > $(P3_RECORD_OUT)/trace.out 2>&1 || { \
+			cat $(P3_RECORD_OUT)/trace.out; echo "recording failed, with the output above"; exit 1; }; \
+		$(WASMTIME) --invoke 'start()' $(P3_RECORD_OUT)/replay.wasm < $(P3_RECORD_OUT)/trace.out > $(P3_RECORD_OUT)/replay.out 2>&1 || { \
+			cat $(P3_RECORD_OUT)/replay.out; echo "replay failed, with the output above, of the trace in $(P3_RECORD_OUT)/trace.out"; exit 1; }; \
+	done
+	for input in "printf ''" "printf first; sleep 0.05; printf second" "for i in 1 2 3 4 5; do echo line \$$i; sleep 0.01; done" "head -c 10000 /dev/zero"; do \
+		sh -c "$$input" | $(WASMTIME) --invoke 'cat()' $(P3_RECORD_OUT)/record.wasm > $(P3_RECORD_OUT)/trace.out 2> $(P3_RECORD_OUT)/stderr.out || { \
+			cat $(P3_RECORD_OUT)/trace.out $(P3_RECORD_OUT)/stderr.out; echo "recording failed, with the output above"; exit 1; }; \
+		$(WASMTIME) --invoke 'start()' $(P3_RECORD_OUT)/replay.wasm < $(P3_RECORD_OUT)/trace.out > $(P3_RECORD_OUT)/replay.out 2>&1 || { \
+			cat $(P3_RECORD_OUT)/replay.out; echo "replay failed, with the output above, of the trace in $(P3_RECORD_OUT)/trace.out"; exit 1; }; \
+	done
+
+# Records tests/wasi_http_p3.wasm under `wasmtime serve`, which reuses an instance for the requests,
+# so its trace has an export call for each, and replays it. Not its echo (see
+# docs/p3-record-replay.md, Labels), nor a fetch, which needs the network.
+HTTP_OUT = target/fixture-http-p3
+HTTP_ADDR = 127.0.0.1:8789
+test-record-http-p3:
+	mkdir -p $(HTTP_OUT)
+	$(INSTRUMENT) -m record tests/wasi_http_p3.wasm
+	cp composed.wasm $(HTTP_OUT)/record.wasm
+	$(INSTRUMENT) -m replay tests/wasi_http_p3.wasm
+	cp composed.wasm $(HTTP_OUT)/replay.wasm
+	wasmtime serve $(WASMTIME_FLAGS) -S p3,http,cli --no-logging-prefix --addr $(HTTP_ADDR) $(HTTP_OUT)/record.wasm > $(HTTP_OUT)/trace.out 2> $(HTTP_OUT)/serve.err & echo $$! > $(HTTP_OUT)/serve.pid; \
+	sleep 2; \
+	for path in / "/wait?ms=20" /random "/wait?ms=5" /; do \
+		curl -sf -m 10 "http://$(HTTP_ADDR)$$path" > /dev/null || { kill `cat $(HTTP_OUT)/serve.pid`; cat $(HTTP_OUT)/serve.err; echo "GET $$path failed"; exit 1; }; \
+	done; \
+	kill `cat $(HTTP_OUT)/serve.pid`
+	$(WASMTIME) --invoke 'start()' $(HTTP_OUT)/replay.wasm < $(HTTP_OUT)/trace.out > $(HTTP_OUT)/replay.out 2>&1 || { \
+		cat $(HTTP_OUT)/replay.out; echo "replay failed, with the output above, of the trace in $(HTTP_OUT)/trace.out"; exit 1; }
+
+# The spike's guest, which joins two concurrent results in the order its wakeups receive them
+RACE = tests/fixtures/spike-p3-race
+RACE_OUT = target/fixture-race
+RACE_WASM = $(RACE_OUT)/wasm32-wasip2/release/race_guest.wasm
+# Fuzzes the main components of tests/fixtures/p2/guest, the p3 and p3-record fixtures,
+# wasi_http_p3 and the spike's guest, and replays each trace it writes, which ends as the fuzzing run did: to the
+# end, or in the main component's trap, e.g. a guest's panic on a fuzzed error.
+test-fuzz-replay:
+	cargo build --manifest-path $(FIXTURE)/guest/Cargo.toml --target wasm32-wasip2 --release --target-dir $(FIXTURE_OUT)
+	$(MAKE) run-fuzz-replay WASM=$(FIXTURE_WASM)/proxy_guest.wasm OUT=$(FIXTURE_OUT)
+	cargo build --manifest-path $(P3_GUEST)/Cargo.toml --target wasm32-wasip2 --release --target-dir $(P3_GUEST_OUT)
+	$(MAKE) run-fuzz-replay WASM=$(P3_GUEST_WASM) OUT=$(P3_GUEST_OUT) WASMTIME_FLAGS="$(WASMTIME_FLAGS) -W component-model-error-context=y"
+	cargo build --manifest-path $(P3_RECORD)/Cargo.toml --target wasm32-wasip2 --release --target-dir $(P3_RECORD_OUT)
+	$(MAKE) run-fuzz-replay WASM=$(P3_RECORD_WASM) OUT=$(P3_RECORD_OUT)
+	$(MAKE) run-fuzz-replay WASM=tests/wasi_http_p3.wasm OUT=target/fixture-http-p3
+	cargo build --manifest-path $(RACE)/Cargo.toml -p race-guest --target wasm32-wasip2 --release --target-dir $(RACE_OUT)
+	$(MAKE) run-fuzz-replay WASM=$(RACE_WASM) OUT=$(RACE_OUT)
+run-fuzz-replay:
+	mkdir -p $(OUT)
+	$(INSTRUMENT) -m fuzz $(WASM)
+	cp composed.wasm $(OUT)/fuzz.wasm
+	$(INSTRUMENT) -m replay $(WASM)
+	cp composed.wasm $(OUT)/replay.wasm
+	for i in 1 2 3 4 5 6 7 8 9 10; do \
+		$(RUN_WASM) $(OUT)/fuzz-trace.out $(WASMTIME_FLAGS) --invoke 'start()' $(OUT)/fuzz.wasm > /dev/null; fuzz=$$?; \
+		if [ $$fuzz -eq 1 ]; then \
+			cat $(OUT)/fuzz-trace.out; echo "fuzzing failed, with the output above, in $(OUT)/fuzz-trace.out"; exit 1; \
+		fi; \
+		$(RUN_WASM) $(OUT)/replay.out $(WASMTIME_FLAGS) --invoke 'start()' $(OUT)/replay.wasm < $(OUT)/fuzz-trace.out > /dev/null; \
+		if [ $$? -ne $$fuzz ]; then \
+			cat $(OUT)/replay.out; echo "replay failed, with the output above, in $(OUT)/replay.out, of the trace in $(OUT)/fuzz-trace.out"; exit 1; \
+		fi; \
+	done
+
 test-dialog:
 	rm tests/composed.wasm || true
 	for wasm in tests/*.wasm; do \
-		$(MAKE) run-dialog WASM=$$wasm; \
+		$(MAKE) run-dialog WASM=$$wasm || exit 1; \
 	done
+	cargo build --manifest-path $(P3_GUEST)/Cargo.toml --target wasm32-wasip2 --release --target-dir $(P3_GUEST_OUT)
+	$(MAKE) run-dialog WASM=$(P3_GUEST_WASM)
 
+# A trap of the main component is what fuzzing finds, not a failure.
 run-fuzz:
 	$(INSTRUMENT) -m fuzz $(WASM)
-	$(WASMTIME) --invoke 'start()' composed.wasm
+	$(RUN_WASM) /tmp/composed.out $(WASMTIME_FLAGS) --invoke 'start()' composed.wasm; [ $$? -ne 1 ]
 
 run-record:
 	$(INSTRUMENT) -m record $(WASM)

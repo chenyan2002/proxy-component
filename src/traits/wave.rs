@@ -1,15 +1,17 @@
 use crate::codegen::util::{is_wrapped_module, make_path};
 use crate::codegen::wit::WitType;
-use crate::traits::{Trait, new_mock};
+use crate::traits::Trait;
 use quote::{format_ident, quote};
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
 pub struct WaveTrait {
     pub to_value: bool,
-    pub to_rust: bool,
     pub has_replay_table: bool,
     /// Label wrapped host resources by their host handles, see `proxy:conversion`
     pub wrapped_labels: bool,
+    /// Label mocked host resources by the ids the imports component gives them, see
+    /// `proxy:conversion`
+    pub mock_labels: bool,
 }
 
 impl Trait for WaveTrait {
@@ -40,10 +42,12 @@ impl Trait for WaveTrait {
             });
             if self.to_value {
                 // A wrapped host resource is labeled by its host handle, which the component
-                // wrapping it knows, so that both generated components label it alike.
+                // wrapping it knows, and a mock by its id, which the component mocking it knows,
+                // so that both generated components label it alike.
                 let handle = match &wit.conversion {
                     Some(conversion)
-                        if self.wrapped_labels && is_wrapped_module(&module_path[0]) =>
+                        if self.mock_labels
+                            || (self.wrapped_labels && is_wrapped_module(&module_path[0])) =>
                     {
                         let conversion = conversion.to_string();
                         let get_handle = format_ident!(
@@ -67,36 +71,6 @@ impl Trait for WaveTrait {
                     fn to_value(&self) -> Value {
                         let label = format!("borrow-{}-{}", #wit_name, #handle);
                         Value::make_handle(label.into())
-                    }
-                }
-                });
-            }
-            if self.to_rust {
-                let mock = new_mock(wit, quote! { handle });
-                res.push(parse_quote! {
-                impl ToRust<#resource_path> for Value {
-                    fn to_rust(&self) -> #resource_path {
-                        let label = self.unwrap_handle();
-                        let handle = label
-                            .strip_prefix(&format!("{}-", #wit_name))
-                            .and_then(|s| s.parse::<u32>().ok())
-                            .expect("invalid handle label");
-                        #mock
-                    }
-                }
-                });
-                res.push(parse_quote! {
-                impl<'a> ToRust<&'a #resource_path> for Value {
-                    fn to_rust(&self) -> &'a #resource_path {
-                        let label = self.unwrap_handle();
-                        let handle = label
-                            .strip_prefix(&format!("borrow-{}-", #wit_name))
-                            .and_then(|s| s.parse::<u32>().ok())
-                            .expect("invalid handle label");
-                        SCOPED_ALLOC.with(|alloc| {
-                            let mut alloc = alloc.borrow_mut();
-                            alloc.alloc(#mock)
-                        })
                     }
                 }
                 });
@@ -150,35 +124,6 @@ impl Trait for WaveTrait {
                     });
                 }
             }
-            if self.to_rust && self.has_replay_table {
-                res.push(parse_quote! {
-                impl ToRust<#resource_path> for Value {
-                    fn to_rust(&self) -> #resource_path {
-                        let label = self.unwrap_handle();
-                        let expect_handle = label
-                            .strip_prefix(&format!("{}-", #wit_name))
-                            .and_then(|s| s.parse::<u32>().ok())
-                            .expect("invalid handle label");
-                        let handle = #resource_path::new(MockedResource {
-                            handle: expect_handle,
-                            name: #wit_name.to_string(),
-                        });
-                        // handle.handle() is not expected to match expect_handle, because each component
-                        // has its own resource table, and the order of resource creation can be different.
-                        // However, for the user component, the handle id should match, but we don't have a
-                        // way to check that at the moment.
-                        handle
-                    }
-                }
-                });
-                res.push(parse_quote! {
-                impl<'a> ToRust<#borrow_path> for Value {
-                    fn to_rust(&self) -> #borrow_path {
-                        unreachable!()
-                    }
-                }
-                });
-            }
         }
         res
     }
@@ -225,18 +170,6 @@ impl Trait for WaveTrait {
                         #((#wit_names, self.#field_names.to_value())),*
                     ];
                     Value::make_record(&ty, fields).unwrap()
-                }
-            }
-            });
-        }
-        if self.to_rust {
-            res.push(parse_quote! {
-            impl #impl_generics ToRust<#struct_name #ty_generics> for Value #where_clause {
-                fn to_rust(&self) -> #struct_name #ty_generics {
-                    let fields: std::collections::BTreeMap<_, _> = self.unwrap_record().collect();
-                    #struct_name {
-                        #(#field_names: fields[#wit_names].to_rust()),*
-                    }
                 }
             }
             });
@@ -291,30 +224,6 @@ impl Trait for WaveTrait {
             }
             });
         }
-        if self.to_rust {
-            let arms = enum_item.variants.iter().zip(&wit.members).map(|(variant, wit_name)| {
-                let tag = &variant.ident;
-                match &variant.fields {
-                    syn::Fields::Unit => quote! {
-                        (ref case, None) if case == #wit_name => #enum_name::#tag
-                    },
-                    syn::Fields::Unnamed(_) => quote! {
-                        (ref case, Some(val)) if case == #wit_name => #enum_name::#tag(val.to_rust())
-                    },
-                    syn::Fields::Named(_) => unreachable!(),
-                }
-            });
-            res.push(parse_quote! {
-            impl #impl_generics ToRust<#enum_name #ty_generics> for Value #where_clause {
-                fn to_rust(&self) -> #enum_name #ty_generics {
-                    match self.unwrap_variant() {
-                        #(#arms),*,
-                        _ => unreachable!(),
-                    }
-                }
-            }
-            });
-        }
         res
     }
     fn flag_trait(
@@ -352,32 +261,13 @@ impl Trait for WaveTrait {
             }
             });
         }
-        if self.to_rust {
-            let set_flags = item.flags.iter().zip(&wit.members).map(|(f, wit_name)| {
-                quote! {
-                    if flags.iter().any(|flag| flag == #wit_name) {
-                        res |= #flag_path::#f;
-                    }
-                }
-            });
-            res.push(parse_quote! {
-            impl ToRust<#flag_path> for Value {
-                fn to_rust(&self) -> #flag_path {
-                    let flags: Vec<_> = self.unwrap_flags().map(|f| f.into_owned()).collect();
-                    let mut res = #flag_path::empty();
-                    #(#set_flags)*
-                    res
-                }
-            }
-            });
-        }
         res
     }
     fn trait_defs(&self) -> Vec<Item> {
         let mocked_resource = if self.has_replay_table {
             quote! {
                 use std::{alloc::Layout, cell::RefCell};
-                // Used to store borrowed resources when calling proxy::conversion during ToRust trait
+                // Used to store borrowed resources when calling proxy::conversion during `Replay`
                 #[allow(dead_code)]
                 struct ScopedAlloc {
                     ptrs: Vec<(*mut u8, Layout, fn(*mut u8))>,
@@ -439,22 +329,6 @@ impl Trait for WaveTrait {
                     fn to_value(&self) -> Value {
                         let label = format!("borrow-{}-{}", self.name, self.handle);
                         Value::make_handle(label.into())
-                    }
-                }
-                // Only called by constructor
-                impl ToRust<MockedResource> for Value {
-                    fn to_rust(&self) -> MockedResource {
-                        let label = self.unwrap_handle();
-                        let (name, handle) = label
-                            .rsplit_once('-')
-                            .and_then(|(name, handle_str)| {
-                                handle_str.parse::<u32>().ok().map(|h| (name.to_string(), h))
-                            })
-                            .expect("invalid handle label");
-                        MockedResource {
-                            handle,
-                            name,
-                        }
                     }
                 }
             }

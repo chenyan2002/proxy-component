@@ -43,6 +43,11 @@ impl<'a> Opt<'a> {
             need_debug: false,
         }
     }
+    /// Whether the main component's exports are driven by the generated `start`, rather than
+    /// by the host. Either way, the exports component runs `proxy:conversion/executor`.
+    fn has_start(&self) -> bool {
+        matches!(self.mode, Mode::Replay | Mode::Fuzz | Mode::Dialog)
+    }
     fn push_mode_imports(&self, out: &mut Source) {
         match self.mode {
             Mode::Record | Mode::Replay => {
@@ -51,7 +56,11 @@ impl<'a> Opt<'a> {
                     ident(self.mode.to_str())
                 ));
             }
-            Mode::Fuzz => out.push_str("import proxy:util/debug;\n"),
+            // `debug` for random numbers, and the trace, as in record mode.
+            Mode::Fuzz => {
+                out.push_str("import proxy:util/debug;\n");
+                out.push_str("import proxy:recorder/%record@0.1.0;\n");
+            }
             Mode::Dialog => out.push_str("import proxy:util/dialog;\n"),
         }
     }
@@ -67,6 +76,7 @@ impl<'a> Opt<'a> {
         out.push_str("world imports {\n");
         self.push_mode_imports(&mut out);
         out.push_str("export proxy:conversion/conversion;\n");
+        out.push_str("export proxy:conversion/executor;\n");
         for name in interface_names(resolve, &world.imports)? {
             // Don't virtualize util imports
             if name.starts_with("proxy:util/") {
@@ -100,7 +110,7 @@ impl<'a> Opt<'a> {
             }
             self.main_exports.insert(name);
         }
-        if matches!(self.mode, Mode::Replay | Mode::Fuzz | Mode::Dialog) {
+        if self.has_start() {
             out.push_str("export proxy:recorder/start-replay@0.1.0;\n")
         }
         out.push_str("}\n");
@@ -118,6 +128,7 @@ impl<'a> Opt<'a> {
         out.push_str("world exports {\n");
         self.push_mode_imports(&mut out);
         out.push_str("import proxy:conversion/conversion;\n");
+        out.push_str("import proxy:conversion/executor;\n");
         for name in interface_names(resolve, &world.imports)? {
             out.push_str(&format!("import {name};\n"));
         }
@@ -141,7 +152,7 @@ impl<'a> Opt<'a> {
         if self.need_debug {
             out.push_str("let debug = new import:debug { ... };\n");
         }
-        if !self.args.use_host_recorder {
+        if self.args.bundles_recorder() {
             out.push_str("let recorder = new import:recorder { ... };\n");
         }
         out.push_str("let imports = new import:proxy {\n");
@@ -186,7 +197,7 @@ impl<'a> Opt<'a> {
     fn push_external_link(&self, out: &mut Source, name: &str, link_type: &LinkType) -> bool {
         match link_type {
             LinkType::Debug => push_link(out, name, "debug", name),
-            LinkType::Recorder if !self.args.use_host_recorder => {
+            LinkType::Recorder if self.args.bundles_recorder() => {
                 push_link(out, name, "recorder", name)
             }
             LinkType::Recorder | LinkType::Host => return true,
@@ -213,6 +224,12 @@ impl<'a> Opt<'a> {
         files.push(
             "deps/util.wit",
             include_str!("../assets/util.wit").as_bytes(),
+        );
+        // The `executor` interface of `proxy:conversion`, which `generate_conversion_wit` writes
+        // the rest of, in the same package directory.
+        files.push(
+            "deps/conversion/executor.wit",
+            include_str!("../assets/executor.wit").as_bytes(),
         );
         Ok(())
     }
@@ -285,11 +302,16 @@ impl<'a> Opt<'a> {
                     out.push_str(&format!(
                         "get-mock-{func_name}: func(handle: u32) -> {func_name};\n"
                     ));
+                    // The label of a mock, which the imports component, which made it, keeps,
+                    // so that both generated components label it alike.
+                    out.push_str(&format!(
+                        "get-handle-mock-{func_name}: func(x: borrow<{func_name}>) -> u32;\n"
+                    ));
                 }
             }
         }
         out.push_str("}\n");
-        files.push("deps/conversion.wit", out.as_bytes());
+        files.push("deps/conversion/conversion.wit", out.as_bytes());
     }
     fn load_imports(&mut self, file: &Path) -> Result<()> {
         for name in import_names(file)? {
@@ -299,6 +321,8 @@ impl<'a> Opt<'a> {
                     LinkType::Debug
                 }
                 "proxy:util/dialog" => LinkType::Host,
+                // Only types, which no instance has to provide.
+                name if name.starts_with("proxy:recorder/types@") => LinkType::Host,
                 name if name.starts_with("proxy:recorder/") => LinkType::Recorder,
                 _ => LinkType::Host,
             };
@@ -313,8 +337,10 @@ impl<'a> Opt<'a> {
                     self.need_debug = true;
                     LinkType::Debug
                 }
-                "proxy:conversion/conversion" => LinkType::Imports,
+                "proxy:conversion/conversion" | "proxy:conversion/executor" => LinkType::Imports,
                 "proxy:util/dialog" => LinkType::Host,
+                // Only types, which no instance has to provide.
+                name if name.starts_with("proxy:recorder/types@") => LinkType::Host,
                 name if name.starts_with("proxy:recorder/") => LinkType::Recorder,
                 name if matches!(self.mode, Mode::Record) => match strip_wrapped(name) {
                     Some(stripped) if self.main_exports.contains(stripped) => LinkType::Main,

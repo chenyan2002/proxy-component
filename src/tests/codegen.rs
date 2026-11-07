@@ -1,17 +1,20 @@
 //! Snapshot tests of the sources generated from the WIT of a main component in
-//! `tests/fixtures/proxy`, which compare them with `tests/snapshots/<mode>`.
+//! `tests/fixtures/p2/wit` and `tests/fixtures/p3/wit`, which compare them with
+//! `tests/snapshots/<mode>`.
 //! `BLESS=1 cargo test` rewrites the snapshots. `make test` builds and runs generated sources.
 use crate::Mode;
 use crate::instrument::{InstrumentArgs, generate_sources};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const FIXTURE: &str = "tests/fixtures/proxy";
+const FIXTURE: &str = "tests/fixtures/p2/wit";
+/// A WASI p3 main component, with async functions, streams, futures and error-contexts.
+const P3_FIXTURE: &str = "tests/fixtures/p3/wit";
 const SNAPSHOTS: &str = "tests/snapshots";
 /// The generated files to compare, relative to the generation directory.
 const OUTPUTS: &[&str] = &[
     "wit/component.wit",
-    "wit/deps/conversion.wit",
+    "wit/deps/conversion/conversion.wit",
     "record_imports/lib.rs",
     "record_exports/lib.rs",
 ];
@@ -57,26 +60,27 @@ fn check(path: &Path, actual: &str) -> Result<(), String> {
 }
 
 /// Generates the sources for `mode` into a new directory.
-fn generate(mode: &Mode) -> tempfile::TempDir {
+fn generate(fixture: &str, mode: &Mode) -> anyhow::Result<tempfile::TempDir> {
     let dir = tempfile::tempdir().unwrap();
-    copy_dir(Path::new(FIXTURE), &dir.path().join("wit"));
+    copy_dir(Path::new(fixture), &dir.path().join("wit"));
     let args = InstrumentArgs {
         wasm_file: PathBuf::new(),
         mode: mode.clone(),
         use_host_recorder: false,
         one_byte_page_size: false,
     };
-    generate_sources(&args, dir.path()).unwrap();
-    dir
+    generate_sources(&args, dir.path())?;
+    Ok(dir)
 }
 
-fn snapshot(mode: Mode) {
-    let dir = generate(&mode);
+/// Checks the sources generated from `fixture` against `tests/snapshots/{name}`.
+fn snapshot(fixture: &str, name: &str, mode: Mode) {
+    let dir = generate(fixture, &mode).unwrap();
     let errors: Vec<_> = OUTPUTS
         .iter()
         .filter_map(|output| {
             let actual = fs::read_to_string(dir.path().join(output)).unwrap();
-            let snapshot = Path::new(SNAPSHOTS).join(mode.to_str()).join(output);
+            let snapshot = Path::new(SNAPSHOTS).join(name).join(output);
             check(&snapshot, &actual).err()
         })
         .collect();
@@ -89,17 +93,25 @@ fn snapshot(mode: Mode) {
 
 #[test]
 fn record() {
-    snapshot(Mode::Record);
+    snapshot(FIXTURE, "record", Mode::Record);
 }
 #[test]
 fn replay() {
-    snapshot(Mode::Replay);
+    snapshot(FIXTURE, "replay", Mode::Replay);
 }
 #[test]
 fn fuzz() {
-    snapshot(Mode::Fuzz);
+    snapshot(FIXTURE, "fuzz", Mode::Fuzz);
 }
 #[test]
 fn dialog() {
-    snapshot(Mode::Dialog);
+    snapshot(FIXTURE, "dialog", Mode::Dialog);
+}
+#[test]
+fn p3_fuzz() {
+    snapshot(P3_FIXTURE, "p3-fuzz", Mode::Fuzz);
+}
+#[test]
+fn p3_dialog() {
+    snapshot(P3_FIXTURE, "p3-dialog", Mode::Dialog);
 }

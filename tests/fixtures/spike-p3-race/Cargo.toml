@@ -1,0 +1,11 @@
+[workspace]
+members = ["guest", "host", "proxy-record", "proxy-replay", "driver"]
+resolver = "2"
+
+[workspace.dependencies]
+wit-bindgen = { version = "0.63.0", features = ["async-spawn", "inter-task-wakeup"] }
+futures-channel = "0.3"
+
+[profile.release]
+codegen-units = 1
+opt-level = "s"

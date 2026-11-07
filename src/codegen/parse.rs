@@ -8,6 +8,11 @@ use wit_parser::{TypeDefKind, TypeId};
 
 impl State {
     pub fn find_all_items(&mut self, items: &[Item], current_path: Vec<String>) {
+        // The recorder's imports, e.g. the lines of `proxy:recorder/types`, are the proxy's own,
+        // which the generated code calls, rather than interfaces of the main component.
+        if current_path.starts_with(&["proxy".to_string(), "recorder".to_string()]) {
+            return;
+        }
         for item in items {
             match item {
                 // export functions
@@ -110,8 +115,21 @@ impl State {
                     if let Some((_, ref mod_items)) = module.content {
                         let mut new_path = current_path.clone();
                         let mod_name = module.ident.to_string();
-                        if current_path.is_empty() && mod_name == "_rt" {
-                            continue;
+                        // wit-bindgen's runtime, and its `wit_stream`/`wit_future` modules, whose
+                        // payload traits aren't WIT items.
+                        if current_path.is_empty() {
+                            match mod_name.as_str() {
+                                "_rt" => continue,
+                                "wit_stream" => {
+                                    self.has_streams = true;
+                                    continue;
+                                }
+                                "wit_future" => {
+                                    self.has_futures = true;
+                                    continue;
+                                }
+                                _ => (),
+                            }
                         }
                         new_path.push(mod_name);
                         self.module_paths.insert(new_path.clone());

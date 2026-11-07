@@ -1,0 +1,29 @@
+package test:p3@0.1.0;
+
+interface host {
+  variant error-code {
+    timeout,
+    other(option<string>),
+  }
+  resource body {
+    // A stream the guest writes, and the host reads.
+    constructor(contents: option<stream<u8>>);
+    // An async method.
+    size: async func() -> u64;
+    // A stream and a future the host writes, with a resource and a variant in the future.
+    consume: static func(this: body) -> tuple<stream<u8>, future<result<option<body>, error-code>>>;
+  }
+  fetch: async func(url: string) -> result<body, error-code>;
+  sleep: async func(ms: u64);
+  report: func(err: error-context);
+  // A future the guest writes, and a function without a result.
+  finish: func(done: future<result<_, error-code>>);
+}
+
+interface api {
+  use host.{body, error-code};
+  handle: async func(url: string) -> result<body, error-code>;
+  // A stream the guest returns, and one the host passes to a sync export.
+  serve: async func(port: u16) -> stream<u8>;
+  echo: func(s: stream<u8>) -> stream<u8>;
+}

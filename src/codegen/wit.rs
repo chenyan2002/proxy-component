@@ -3,10 +3,10 @@
 //! wit-bindgen names each Rust item after a WIT item, so an item of the bindings is found by
 //! applying wit-bindgen's naming to the WIT items, never by recovering WIT names from Rust ones.
 use super::State;
-use super::util::ResourceFuncKind;
-use crate::wit_util::strip_wrapped;
+use super::util::{ArgInfo, ResourceFuncKind};
+use crate::wit_util::{has_async_value, strip_wrapped};
 use heck::ToUpperCamelCase;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use syn::Ident;
 use wit_bindgen_core::{dealias, name_package_module};
 use wit_bindgen_rust::to_rust_ident;
@@ -30,10 +30,23 @@ pub struct WitFunc {
     pub params_own: Vec<bool>,
     /// The WIT type of the result
     pub result: Option<String>,
-    /// Whether the result owns a resource
-    pub result_owns: bool,
+    /// Whether the function is `async`
+    pub is_async: bool,
+    /// Whether each parameter, without a method's `self`, has a stream or future
+    pub params_async: Vec<bool>,
+    /// Whether the result has a stream or future
+    pub result_async: bool,
 }
 impl WitFunc {
+    /// The arguments with the streams and futures the guest gives the host, which the
+    /// virtualized host reads or drops, of `args`, the arguments of the Rust function.
+    pub fn consumed_args<'a>(&self, args: &'a [ArgInfo]) -> Vec<&'a Ident> {
+        args.iter()
+            .zip(&self.params_async)
+            .filter(|(arg, is_async)| **is_async && !arg.is_borrowed)
+            .map(|(arg, _)| &arg.ident)
+            .collect()
+    }
     /// In virtualized components, constructors return `Self`, i.e. `MockedResource`, so
     /// type-directed traits like `Dialog` or `Arbitrary` cannot recover the resource name.
     /// Returns the name to patch into the `MockedResource`, if this is a constructor.
@@ -86,6 +99,24 @@ pub fn interface_modules(resolve: &Resolve, world: WorldId) -> BTreeMap<Vec<Stri
                 }
             }
             Some((path, *id))
+        })
+        .collect()
+}
+
+/// The interfaces the `imports` world of the package of `world` exports: those of the virtualized
+/// host, which the main component imports, for the exports component to tell the host's own
+/// functions from the main component's exports.
+pub fn host_interfaces(resolve: &Resolve, world: WorldId) -> BTreeSet<InterfaceId> {
+    let pkg = resolve.worlds[world].package.unwrap();
+    let Some(imports) = resolve.packages[pkg].worlds.get("imports") else {
+        return BTreeSet::new();
+    };
+    resolve.worlds[*imports]
+        .exports
+        .values()
+        .filter_map(|item| match item {
+            WorldItem::Interface { id, .. } => Some(*id),
+            _ => None,
         })
         .collect()
 }
@@ -280,7 +311,14 @@ impl State {
                 .map(|param| self.owns_resource(&param.ty))
                 .collect(),
             result: wit_func.result.as_ref().map(|ty| self.type_name(ty)),
-            result_owns: wit_func.result.is_some_and(|ty| self.owns_resource(&ty)),
+            is_async: wit_func.kind.is_async(),
+            params_async: params
+                .iter()
+                .map(|param| has_async_value(&self.resolve, &param.ty))
+                .collect(),
+            result_async: wit_func
+                .result
+                .is_some_and(|ty| has_async_value(&self.resolve, &ty)),
         })
     }
     /// Like `wit_func`, for functions the bindings generate from WIT.

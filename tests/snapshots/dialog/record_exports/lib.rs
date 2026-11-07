@@ -3,7 +3,10 @@ use bindings::*;
 struct Stub;
 bindings::export!(Stub with_types_in bindings);
 impl exports::proxy::recorder::start_replay::Guest for Stub {
-    fn start() -> () {
+    async fn start() -> () {
+        let mut __executor = wit_bindgen::spawn_local(
+            proxy::conversion::executor::run(),
+        );
         loop {
             let idx = proxy::util::dialog::read_select(
                 0,
@@ -14,11 +17,6 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     "test:guest/api@0.1.0.classify".to_string(),
                     "test:guest/api@0.1.0.begin".to_string(),
                     "new test:guest/api/session@0.1.0".to_string(),
-                    "test:host/types@0.1.0.make-point".to_string(),
-                    "test:host/types@0.1.0.check".to_string(),
-                    "test:host/types@0.1.0.open".to_string(),
-                    "new test:host/types/counter@0.1.0".to_string(),
-                    "test:host/types/counter@0.1.0.merge".to_string(),
                 ],
             ) as usize;
             match idx {
@@ -51,7 +49,21 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             .join(", ")
                         ),
                     );
-                    let _ = test::guest::api::run(&p, &c);
+                    let res = test::guest::api::run(&p, &c);
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
+                            .unwrap()
+                        ),
+                    );
+                    let _ = res;
+                    join_spawned().await;
+                    proxy::conversion::executor::stop();
+                    __executor.await;
+                    __executor = wit_bindgen::spawn_local(
+                        proxy::conversion::executor::run(),
+                    );
                 }
                 2usize => {
                     proxy::util::dialog::print(
@@ -72,7 +84,21 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             .join(", ")
                         ),
                     );
-                    let _ = test::guest::api::classify(&s);
+                    let res = test::guest::api::classify(&s);
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
+                            .unwrap()
+                        ),
+                    );
+                    let _ = res;
+                    join_spawned().await;
+                    proxy::conversion::executor::stop();
+                    __executor.await;
+                    __executor = wit_bindgen::spawn_local(
+                        proxy::conversion::executor::run(),
+                    );
                 }
                 3usize => {
                     proxy::util::dialog::print(
@@ -93,7 +119,21 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             .join(", ")
                         ),
                     );
-                    let _ = test::guest::api::begin(c);
+                    let res = test::guest::api::begin(c);
+                    proxy::util::dialog::print(
+                        0,
+                        &format!(
+                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
+                            .unwrap()
+                        ),
+                    );
+                    let _ = res;
+                    join_spawned().await;
+                    proxy::conversion::executor::stop();
+                    __executor.await;
+                    __executor = wit_bindgen::spawn_local(
+                        proxy::conversion::executor::run(),
+                    );
                 }
                 4usize => {
                     proxy::util::dialog::print(
@@ -119,143 +159,21 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                             __params.join(", ")
                         ),
                     );
-                    let _ = test::guest::api::Session::new(&name);
-                }
-                5usize => {
+                    let res = test::guest::api::Session::new(&name);
                     proxy::util::dialog::print(
                         0,
                         &format!(
-                            "call export func {}", "test:host/types@0.1.0.make-point"
+                            "ret: {}", wasm_wave::to_string(& ToValue::to_value(& res))
+                            .unwrap()
                         ),
                     );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(x), "s32"),
+                    let _ = res;
+                    join_spawned().await;
+                    proxy::conversion::executor::stop();
+                    __executor.await;
+                    __executor = wit_bindgen::spawn_local(
+                        proxy::conversion::executor::run(),
                     );
-                    let x: i32 = Dialog::read_value(0);
-                    __params.push(wasm_wave::to_string(&ToValue::to_value(&x)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(y), "s32"),
-                    );
-                    let y: i32 = Dialog::read_value(0);
-                    __params.push(wasm_wave::to_string(&ToValue::to_value(&y)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "test:host/types@0.1.0.make-point",
-                            __params.join(", ")
-                        ),
-                    );
-                    let _ = test::host::types::make_point(x, y);
-                }
-                6usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("call export func {}", "test:host/types@0.1.0.check"),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(p), "perms"),
-                    );
-                    let p: test::host::types::Perms = Dialog::read_value(0);
-                    __params.push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(c), "color"),
-                    );
-                    let c: test::host::types::Color = Dialog::read_value(0);
-                    __params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "test:host/types@0.1.0.check", __params
-                            .join(", ")
-                        ),
-                    );
-                    let _ = test::host::types::check(p, c);
-                }
-                7usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("call export func {}", "test:host/types@0.1.0.open"),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "provide argument for {}: {}", stringify!(name), "string"
-                        ),
-                    );
-                    let name: String = Dialog::read_value(0);
-                    __params
-                        .push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "test:host/types@0.1.0.open", __params
-                            .join(", ")
-                        ),
-                    );
-                    let _ = test::host::types::open(&name);
-                }
-                8usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "call export func {}", "new test:host/types/counter@0.1.0"
-                        ),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(start), "u32"),
-                    );
-                    let start: u32 = Dialog::read_value(0);
-                    __params
-                        .push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "new test:host/types/counter@0.1.0",
-                            __params.join(", ")
-                        ),
-                    );
-                    let _ = test::host::types::Counter::new(start);
-                }
-                9usize => {
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "call export func {}", "test:host/types/counter@0.1.0.merge"
-                        ),
-                    );
-                    let mut __params: Vec<String> = Vec::new();
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "provide argument for {}: {}", stringify!(a),
-                            "borrow<counter>"
-                        ),
-                    );
-                    let a: test::host::types::Counter = Dialog::read_value(0);
-                    __params.push(wasm_wave::to_string(&ToValue::to_value(&a)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!("provide argument for {}: {}", stringify!(b), "counter"),
-                    );
-                    let b: test::host::types::Counter = Dialog::read_value(0);
-                    __params.push(wasm_wave::to_string(&ToValue::to_value(&b)).unwrap());
-                    proxy::util::dialog::print(
-                        0,
-                        &format!(
-                            "export: {}({})", "test:host/types/counter@0.1.0.merge",
-                            __params.join(", ")
-                        ),
-                    );
-                    let _ = test::host::types::Counter::merge(&a, b);
                 }
                 _ => unreachable!(),
             }
@@ -264,6 +182,9 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                     alloc.borrow_mut().clear();
                 });
         }
+        join_spawned().await;
+        proxy::conversion::executor::stop();
+        __executor.await;
     }
 }
 impl ValueTyped for test::guest::api::Session {
@@ -288,45 +209,6 @@ impl<'a> ToValue for &'a test::guest::api::Session {
         Value::make_handle(label.into())
     }
 }
-impl ToRust<test::guest::api::Session> for Value {
-    fn to_rust(&self) -> test::guest::api::Session {
-        let label = self.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("{}-", "session"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        {
-            fn cannot_mock<T>() -> T {
-                unimplemented!("cannot mock `session`, a resource of the main component")
-            }
-            let _ = handle;
-            cannot_mock()
-        }
-    }
-}
-impl<'a> ToRust<&'a test::guest::api::Session> for Value {
-    fn to_rust(&self) -> &'a test::guest::api::Session {
-        let label = self.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("borrow-{}-", "session"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        SCOPED_ALLOC
-            .with(|alloc| {
-                let mut alloc = alloc.borrow_mut();
-                alloc
-                    .alloc({
-                        fn cannot_mock<T>() -> T {
-                            unimplemented!(
-                                "cannot mock `session`, a resource of the main component"
-                            )
-                        }
-                        let _ = handle;
-                        cannot_mock()
-                    })
-            })
-    }
-}
 impl ValueTyped for test::host::types::Point {
     #[allow(unused_imports)]
     fn value_type() -> Type {
@@ -346,16 +228,6 @@ impl ToValue for test::host::types::Point {
             .to_value())
         ];
         Value::make_record(&ty, fields).unwrap()
-    }
-}
-impl ToRust<test::host::types::Point> for Value {
-    fn to_rust(&self) -> test::host::types::Point {
-        let fields: std::collections::BTreeMap<_, _> = self.unwrap_record().collect();
-        test::host::types::Point {
-            x: fields["x"].to_rust(),
-            y: fields["y"].to_rust(),
-            label: fields["label"].to_rust(),
-        }
     }
 }
 impl ValueTyped for test::host::types::Shape {
@@ -383,23 +255,6 @@ impl ToValue for test::host::types::Shape {
             .unwrap()
     }
 }
-impl ToRust<test::host::types::Shape> for Value {
-    fn to_rust(&self) -> test::host::types::Shape {
-        match self.unwrap_variant() {
-            (ref case, Some(val)) if case == "circle" => {
-                test::host::types::Shape::Circle(val.to_rust())
-            }
-            (ref case, Some(val)) if case == "rect" => {
-                test::host::types::Shape::Rect(val.to_rust())
-            }
-            (ref case, Some(val)) if case == "HTTP-error" => {
-                test::host::types::Shape::HttpError(val.to_rust())
-            }
-            (ref case, None) if case == "empty" => test::host::types::Shape::Empty,
-            _ => unreachable!(),
-        }
-    }
-}
 impl ValueTyped for test::host::types::Color {
     #[allow(unused_imports)]
     fn value_type() -> Type {
@@ -416,16 +271,6 @@ impl ToValue for test::host::types::Color {
             Self::DnsBlue => Value::make_variant(&ty, "DNS-blue", None),
         }
             .unwrap()
-    }
-}
-impl ToRust<test::host::types::Color> for Value {
-    fn to_rust(&self) -> test::host::types::Color {
-        match self.unwrap_variant() {
-            (ref case, None) if case == "red" => test::host::types::Color::Red,
-            (ref case, None) if case == "green" => test::host::types::Color::Green,
-            (ref case, None) if case == "DNS-blue" => test::host::types::Color::DnsBlue,
-            _ => unreachable!(),
-        }
     }
 }
 impl ValueTyped for test::host::types::Perms {
@@ -449,22 +294,6 @@ impl ToValue for test::host::types::Perms {
         Value::make_flags(&ty, flags).unwrap()
     }
 }
-impl ToRust<test::host::types::Perms> for Value {
-    fn to_rust(&self) -> test::host::types::Perms {
-        let flags: Vec<_> = self.unwrap_flags().map(|f| f.into_owned()).collect();
-        let mut res = test::host::types::Perms::empty();
-        if flags.iter().any(|flag| flag == "read") {
-            res |= test::host::types::Perms::READ;
-        }
-        if flags.iter().any(|flag| flag == "write") {
-            res |= test::host::types::Perms::WRITE;
-        }
-        if flags.iter().any(|flag| flag == "exec") {
-            res |= test::host::types::Perms::EXEC;
-        }
-        res
-    }
-}
 impl ValueTyped for test::host::types::Counter {
     fn value_type() -> Type {
         Type::handle("counter")
@@ -477,43 +306,20 @@ impl<'a> ValueTyped for &'a test::host::types::Counter {
 }
 impl ToValue for test::host::types::Counter {
     fn to_value(&self) -> Value {
-        let label = format!("{}-{}", "counter", self.handle());
+        let label = format!(
+            "{}-{}", "counter",
+            proxy::conversion::conversion::get_handle_mock_test_host_types_counter(self)
+        );
         Value::make_handle(label.into())
     }
 }
 impl<'a> ToValue for &'a test::host::types::Counter {
     fn to_value(&self) -> Value {
-        let label = format!("borrow-{}-{}", "counter", self.handle());
+        let label = format!(
+            "borrow-{}-{}", "counter",
+            proxy::conversion::conversion::get_handle_mock_test_host_types_counter(self)
+        );
         Value::make_handle(label.into())
-    }
-}
-impl ToRust<test::host::types::Counter> for Value {
-    fn to_rust(&self) -> test::host::types::Counter {
-        let label = self.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("{}-", "counter"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        proxy::conversion::conversion::get_mock_test_host_types_counter(handle)
-    }
-}
-impl<'a> ToRust<&'a test::host::types::Counter> for Value {
-    fn to_rust(&self) -> &'a test::host::types::Counter {
-        let label = self.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("borrow-{}-", "counter"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        SCOPED_ALLOC
-            .with(|alloc| {
-                let mut alloc = alloc.borrow_mut();
-                alloc
-                    .alloc(
-                        proxy::conversion::conversion::get_mock_test_host_types_counter(
-                            handle,
-                        ),
-                    )
-            })
     }
 }
 #[allow(unused_imports)]
@@ -580,45 +386,19 @@ impl ToValue for &MockedResource {
         Value::make_handle(label.into())
     }
 }
-impl ToRust<MockedResource> for Value {
-    fn to_rust(&self) -> MockedResource {
-        let label = self.unwrap_handle();
-        let (name, handle) = label
-            .rsplit_once('-')
-            .and_then(|(name, handle_str)| {
-                handle_str.parse::<u32>().ok().map(|h| (name.to_string(), h))
-            })
-            .expect("invalid handle label");
-        MockedResource { handle, name }
-    }
-}
 impl Dialog for test::guest::api::Session {
     fn read_value(_dep: u32) -> Self {
-        let handle = HANDLE_ID
-            .with(|id| {
-                let mut id = id.borrow_mut();
-                let current_id = *id;
-                *id += 1;
-                current_id
-            });
         {
             fn cannot_mock<T>() -> T {
                 unimplemented!("cannot mock `session`, a resource of the main component")
             }
-            let _ = handle;
+            let _ = 0;
             cannot_mock()
         }
     }
 }
 impl<'a> Dialog for &'a test::guest::api::Session {
     fn read_value(_dep: u32) -> Self {
-        let handle = HANDLE_ID
-            .with(|id| {
-                let mut id = id.borrow_mut();
-                let current_id = *id;
-                *id += 1;
-                current_id
-            });
         SCOPED_ALLOC
             .with(|alloc| {
                 let mut alloc = alloc.borrow_mut();
@@ -629,7 +409,7 @@ impl<'a> Dialog for &'a test::guest::api::Session {
                                 "cannot mock `session`, a resource of the main component"
                             )
                         }
-                        let _ = handle;
+                        let _ = 0;
                         cannot_mock()
                     })
             })
@@ -716,42 +496,27 @@ impl Dialog for test::host::types::Perms {
 }
 impl Dialog for test::host::types::Counter {
     fn read_value(_dep: u32) -> Self {
-        let handle = HANDLE_ID
-            .with(|id| {
-                let mut id = id.borrow_mut();
-                let current_id = *id;
-                *id += 1;
-                current_id
-            });
-        proxy::conversion::conversion::get_mock_test_host_types_counter(handle)
+        proxy::conversion::conversion::get_mock_test_host_types_counter(0)
     }
 }
 impl<'a> Dialog for &'a test::host::types::Counter {
     fn read_value(_dep: u32) -> Self {
-        let handle = HANDLE_ID
-            .with(|id| {
-                let mut id = id.borrow_mut();
-                let current_id = *id;
-                *id += 1;
-                current_id
-            });
         SCOPED_ALLOC
             .with(|alloc| {
                 let mut alloc = alloc.borrow_mut();
                 alloc
                     .alloc(
                         proxy::conversion::conversion::get_mock_test_host_types_counter(
-                            handle,
+                            0,
                         ),
                     )
             })
     }
 }
-trait Dialog {
+trait Dialog: Sized {
     fn read_value(dep: u32) -> Self;
-}
-thread_local! {
-    static HANDLE_ID : std::cell::RefCell < u32 > = std::cell::RefCell::new(1);
+    #[allow(dead_code)]
+    fn consume(self, _dep: u32) {}
 }
 impl Dialog for () {
     fn read_value(_dep: u32) -> Self {
@@ -766,6 +531,11 @@ impl<T: Dialog> Dialog for Option<T> {
             &["none".to_string(), "some".to_string()],
         );
         if selection == 0 { None } else { Some(Dialog::read_value(dep + 1)) }
+    }
+    fn consume(self, dep: u32) {
+        if let Some(x) = self {
+            x.consume(dep);
+        }
     }
 }
 impl<T: Dialog + 'static> Dialog for Vec<T> {
@@ -783,6 +553,11 @@ impl<T: Dialog + 'static> Dialog for Vec<T> {
             (0..len).map(|_| Dialog::read_value(dep + 1)).collect()
         }
     }
+    fn consume(self, dep: u32) {
+        for x in self {
+            x.consume(dep);
+        }
+    }
 }
 impl<O: Dialog, E: Dialog> Dialog for Result<O, E> {
     fn read_value(dep: u32) -> Self {
@@ -797,18 +572,17 @@ impl<O: Dialog, E: Dialog> Dialog for Result<O, E> {
             Err(Dialog::read_value(dep + 1))
         }
     }
+    fn consume(self, dep: u32) {
+        match self {
+            Ok(x) => x.consume(dep),
+            Err(x) => x.consume(dep),
+        }
+    }
 }
 impl Dialog for MockedResource {
     fn read_value(_dep: u32) -> Self {
-        let handle = HANDLE_ID
-            .with(|id| {
-                let mut id = id.borrow_mut();
-                let current_id = *id;
-                *id += 1;
-                current_id
-            });
         Self {
-            handle,
+            handle: next_mock_label(),
             name: "mocked-resource".to_string(),
         }
     }
@@ -828,7 +602,8 @@ impl_dialog_primitive! {
 macro_rules! impl_dialog_tuple {
     ($($T:ident),+) => {
         impl < $($T : Dialog),+ > Dialog for ($($T,)+) { fn read_value(dep : u32) -> Self
-        { ($($T ::read_value(dep + 1),)+) } }
+        { ($($T ::read_value(dep + 1),)+) } #[allow(non_snake_case)] fn consume(self, dep
+        : u32) { let ($($T,)+) = self; $($T .consume(dep);)+ } }
     };
 }
 impl_dialog_tuple!(T1);
@@ -839,3 +614,43 @@ impl_dialog_tuple!(T1, T2, T3, T4, T5);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7);
 impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
+impl Dialog for wit_bindgen::rt::async_support::ErrorContext {
+    fn read_value(dep: u32) -> Self {
+        Self::new(
+            &proxy::util::dialog::read_raw_string(
+                dep,
+                "Enter the message of an error-context",
+            ),
+        )
+    }
+}
+thread_local! {
+    static MOCK_LABEL : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+}
+/// The label of a new mock.
+#[allow(dead_code)]
+fn next_mock_label() -> u32 {
+    MOCK_LABEL.set(MOCK_LABEL.get() + 1);
+    MOCK_LABEL.get()
+}
+thread_local! {
+    static SPAWNED : std::cell::RefCell < Vec < wit_bindgen::JoinHandle < () >> > = const
+    { std::cell::RefCell::new(Vec::new()) };
+}
+#[allow(dead_code)]
+fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
+    let handle = wit_bindgen::spawn_local(job);
+    SPAWNED.with_borrow_mut(|spawned| spawned.push(handle));
+}
+#[allow(dead_code)]
+async fn join_spawned() {
+    loop {
+        let spawned = SPAWNED.with_borrow_mut(std::mem::take);
+        if spawned.is_empty() {
+            break;
+        }
+        for handle in spawned {
+            handle.await;
+        }
+    }
+}

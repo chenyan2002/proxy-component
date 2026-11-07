@@ -22,6 +22,13 @@ pub struct InstrumentArgs {
     #[arg(long)]
     pub one_byte_page_size: bool,
 }
+impl InstrumentArgs {
+    /// Whether the composition has the bundled recorder component: record, replay and fuzz modes
+    /// use it, unless the host implements it.
+    pub fn bundles_recorder(&self) -> bool {
+        matches!(self.mode, Mode::Record | Mode::Replay | Mode::Fuzz) && !self.use_host_recorder
+    }
+}
 
 const DEBUG_WASM: &[u8] = include_bytes!("../assets/debug.wasm");
 const RECORDER_WASM: &[u8] = include_bytes!("../assets/recorder.wasm");
@@ -30,8 +37,8 @@ const DEBUG_WASM_ONE_BYTE_PAGE: &[u8] = include_bytes!("../assets/debug.one_byte
 const RECORDER_WASM_ONE_BYTE_PAGE: &[u8] = include_bytes!("../assets/recorder.one_byte_page.wasm");
 
 pub fn run(args: InstrumentArgs) -> Result<()> {
-    if args.use_host_recorder && !matches!(args.mode, Mode::Record | Mode::Replay) {
-        anyhow::bail!("--use-host-recorder only works in record or replay mode");
+    if args.use_host_recorder && !matches!(args.mode, Mode::Record | Mode::Replay | Mode::Fuzz) {
+        anyhow::bail!("--use-host-recorder only works in record, replay or fuzz mode");
     }
     // 1. Create a tmp directory and initialize a new Rust project in it.
     let tmp_dir = init_rust_project()?;
@@ -86,7 +93,7 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
         .arg(&wac_path)
         .arg("-o")
         .arg(output_file);
-    if !args.use_host_recorder {
+    if args.bundles_recorder() {
         let wasm_path = tmp_dir.join("recorder.wasm");
         fs::write(&wasm_path, recorder_wasm)?;
         let recorder = format!("import:recorder={}", wasm_path.display());
@@ -111,6 +118,8 @@ pub fn generate_sources<'a>(args: &'a InstrumentArgs, dir: &Path) -> Result<crat
     // 4. Write generated files to the temp directory.
     for (name, content) in files.iter() {
         let path = wit_dir.as_path().join(name);
+        // e.g. the `deps/conversion` directory of the `proxy:conversion` package
+        fs::create_dir_all(path.parent().unwrap())?;
         std::fs::write(&path, content)?;
     }
     // Re-generate exports world to bring in extra imports
@@ -119,26 +128,13 @@ pub fn generate_sources<'a>(args: &'a InstrumentArgs, dir: &Path) -> Result<crat
     for (name, content) in files.iter() {
         let path = wit_dir.as_path().join(name);
         eprintln!("Generating: {}", path.display());
+        fs::create_dir_all(path.parent().unwrap())?;
         std::fs::write(&path, content)?;
     }
 
     // 5. Generate Rust binding for both import and export interface
-    bindgen(
-        dir,
-        &wit_dir,
-        &args.mode,
-        "imports",
-        "record_imports",
-        args.one_byte_page_size,
-    )?;
-    bindgen(
-        dir,
-        &wit_dir,
-        &args.mode,
-        "exports",
-        "record_exports",
-        args.one_byte_page_size,
-    )?;
+    bindgen(dir, &wit_dir, args, "imports", "record_imports")?;
+    bindgen(dir, &wit_dir, args, "exports", "record_exports")?;
     Ok(opts)
 }
 
@@ -156,17 +152,22 @@ fn parse_wit(dir: &Path, world: Option<&str>) -> Result<(Resolve, WorldId)> {
 fn bindgen(
     tmp_dir: &Path,
     wit_dir: &Path,
-    mode: &Mode,
+    args: &InstrumentArgs,
     world_name: &str,
     dest_name: &str,
-    use_custom_allocator: bool,
 ) -> Result<()> {
     let out_dir = tmp_dir.join(dest_name);
     fs::create_dir_all(&out_dir)?;
     let (mut resolve, world) = parse_wit(wit_dir, Some(world_name))?;
-    let bindings = crate::wit_util::generate_bindings(&mut resolve, world)?;
+    let bindings = codegen::patch_bindings(crate::wit_util::generate_bindings(&mut resolve, world)?);
     fs::write(out_dir.join("bindings.rs"), &bindings)?;
-    let lib = codegen::generate(mode, resolve, world, &bindings, use_custom_allocator)?;
+    let lib = codegen::generate(
+        &args.mode,
+        resolve,
+        world,
+        &bindings,
+        args.one_byte_page_size,
+    )?;
     fs::write(out_dir.join("lib.rs"), lib)?;
     Ok(())
 }
