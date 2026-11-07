@@ -412,10 +412,14 @@ fn pump_defs(has_streams: bool, has_futures: bool) -> Vec<Item> {
                 }
             }
             /// Copies the items of a stream from `from`, which `sender` writes, to `to`, which
-            /// the other party reads: once the reader reads, so that the writer is read only
-            /// then, as it would be without the proxy. A zero-length write waits for that, as
-            /// it completes once the reader reads. A host's end may answer it at once, without
-            /// being ready, e.g. wasmtime's, which then takes a chunk of the guest's early.
+            /// the other party reads, once both are ready, so that each copy completes in the
+            /// run it's issued in, and its line is recorded before either party goes on, e.g.
+            /// the guest traps:
+            ///
+            /// - A zero-length write waits until the reader reads, so that the writer is read
+            ///   only then, as without the proxy. A host's end may answer it at once, without
+            ///   being ready, e.g. wasmtime's, which then takes a chunk of the guest's early.
+            /// - A zero-length read waits until the writer writes, leaving its write pending.
             async fn pump_stream<T, U>(
                 mut from: wit_bindgen::StreamReader<T>,
                 mut to: wit_bindgen::StreamWriter<U>,
@@ -427,51 +431,58 @@ fn pump_defs(has_streams: bool, has_futures: bool) -> Vec<Item> {
             {
                 let receiver = trace_receiver(sender);
                 let wave = |item: &dyn ToValue| wasm_wave::to_string(&item.to_value()).unwrap();
+                let dropped = |by: Party| {
+                    proxy::recorder::record::record(&pump_line(by, trace_at(), Event::Drop(label.clone())));
+                };
                 loop {
-                    let (result, _) = to.write(Vec::new()).await;
-                    if let wit_bindgen::StreamResult::Dropped = result {
-                        let line = pump_line(receiver, trace_at(), Event::Drop(label));
-                        return proxy::recorder::record::record(&line);
+                    let (ready, _) = to.write(Vec::new()).await;
+                    if let wit_bindgen::StreamResult::Dropped = ready {
+                        return dropped(receiver);
                     }
-                    // The host's side of a copy is its read of the guest's items, or its write of
-                    // its own, in whose step the line is.
+                    let (ready, _) = from.read(Vec::new()).await;
+                    if let wit_bindgen::StreamResult::Dropped = ready {
+                        return dropped(sender);
+                    }
                     let read_at = trace_at();
                     let (result, items) = from.read(Vec::with_capacity(4096)).await;
-                    if items.is_empty() {
-                        if let wit_bindgen::StreamResult::Dropped = result {
-                            let line = pump_line(sender, trace_at(), Event::Drop(label));
-                            return proxy::recorder::record::record(&line);
-                        }
-                        continue;
-                    }
                     let received: Vec<String> = items.iter().map(|item| wave(item)).collect();
-                    let items: Vec<U> = items.into_iter().map(ToProxy::to_proxy).collect();
+                    let mut items: Vec<U> = items.into_iter().map(ToProxy::to_proxy).collect();
                     let waves = if sent_by_caller(sender) {
                         items.iter().map(|item| wave(item)).collect()
                     } else {
                         received
                     };
-                    let write_at = trace_at();
-                    let rest = to.write_all(items).await;
-                    let written = waves.len() - rest.len();
-                    if written > 0 {
-                        let chunk = Chunk {
-                            stream: label.clone(),
-                            items: format!("[{}]", waves[..written].join(", ")),
-                        };
-                        let (at, event) = match sender {
-                            Party::Host => (write_at, Event::Write(chunk)),
-                            Party::Guest => (read_at, Event::Read(chunk)),
-                        };
-                        proxy::recorder::record::record(&pump_line(Party::Host, at, event));
+                    // The host's read of the guest's items, in its step.
+                    if matches!(sender, Party::Guest) && !items.is_empty() {
+                        let chunk = Chunk { stream: label.clone(), items: format!("[{}]", waves.join(", ")) };
+                        proxy::recorder::record::record(&pump_line(Party::Host, read_at, Event::Read(chunk)));
                     }
-                    if !rest.is_empty() {
-                        let line = pump_line(receiver, trace_at(), Event::Drop(label));
-                        return proxy::recorder::record::record(&line);
+                    // The host's write of its items, a line per part the guest takes.
+                    let mut offset = 0;
+                    while !items.is_empty() {
+                        let (write_at, count) = (trace_at(), items.len());
+                        let (written_result, rest) = to.write(items).await;
+                        let rest = rest.into_vec();
+                        let written = count - rest.len();
+                        if matches!(sender, Party::Host) && written > 0 {
+                            let items = format!("[{}]", waves[offset..offset + written].join(", "));
+                            let chunk = Chunk { stream: label.clone(), items };
+                            proxy::recorder::record::record(&pump_line(Party::Host, write_at, Event::Write(chunk)));
+                        }
+                        offset += written;
+                        if let wit_bindgen::StreamResult::Dropped = written_result {
+                            return dropped(receiver);
+                        }
+                        items = rest;
+                        if !items.is_empty() {
+                            let (ready, _) = to.write(Vec::new()).await;
+                            if let wit_bindgen::StreamResult::Dropped = ready {
+                                return dropped(receiver);
+                            }
+                        }
                     }
                     if let wit_bindgen::StreamResult::Dropped = result {
-                        let line = pump_line(sender, trace_at(), Event::Drop(label));
-                        return proxy::recorder::record::record(&line);
+                        return dropped(sender);
                     }
                 }
             }
@@ -500,7 +511,10 @@ fn pump_defs(has_streams: bool, has_futures: bool) -> Vec<Item> {
                 }
             }
             /// Passes the value of a future from `from`, which `sender` writes, to `to`, which
-            /// the other party reads, unless it drops it first.
+            /// the other party reads, unless it drops it first. The value's line is recorded as
+            /// the pump writes it, before the reader can take it and go on, e.g. trap; a drop
+            /// follows if the reader drops its end instead. A future can't wait until the other
+            /// side reads: the host's read of the guest's value is recorded once it completes.
             async fn pump_future<T, U>(
                 from: wit_bindgen::FutureReader<T>,
                 to: wit_bindgen::FutureWriter<U>,
@@ -518,12 +532,12 @@ fn pump_defs(has_streams: bool, has_futures: bool) -> Vec<Item> {
                 } else {
                     received
                 };
-                let at = trace_at();
-                let line = match to.write(value).await {
-                    Ok(()) => pump_line(sender, at, Event::Value(FutureValue { future: label, value: wave })),
-                    Err(_) => pump_line(trace_receiver(sender), trace_at(), Event::Drop(label)),
-                };
-                proxy::recorder::record::record(&line);
+                let value_line = Event::Value(FutureValue { future: label.clone(), value: wave });
+                proxy::recorder::record::record(&pump_line(sender, trace_at(), value_line));
+                if to.write(value).await.is_err() {
+                    let line = pump_line(trace_receiver(sender), trace_at(), Event::Drop(label));
+                    proxy::recorder::record::record(&line);
+                }
             }
         };
         items.extend(file.items);

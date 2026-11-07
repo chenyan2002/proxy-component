@@ -206,17 +206,37 @@ pub struct Replay {
     lines: Vec<Line>,
     done: Vec<bool>,
     renaming: Renaming,
+    /// Whether the trace is cut short (see `is_cut`).
+    cut: bool,
 }
 
 impl Replay {
     pub fn new(trace: Trace) -> Self {
         let done = vec![false; trace.0.len()];
         let renaming = Renaming::new(&trace.0);
+        let answered = |id: TaskId| {
+            trace.0.iter().any(|line| {
+                matches!(&line.event, Event::Return(ret) if ret.id == id)
+                    || matches!(&line.event, Event::Cancelled(task) if *task == id)
+            })
+        };
+        let cut = trace.0.iter().any(|line| match &line.event {
+            Event::Call(call) => call.id.table == Table::Exports && !answered(call.id),
+            _ => false,
+        });
         Replay {
             lines: trace.0,
             done,
             renaming,
+            cut,
         }
+    }
+    /// Whether the trace is cut short: an export call has no answer, e.g. the run trapped during
+    /// it. The host records some copies once it sees them complete, after the guest went on, so
+    /// a cut trace may lack the last of those: the guest's drops of streams and futures, and the
+    /// values of the futures it wrote. `check` accepts a guest's line about one that it lacks.
+    pub fn is_cut(&self) -> bool {
+        self.cut
     }
     fn pending(&self) -> impl Iterator<Item = (usize, &Line)> {
         self.lines
@@ -301,6 +321,12 @@ impl Replay {
             (None, None) => line.by == Party::Guest,
         });
         let Some((idx, expected)) = found else {
+            let late = |label: &Label| {
+                ["#stream-", "#future-"].iter().any(|kind| label.name.starts_with(kind))
+            };
+            if self.cut && handle.is_some_and(late) {
+                return Vec::new();
+            }
             panic!("the guest did `{actual}`, which the trace doesn't have");
         };
         let expected = expected.clone();
@@ -574,6 +600,31 @@ mod tests {
         replay.next_host_line();
         // The trace's `#session-3` is replay's `#session-1`, not another session.
         replay.check(&line(Party::Guest, ret(t2, Some("#session-2"))));
+    }
+
+    #[test]
+    fn cut_traces_lack_the_guests_last_copies() {
+        let t1 = task(Table::Exports, 1);
+        let stream = Label {
+            table: Table::Imports,
+            name: "#stream-3".to_string(),
+        };
+        let drop = line(Party::Guest, Event::Drop(stream));
+        // The run trapped during `t1`, before the host saw the guest's drop of its stream.
+        let mut replay = Replay::new(Trace(vec![line(Party::Host, call(t1, "run", &[]))]));
+        assert!(replay.is_cut());
+        replay.next_host_line();
+        assert_eq!(replay.check(&drop), vec![]);
+        // A whole trace has every line.
+        let whole = Trace(vec![
+            line(Party::Host, call(t1, "run", &[])),
+            line(Party::Guest, ret(t1, None)),
+        ]);
+        let mut replay = Replay::new(whole);
+        assert!(!replay.is_cut());
+        replay.next_host_line();
+        let check = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| replay.check(&drop)));
+        assert!(check.is_err());
     }
 
     #[test]

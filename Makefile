@@ -106,14 +106,16 @@ test-record-p3:
 RACE = tests/fixtures/spike-p3-race
 RACE_OUT = target/fixture-race
 RACE_WASM = $(RACE_OUT)/wasm32-wasip2/release/race_guest.wasm
-# Fuzzes the main components of tests/fixtures/p2/guest, the p3 fixture, wasi_http_p3 and
-# the spike's guest, and replays each trace it writes, which ends as the fuzzing run did: to the
+# Fuzzes the main components of tests/fixtures/p2/guest, the p3 and p3-record fixtures,
+# wasi_http_p3 and the spike's guest, and replays each trace it writes, which ends as the fuzzing run did: to the
 # end, or in the main component's trap, e.g. a guest's panic on a fuzzed error.
 test-fuzz-replay:
 	cargo build --manifest-path $(FIXTURE)/guest/Cargo.toml --target wasm32-wasip2 --release --target-dir $(FIXTURE_OUT)
 	$(MAKE) run-fuzz-replay WASM=$(FIXTURE_WASM)/proxy_guest.wasm OUT=$(FIXTURE_OUT)
 	cargo build --manifest-path $(P3_GUEST)/Cargo.toml --target wasm32-wasip2 --release --target-dir $(P3_GUEST_OUT)
 	$(MAKE) run-fuzz-replay WASM=$(P3_GUEST_WASM) OUT=$(P3_GUEST_OUT) WASMTIME_FLAGS="$(WASMTIME_FLAGS) -W component-model-error-context=y"
+	cargo build --manifest-path $(P3_RECORD)/Cargo.toml --target wasm32-wasip2 --release --target-dir $(P3_RECORD_OUT)
+	$(MAKE) run-fuzz-replay WASM=$(P3_RECORD_WASM) OUT=$(P3_RECORD_OUT)
 	$(MAKE) run-fuzz-replay WASM=tests/wasi_http_p3.wasm OUT=target/fixture-http-p3
 	cargo build --manifest-path $(RACE)/Cargo.toml -p race-guest --target wasm32-wasip2 --release --target-dir $(RACE_OUT)
 	$(MAKE) run-fuzz-replay WASM=$(RACE_WASM) OUT=$(RACE_OUT)

@@ -80,6 +80,9 @@ impl bindings::proxy::recorder::replay::Host for State {
     fn finish(&mut self) {
         self.replay.as_ref().unwrap().finish();
     }
+    fn trace_cut(&mut self) -> bool {
+        self.replay.as_ref().unwrap().is_cut()
+    }
     fn check(&mut self, line: Line) -> Vec<Line> {
         let line: trace::Line = trace::convert(line);
         println!("{line}");

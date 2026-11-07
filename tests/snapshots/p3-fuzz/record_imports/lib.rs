@@ -668,23 +668,37 @@ where
                     .iter()
                     .map(|item| wasm_wave::to_string(&item.to_value()).unwrap())
                     .collect();
-                let at = trace_at();
-                let rest = writer.write_all(chunk).await;
-                let written = waves.len() - rest.len();
-                if written > 0 {
-                    let items = format!("[{}]", waves[..written].join(", "));
-                    let chunk = Chunk {
-                        stream: label.clone(),
-                        items,
-                    };
-                    proxy::recorder::record::record(
-                        &host_line_at(at, Event::Write(chunk)),
-                    );
-                }
-                if !rest.is_empty() {
-                    proxy::recorder::record::record(&guest_line(Event::Drop(label)));
-                    host_dropping(move || drop((rest, chunks.collect::<Vec<_>>())));
-                    return;
+                let (mut items, mut offset) = (chunk, 0);
+                while !items.is_empty() {
+                    let (ready, _) = writer.write(Vec::new()).await;
+                    if let wit_bindgen::StreamResult::Dropped = ready {
+                        proxy::recorder::record::record(&guest_line(Event::Drop(label)));
+                        host_dropping(move || drop((items, chunks.collect::<Vec<_>>())));
+                        return;
+                    }
+                    let (at, count) = (trace_at(), items.len());
+                    let (result, rest) = writer.write(items).await;
+                    let rest = rest.into_vec();
+                    let written = count - rest.len();
+                    if written > 0 {
+                        let items = format!(
+                            "[{}]", waves[offset..offset + written].join(", ")
+                        );
+                        let chunk = Chunk {
+                            stream: label.clone(),
+                            items,
+                        };
+                        proxy::recorder::record::record(
+                            &host_line_at(at, Event::Write(chunk)),
+                        );
+                        offset += written;
+                    }
+                    if let wit_bindgen::StreamResult::Dropped = result {
+                        proxy::recorder::record::record(&guest_line(Event::Drop(label)));
+                        host_dropping(move || drop((rest, chunks.collect::<Vec<_>>())));
+                        return;
+                    }
+                    items = rest;
                 }
             }
             drop(writer);
@@ -703,6 +717,11 @@ where
         spawn(async move {
             let mut count = 0;
             while reads != Some(count) {
+                let (ready, _) = self.read(Vec::new()).await;
+                if let wit_bindgen::StreamResult::Dropped = ready {
+                    proxy::recorder::record::record(&guest_line(Event::Drop(label)));
+                    return;
+                }
                 let at = trace_at();
                 let (result, items) = self.read(Vec::with_capacity(capacity)).await;
                 if !items.is_empty() {
@@ -737,21 +756,14 @@ where
         let label = Label { table: TRACE_TABLE, name };
         let wave = wasm_wave::to_string(&value.to_value()).unwrap();
         spawn(async move {
-            let at = trace_at();
-            match writer.write(value).await {
-                Ok(()) => {
-                    let value = FutureValue {
-                        future: label,
-                        value: wave,
-                    };
-                    proxy::recorder::record::record(
-                        &host_line_at(at, Event::Value(value)),
-                    );
-                }
-                Err(unwritten) => {
-                    proxy::recorder::record::record(&guest_line(Event::Drop(label)));
-                    host_dropping(move || drop(unwritten));
-                }
+            let line = FutureValue {
+                future: label.clone(),
+                value: wave,
+            };
+            proxy::recorder::record::record(&host_line(Event::Value(line)));
+            if let Err(unwritten) = writer.write(value).await {
+                proxy::recorder::record::record(&guest_line(Event::Drop(label)));
+                host_dropping(move || drop(unwritten));
             }
         });
         Ok(reader)

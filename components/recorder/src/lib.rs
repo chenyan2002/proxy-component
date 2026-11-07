@@ -76,6 +76,9 @@ impl bindings::exports::proxy::recorder::replay::Guest for Component {
     fn finish() {
         with_replay(|replay| replay.finish());
     }
+    fn trace_cut() -> bool {
+        with_replay(|replay| replay.is_cut())
+    }
     fn check(line: Line) -> Vec<Line> {
         println!("{line}");
         // A replayed `wasi:cli/exit` ends the replay with the guest's status.

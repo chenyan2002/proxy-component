@@ -103,7 +103,10 @@ variant event {
   write(chunk),
   // A copy: the host read the items, which the guest wrote.
   read(chunk),
-  // A future's value was taken by its reader; `by` is the writer.
+  // A future's value, and who wrote it (`by`). If the host wrote it, the line is recorded when
+  // the host writes, before the guest can read it; if the guest then drops its end without
+  // reading, a `drop` by the guest follows. If the guest wrote it, the line is recorded when
+  // the host reads it.
   value(future-value),
   // A stream or future end, or a resource, was dropped; `by` is who dropped it.
   drop(label),
@@ -157,6 +160,11 @@ What the types don't enforce:
   lazy: if the guest never reads a stream the host writes, no `Write` appears. For `stream<T>` a
   line is the chunk one rendezvous copied, so replay can give the guest's reads the same chunks.
   This holds for pumps that don't read ahead; [Read-ahead](#read-ahead-in-pumps) would change it.
+  The host's side waits until the other side is ready, with a zero-length write or read, which
+  completes once the other side reads or writes and leaves its copy pending, so that the copy
+  completes as the host issues it, and its line is recorded before the guest goes on. A future
+  has no such wait, so the host's value is recorded as it is written. Replay's jobs wait alike,
+  so that the same events wake the executor.
 - **Order.** The trace is not a total order. Each line belongs to a task, by its `TaskId`, or to a
   handle, by its `Label`, and the lines of different tasks or handles may come in any order. What
   orders them is each task's own sequence, `Call`, `Started`, `Return`; the `at` of the host lines
@@ -482,6 +490,12 @@ The proxy puts a hop, its own task, between the host and the guest. With deliver
 | a guest read or write that completes at once, as the host had data or was reading | only if the pump [reads ahead](#read-ahead-in-pumps); otherwise it blocks first |
 | a host result arriving before the guest's next wait | may arrive after it instead, as the executor needs a turn to pass it on: a slower host, which is legal. [Read-ahead](#read-ahead-in-pumps) doesn't help: an async import's result has nothing to read ahead, and a stream's data that arrives just before the wait still waits for the pump. A wit-bindgen guest, whose callback gets one event per wakeup, can't tell the difference when this is the only event, but can when another is pending at the same wait: without the proxy, the lowest waitable of the two comes first, with it, the other one. A guest that calls `waitable-set.poll` also finds nothing pending |
 
+A run that traps, or is killed, during an export call cuts its trace short:
+
+| | |
+|---|---|
+| the guest's last copies before a trap: its drop of a stream or future, or the value of a future it wrote | may be missing, as the host records them once it sees them complete, after the guest went on, and the guest may trap first. A trace with an export call that has no answer is cut: replay accepts a guest's line about a stream or future that the trace lacks, without checking it, and takes what the guest writes since, so that it goes on to the same trap. The host's own copies, and the guest's writes to its streams, are recorded as the host completes them, so a cut trace has every value and item the guest got, and every item the host took. A trap after every export call returned, e.g. in a task the guest spawned, leaves a trace that looks whole, whose replay then reports the missing line as a divergence |
+
 Whatever schedule happens is recorded completely. Not every timing the unproxied component could
 have is reachable while recording, as the proxy only makes the host look slower, or, with
 read-ahead, eagerer. Covering other schedules is exploration, which fuzz mode does.
@@ -591,10 +605,12 @@ executor runs both.
   or a handle, e.g. the `Return` of a STARTED call, which its mock waits for; `check`, which
   checks a guest line, up to renaming, and returns the host lines that answer it at once, e.g. an
   import's `Return`; `pair`, which pairs a label of a stream or future replay makes; `finish`,
-  which checks that replay reached every line; and, in both, `fail`, which reports a panic of a
-  generated component, which has no stderr of its own to print it. Waiting for a step is the
-  executor's, not the recorder's. The bundled recorder (`assets/recorder*.wasm`) and the
-  host recorder of `run` (`--use-host-recorder`) implement it, with `Replay` of `crates/trace`.
+  which checks that replay reached every line; `trace-cut`, whether the trace ends during an
+  export call, e.g. in a trap, whose last guest copies may be missing; and, in both, `fail`,
+  which reports a panic of a generated component, which has no stderr of its own to print it.
+  Waiting for a step is the executor's, not the recorder's. The bundled recorder
+  (`assets/recorder*.wasm`) and the host recorder of `run` (`--use-host-recorder`) implement it,
+  with `Replay` of `crates/trace`.
 
 ## Correctness
 
@@ -649,8 +665,8 @@ shim](#portability) could provide; see No guest task on import calls, in
   as guest-internal streams, or what the guest's waits returned, which the shim could record.
 - **A fixpoint test**: record a run, replay it while recording, and require the two traces to be
   equal. The spike does this, for its scenarios.
-- **Fuzzed schedules, replayed**: `make test-fuzz-replay` fuzzes the p2 and p3 fixtures,
-  `wasi_http_p3`, and the spike's guest, and replays each trace, which has to end as the fuzzing
+- **Fuzzed schedules, replayed**: `make test-fuzz-replay` fuzzes the p2, p3 and p3-record
+  fixtures, `wasi_http_p3`, and the spike's guest, and replays each trace, which has to end as the fuzzing
   run did: to the end, or in the guest's trap, e.g. a panic on an error the fuzzed host returned,
   which is what fuzzing finds. A trap in a generated component or the recorder, e.g. a
   divergence, fails it (`tests/run-wasm.sh`).

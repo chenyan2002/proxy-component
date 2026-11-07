@@ -31,7 +31,10 @@ interface types {
     write(chunk),
     // The host read `items`, which the guest wrote.
     read(chunk),
-    // A future's value was taken by its reader; `by` is the writer.
+    // A future's value, and who wrote it (`by`). If the host wrote it, the line is recorded when
+    // the host writes, before the guest can read it; if the guest then drops its end without
+    // reading, a `drop` by the guest follows. If the guest wrote it, the line is recorded when
+    // the host reads it.
     value(future-value),
     // `by` is who dropped it.
     drop(label),
@@ -70,8 +73,12 @@ interface replay {
   fail: func(message: string);
   // Checks a guest line against the trace, and returns the host lines that answer it at once,
   // e.g. the `return` of an import call. Traps on a mismatch, with the expected and the actual
-  // line.
+  // line, except for a guest's line about a stream or future that a cut trace lacks.
   check: func(line: line) -> list<line>;
+  // Whether the trace is cut short: an export call has no answer, e.g. the run trapped during
+  // it. Its last lines that the host records once it sees a copy complete may be missing, e.g.
+  // the guest's drop of a stream, or the value of a future it wrote.
+  trace-cut: func() -> bool;
 }
 
 // Async, so that it can await the main component's async exports, and run the jobs of

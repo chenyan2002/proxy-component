@@ -342,6 +342,11 @@ impl ReplayTrait {
                     trace_reach(line.at).await;
                     Some(line)
                 }
+                /// The next host line about `label`, which the job performs once the other side
+                /// is ready, as the recording's did, then in its step (see `trace_reach`).
+                fn take_line(label: &Label) -> Option<Line> {
+                    proxy::recorder::replay::take_host_line(&LineKey::Handle(label.clone()))
+                }
             };
             items.extend(ast.items);
         }
@@ -351,59 +356,96 @@ impl ReplayTrait {
                 where
                     T: Replay + ToValue + ValueTyped + wit_stream::StreamPayload,
                 {
-                    // Writes the trace's chunks, then ends the stream, as the trace has it.
+                    // Writes the trace's chunks, then ends the stream, as the trace has it, each
+                    // once the guest reads, as the recording waited for with a zero-length write.
                     fn replay(value: &Value) -> Self {
                         let (mut writer, reader, name) = host_stream::<T>(false);
                         let label = Label { table: TRACE_TABLE, name };
                         proxy::recorder::replay::pair(&trace_label(value), &label);
                         spawn(async move {
                             loop {
-                                let Some(line) = next_line(&label).await else {
-                                    // The guest dropped the stream, which the host saw at its next
-                                    // write; the guest doesn't read that, so the host just stops.
-                                    drop(writer);
-                                    proxy::recorder::replay::check(&guest_line(Event::Drop(label)));
+                                let Some(line) = take_line(&label) else {
+                                    // The guest dropped the stream, which the host saw as it waited
+                                    // to write; or the trace is cut short, e.g. by a trap.
+                                    let (ready, _) = writer.write(Vec::new()).await;
+                                    if let wit_bindgen::StreamResult::Dropped = ready {
+                                        proxy::recorder::replay::check(&guest_line(Event::Drop(label)));
+                                    } else {
+                                        assert!(
+                                            proxy::recorder::replay::trace_cut(),
+                                            "the guest read {label:?} after the trace's last write",
+                                        );
+                                        std::mem::forget(writer);
+                                    }
                                     return;
                                 };
                                 match line.event {
                                     Event::Write(chunk) => {
+                                        let (ready, _) = writer.write(Vec::new()).await;
+                                        assert!(
+                                            !matches!(ready, wit_bindgen::StreamResult::Dropped),
+                                            "the guest dropped {label:?} before it read {}", chunk.items,
+                                        );
+                                        trace_reach(line.at).await;
                                         let items: Vec<T> = Replay::replay(&wave_value::<Vec<T>>(&chunk.items));
                                         let rest = writer.write_all(items).await;
                                         assert!(rest.is_empty(), "the guest dropped {label:?} before it read {}", chunk.items);
                                     }
-                                    Event::Drop(_) => return drop(writer),
+                                    Event::Drop(_) => {
+                                        trace_reach(line.at).await;
+                                        return drop(writer);
+                                    }
                                     event => unreachable!("the host can't do {event:?} with its stream"),
                                 }
                             }
                         });
                         reader
                     }
-                    // Reads as the trace has it, and checks what the guest wrote.
+                    // Reads as the trace has it, each once the guest writes, as the recording
+                    // waited for with a zero-length read, and checks what the guest wrote.
                     fn consume(mut self) {
                         let label = label_of(&self);
                         spawn(async move {
                             loop {
-                                let Some(line) = next_line(&label).await else {
-                                    // The guest ended the stream, which the host's next read sees.
-                                    let (result, items) = self.read(Vec::with_capacity(1)).await;
-                                    assert!(
-                                        matches!(result, wit_bindgen::StreamResult::Dropped) && items.is_empty(),
-                                        "the guest wrote to {label:?} after the trace's last read",
-                                    );
-                                    proxy::recorder::replay::check(&guest_line(Event::Drop(label)));
-                                    return;
+                                let Some(line) = take_line(&label) else {
+                                    // The guest ends the stream, which the host sees as it waits to
+                                    // read; or the trace is cut short, e.g. by a trap, and the
+                                    // guest's writes since have no lines: the host takes them.
+                                    loop {
+                                        let (result, items) = self.read(Vec::with_capacity(4096)).await;
+                                        if !items.is_empty() {
+                                            assert!(
+                                                proxy::recorder::replay::trace_cut(),
+                                                "the guest wrote to {label:?} after the trace's last read",
+                                            );
+                                            host_dropping(move || drop(items));
+                                        }
+                                        if let wit_bindgen::StreamResult::Dropped = result {
+                                            proxy::recorder::replay::check(&guest_line(Event::Drop(label)));
+                                            return;
+                                        }
+                                    }
                                 };
                                 match line.event {
                                     // As many items as the trace has, which the guest's writes
                                     // split alike.
                                     Event::Read(chunk) => {
+                                        let (ready, _) = self.read(Vec::new()).await;
+                                        assert!(
+                                            !matches!(ready, wit_bindgen::StreamResult::Dropped),
+                                            "the guest dropped {label:?} before it wrote {}", chunk.items,
+                                        );
+                                        trace_reach(line.at).await;
                                         let count = wave_value::<Vec<T>>(&chunk.items).unwrap_list().count();
                                         let (_, items) = self.read(Vec::with_capacity(count)).await;
                                         let wave = wasm_wave::to_string(&items.to_value()).unwrap();
                                         assert_eq!(wave, chunk.items, "the guest wrote other items to {label:?}");
                                         host_dropping(move || drop(items));
                                     }
-                                    Event::Drop(_) => return drop(self),
+                                    Event::Drop(_) => {
+                                        trace_reach(line.at).await;
+                                        return drop(self);
+                                    }
                                     event => unreachable!("the host can't do {event:?} with the guest's stream"),
                                 }
                             }
@@ -419,7 +461,8 @@ impl ReplayTrait {
                 where
                     T: Replay + ToValue + ValueTyped + wit_future::FuturePayload,
                 {
-                    // Writes the trace's value, unless the guest dropped the future first.
+                    // Writes the trace's value, which the trace has as the host wrote it, so a
+                    // guest's drop of the future follows if the guest dropped its end instead.
                     fn replay(value: &Value) -> Self {
                         let (writer, reader, name) = host_future::<T>(false);
                         let label = Label { table: TRACE_TABLE, name };
@@ -435,9 +478,11 @@ impl ReplayTrait {
                             let Event::Value(value) = line.event else {
                                 unreachable!("the host can't do {:?} with its future", line.event);
                             };
-                            let wave = value.value.clone();
                             let value: T = Replay::replay(&wave_value::<T>(&value.value));
-                            assert!(writer.write(value).await.is_ok(), "the guest dropped {label:?} before it took {wave}");
+                            if let Err(unwritten) = writer.write(value).await {
+                                proxy::recorder::replay::check(&guest_line(Event::Drop(label)));
+                                host_dropping(move || drop(unwritten));
+                            }
                         });
                         reader
                     }

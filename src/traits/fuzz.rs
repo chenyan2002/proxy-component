@@ -352,8 +352,10 @@ impl FuzzTrait {
               where
                   T: Fuzz + ToValue + ValueTyped + wit_stream::StreamPayload,
               {
-                  // Writes fuzzed chunks, then ends the stream. A line is a chunk, which the
-                  // guest may read in several copies.
+                  // Writes fuzzed chunks, then ends the stream. Each write waits until the guest
+                  // reads, with a zero-length write, so that it completes in this run, and its
+                  // line, the items the guest took, is recorded before the guest goes on, e.g.
+                  // traps; a chunk the guest takes in parts is a line per part.
                   fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
                       let (mut writer, reader, name) = host_stream::<T>(true);
                       let label = Label { table: TRACE_TABLE, name };
@@ -361,24 +363,34 @@ impl FuzzTrait {
                       spawn(async move {
                           let mut chunks = chunks.into_iter().filter(|chunk| !chunk.is_empty());
                           while let Some(chunk) = chunks.next() {
-                              // Each item's, for the part the guest read, if it drops the stream
-                              // first.
                               let waves: Vec<_> = chunk
                                   .iter()
                                   .map(|item| wasm_wave::to_string(&item.to_value()).unwrap())
                                   .collect();
-                              let at = trace_at();
-                              let rest = writer.write_all(chunk).await;
-                              let written = waves.len() - rest.len();
-                              if written > 0 {
-                                  let items = format!("[{}]", waves[..written].join(", "));
-                                  let chunk = Chunk { stream: label.clone(), items };
-                                  proxy::recorder::record::record(&host_line_at(at, Event::Write(chunk)));
-                              }
-                              if !rest.is_empty() {
-                                  proxy::recorder::record::record(&guest_line(Event::Drop(label)));
-                                  host_dropping(move || drop((rest, chunks.collect::<Vec<_>>())));
-                                  return;
+                              let (mut items, mut offset) = (chunk, 0);
+                              while !items.is_empty() {
+                                  let (ready, _) = writer.write(Vec::new()).await;
+                                  if let wit_bindgen::StreamResult::Dropped = ready {
+                                      proxy::recorder::record::record(&guest_line(Event::Drop(label)));
+                                      host_dropping(move || drop((items, chunks.collect::<Vec<_>>())));
+                                      return;
+                                  }
+                                  let (at, count) = (trace_at(), items.len());
+                                  let (result, rest) = writer.write(items).await;
+                                  let rest = rest.into_vec();
+                                  let written = count - rest.len();
+                                  if written > 0 {
+                                      let items = format!("[{}]", waves[offset..offset + written].join(", "));
+                                      let chunk = Chunk { stream: label.clone(), items };
+                                      proxy::recorder::record::record(&host_line_at(at, Event::Write(chunk)));
+                                      offset += written;
+                                  }
+                                  if let wit_bindgen::StreamResult::Dropped = result {
+                                      proxy::recorder::record::record(&guest_line(Event::Drop(label)));
+                                      host_dropping(move || drop((rest, chunks.collect::<Vec<_>>())));
+                                      return;
+                                  }
+                                  items = rest;
                               }
                           }
                           drop(writer);
@@ -399,6 +411,14 @@ impl FuzzTrait {
                       spawn(async move {
                           let mut count = 0;
                           while reads != Some(count) {
+                              // Once the guest writes, with a zero-length read, so that the read
+                              // completes in this run, and its line is recorded before the guest
+                              // goes on.
+                              let (ready, _) = self.read(Vec::new()).await;
+                              if let wit_bindgen::StreamResult::Dropped = ready {
+                                  proxy::recorder::record::record(&guest_line(Event::Drop(label)));
+                                  return;
+                              }
                               let at = trace_at();
                               let (result, items) = self.read(Vec::with_capacity(capacity)).await;
                               // The guest may write its last items as it drops the stream.
@@ -428,23 +448,20 @@ impl FuzzTrait {
               where
                   T: Fuzz + ToValue + ValueTyped + wit_future::FuturePayload,
               {
-                  // Writes a fuzzed value.
+                  // Writes a fuzzed value, whose line is recorded as it is written, before the guest
+                  // can take it and go on, e.g. trap; a guest's drop of the future follows it if
+                  // the guest drops its end instead.
                   fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
                       let value = T::fuzz(u)?;
                       let (writer, reader, name) = host_future::<T>(true);
                       let label = Label { table: TRACE_TABLE, name };
                       let wave = wasm_wave::to_string(&value.to_value()).unwrap();
                       spawn(async move {
-                          let at = trace_at();
-                          match writer.write(value).await {
-                              Ok(()) => {
-                                  let value = FutureValue { future: label, value: wave };
-                                  proxy::recorder::record::record(&host_line_at(at, Event::Value(value)));
-                              }
-                              Err(unwritten) => {
-                                  proxy::recorder::record::record(&guest_line(Event::Drop(label)));
-                                  host_dropping(move || drop(unwritten));
-                              }
+                          let line = FutureValue { future: label.clone(), value: wave };
+                          proxy::recorder::record::record(&host_line(Event::Value(line)));
+                          if let Err(unwritten) = writer.write(value).await {
+                              proxy::recorder::record::record(&guest_line(Event::Drop(label)));
+                              host_dropping(move || drop(unwritten));
                           }
                       });
                       Ok(reader)
