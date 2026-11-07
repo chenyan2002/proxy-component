@@ -1,14 +1,15 @@
 //! Snapshot tests of the sources generated from the WIT of a main component in
-//! `tests/fixtures/proxy`, which compare them with `tests/snapshots/<mode>`.
+//! `tests/fixtures/p2/wit` and `tests/fixtures/p3/wit`, which compare them with
+//! `tests/snapshots/<mode>`.
 //! `BLESS=1 cargo test` rewrites the snapshots. `make test` builds and runs generated sources.
 use crate::Mode;
 use crate::instrument::{InstrumentArgs, generate_sources};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const FIXTURE: &str = "tests/fixtures/proxy";
+const FIXTURE: &str = "tests/fixtures/p2/wit";
 /// A WASI p3 main component, with async functions, streams, futures and error-contexts.
-const P3_FIXTURE: &str = "tests/fixtures/proxy-p3";
+const P3_FIXTURE: &str = "tests/fixtures/p3/wit";
 const SNAPSHOTS: &str = "tests/snapshots";
 /// The generated files to compare, relative to the generation directory.
 const OUTPUTS: &[&str] = &[

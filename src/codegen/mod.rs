@@ -668,9 +668,21 @@ fn export_call_defs(mode: &Mode) -> Vec<Item> {
 /// Helpers of record mode, which forwards the main component's calls to the host, and the host's
 /// to it, for each component.
 fn record_defs(has_executor: Option<HasExecutor>) -> Vec<Item> {
+    let common: File = parse_quote! {
+        thread_local! {
+            // Who sends the values being converted, for a stream's or future's pump (see
+            // `pump_defs`): the caller for the arguments, the callee for the result.
+            static SENDER: std::cell::Cell<Party> = const { std::cell::Cell::new(Party::Host) };
+        }
+    };
     let file: File = match has_executor {
-        // The imports component, whose executor awaits the host's async calls.
+        // The imports component, whose executor awaits the host's async calls, and runs the
+        // pumps, which record in the step of its run.
         Some(HasExecutor::Exports) => parse_quote! {
+            #[allow(dead_code)]
+            const TRACE_TABLE: Table = Table::Imports;
+            #[allow(dead_code)]
+            fn trace_at() -> u32 { current_step() }
             /// The host's result of an async call: at once, if it is ready on the first poll, so
             /// that the guest sees RETURNED, and otherwise from an executor job, which awaits the
             /// host's subtask, with the step of the run it completed in, as replay returns it in
@@ -691,8 +703,13 @@ fn record_defs(has_executor: Option<HasExecutor>) -> Vec<Item> {
             }
         },
         // The exports component, which runs the imports component's executor while the host's
-        // calls of async exports are pending: there is no `start` to run it.
+        // calls of async exports are pending: there is no `start` to run it. Its pumps run on
+        // the task of the call, and record in the last step, as fuzz mode's jobs there do.
         Some(HasExecutor::Imports) => parse_quote! {
+            #[allow(dead_code)]
+            const TRACE_TABLE: Table = Table::Exports;
+            #[allow(dead_code)]
+            fn trace_at() -> u32 { proxy::conversion::executor::current_step() }
             thread_local! {
                 // The host's calls of async exports that haven't returned.
                 static PENDING_CALLS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
@@ -713,7 +730,7 @@ fn record_defs(has_executor: Option<HasExecutor>) -> Vec<Item> {
         },
         None => return Vec::new(),
     };
-    file.items
+    common.items.into_iter().chain(file.items).collect()
 }
 
 /// Sends the panics of the component to the recorder, which reports them (see `fail`), in
@@ -810,6 +827,39 @@ fn start_spawn_defs() -> Vec<Item> {
         }
     };
     file.items
+}
+
+/// The bindings of a generated component, with the callback of the executor's task, if it
+/// exports `proxy:conversion/executor`, replaced by `executor_callback` (see
+/// `assets/executor.rs`), which wraps wit-bindgen's.
+///
+/// Panics if the bindings don't have wit-bindgen's callback of `run` where it is expected.
+pub fn patch_bindings(bindings: String) -> String {
+    const EXPORT: &str = "[callback][async-lift]proxy:conversion/executor#run";
+    const CALLBACK: &str = "pub unsafe fn __callback_run(";
+    const BODY: &str = "wit_bindgen::rt::async_support::callback(event0, event1, event2)";
+    if !bindings.contains(EXPORT) {
+        return bindings;
+    }
+    // The `executor` module's, which has no module of its own, so it ends before the next one.
+    let callbacks: Vec<usize> = bindings
+        .match_indices("pub mod executor {")
+        .filter_map(|(start, _)| {
+            let module = &bindings[start..];
+            let end = module[1..].find("pub mod ").map_or(module.len(), |end| end + 1);
+            module[..end].find(CALLBACK).map(|callback| start + callback)
+        })
+        .collect();
+    let [callback] = callbacks[..] else {
+        panic!("expected one `__callback_run` of the executor in the bindings, found {callbacks:?}");
+    };
+    let body = bindings[callback..]
+        .find(BODY)
+        .map(|body| callback + body)
+        .expect("expected wit-bindgen's callback in the executor's `__callback_run`");
+    let mut patched = bindings;
+    patched.replace_range(body..body + BODY.len(), "crate::executor_callback(event0, event1, event2)");
+    patched
 }
 
 pub fn get_proxy_path(src_path: &[String]) -> Vec<String> {

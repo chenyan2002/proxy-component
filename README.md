@@ -15,7 +15,7 @@ To build the CLI tool, just run `make all`.
 To test record and fuzzing, run `make test`.
 
 `cargo test` checks the generated sources against the snapshots in `tests/snapshots`, generated
-from the WIT in `tests/fixtures/proxy`. After an intended change, run `BLESS=1 cargo test` and
+from the WIT in `tests/fixtures/p2/wit` and `tests/fixtures/p3/wit`. After an intended change, run `BLESS=1 cargo test` and
 review the snapshots' diff.
 
 ## Usage

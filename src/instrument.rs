@@ -159,7 +159,7 @@ fn bindgen(
     let out_dir = tmp_dir.join(dest_name);
     fs::create_dir_all(&out_dir)?;
     let (mut resolve, world) = parse_wit(wit_dir, Some(world_name))?;
-    let bindings = crate::wit_util::generate_bindings(&mut resolve, world)?;
+    let bindings = codegen::patch_bindings(crate::wit_util::generate_bindings(&mut resolve, world)?);
     fs::write(out_dir.join("bindings.rs"), &bindings)?;
     let lib = codegen::generate(
         &args.mode,

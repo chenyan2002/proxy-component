@@ -47,7 +47,9 @@
 // arrival of an export call, which the exports component counts with the `step` export. Host
 // lines delivered outside a call carry the step, `at`, in which they happened (see
 // `docs/p3-record-replay.md`, Steps). A job that waits for a later run, e.g. an async import
-// the fuzzer made STARTED, makes the executor wake itself, as a host completion would.
+// the fuzzer made STARTED, makes the executor wake itself, as a host completion would. A run
+// after it, as after a host completion, takes an event that came meanwhile (see
+// `executor_callback`), so that a step means the same however the executor was woken.
 type Job = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
 #[derive(Default)]
 struct Executor {
@@ -65,6 +67,10 @@ thread_local! {
     // `wait_for_run`), and whether it was woken meanwhile.
     static HELD: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     static WOKEN_WHILE_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    // Set by `executor_callback` when the executor resumes after a yield, for its next poll to
+    // be a probe, and whether a probe was the last poll.
+    static PROBE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PROBED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 /// Counts a step, and returns it.
 #[allow(dead_code)]
@@ -231,6 +237,14 @@ fn wake_executor() {
 async fn run_executor() {
     let mut running: Vec<Job> = Vec::new();
     std::future::poll_fn(|cx| {
+        // A probe isn't a run: it wakes the executor, for wit-bindgen to take an event that came
+        // while it yielded, before its run (see `executor_callback`).
+        if PROBE.replace(false) {
+            PROBED.set(true);
+            cx.waker().wake_by_ref();
+            return std::task::Poll::Pending;
+        }
+        PROBED.set(false);
         // Held, it isn't a run: the jobs are polled at the next, as every run polls them all.
         if HELD.get() > 0 {
             WOKEN_WHILE_HELD.set(true);
@@ -263,6 +277,25 @@ async fn run_executor() {
         })
     })
     .await
+}
+/// The callback of the executor's task, which `run` exports, in place of wit-bindgen's (see
+/// `patch_bindings` in the generator). Resumed after a yield, e.g. by a job waiting for a later
+/// step, the executor first takes an event that came meanwhile, as a waiting executor woken by
+/// that event does, e.g. in record mode: wit-bindgen would only take it after a poll, in the
+/// next run. So its first poll is a probe, which only wakes it: wit-bindgen then takes a
+/// pending event, if any, and polls it again. If there was none, wit-bindgen yields, and the
+/// callback runs it at once instead.
+#[allow(dead_code)]
+unsafe fn executor_callback(event0: u32, event1: u32, event2: u32) -> u32 {
+    const EVENT_NONE: u32 = 0;
+    if event0 == EVENT_NONE {
+        PROBE.set(true);
+    }
+    let code = unsafe { wit_bindgen::rt::async_support::callback(event0, event1, event2) };
+    if PROBED.replace(false) {
+        return unsafe { wit_bindgen::rt::async_support::callback(EVENT_NONE, 0, 0) };
+    }
+    code
 }
 #[allow(dead_code)]
 fn stop_executor() {

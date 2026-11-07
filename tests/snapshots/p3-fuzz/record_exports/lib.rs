@@ -421,6 +421,7 @@ fn handle_label(end: &impl ToValue) -> String {
     wasm_wave::to_string(&end.to_value()).unwrap()
 }
 /// A stream the host writes: its writer, its reader, to hand out, and its label.
+#[allow(dead_code)]
 fn host_stream<T: wit_stream::StreamPayload + 'static>(
     label_reader: bool,
 ) -> (wit_bindgen::StreamWriter<T>, wit_bindgen::StreamReader<T>, String) {
@@ -433,6 +434,7 @@ fn host_stream<T: wit_stream::StreamPayload + 'static>(
 }
 /// A future the host writes, which it always does: its writer, its reader, to hand
 /// out, and its label.
+#[allow(dead_code)]
 fn host_future<T: wit_future::FuturePayload + 'static>(
     label_reader: bool,
 ) -> (wit_bindgen::FutureWriter<T>, wit_bindgen::FutureReader<T>, String) {

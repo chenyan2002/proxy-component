@@ -27,8 +27,8 @@ dialog support for p3.
   for p2 components.
 - **Replay** of p2 and p3 traces ([Replay](#replay)): calls and steps, RETURNED and STARTED,
   streams, futures and error-contexts.
-- **Record mode for p3**: async imports, RETURNED or STARTED, with their steps. Streams and
-  futures are next.
+- **Record mode for p3**: async imports, RETURNED or STARTED, with their steps, and streams and
+  futures, through pumps.
 
 ## Where nondeterminism comes from
 
@@ -215,7 +215,7 @@ number in that table, e.g. `#fields-3` or `#stream-7`.
 - **Streams and futures** are labeled by the handle of the end the proxy received, which it keeps
   for the stream's lifetime: the host's reader in an import's result or an export's arguments, the
   guest's in an import's arguments or an export's result. The proxy pumps it through a pair of its
-  own, whose ends never appear in the trace. A stream or future first appears in the value that
+  own, whose writer never appears in the trace. A stream or future first appears in the value that
   brings it across, in the table of the component that call or result crosses, and every later
   line uses the same label:
 
@@ -225,8 +225,9 @@ number in that table, e.g. `#fields-3` or `#stream-7`.
   | host | | `Return { id: c4, value: Some("(#stream-6, #future-9)") }` |
   | host | 5 | `Write { stream: #stream-6, items: "[52]" }` |
 
-  - **Record mode** prints each value as it received it, before `to_proxy`. Today it prints
-    arguments after converting them, which has to change.
+  - **Record mode** prints a call's arguments converted, and its result as received, as it does
+    for every value. So the reader it hands on in the arguments is printed by the received end's
+    label too, which it registers with wasm-wave's `set_handle_label`, as fuzz mode does.
   - **Fuzz and dialog modes** make the stream themselves: they keep the writer, and hand the
     reader out, which frees the reader's slot. So they label the stream by the writer, also where
     the reader is printed, in the value that hands it out: they register the pair with wasm-wave's
@@ -305,7 +306,10 @@ executor task, like fuzz mode's:
   would then go between the host and the guest without it. It keeps the end it received, creates
   a pair of its own, and passes on that pair's other end. A pump is the executor job between the
   two: it reads from one end, writes what it read to the other, and records each copy, and passes
-  on a drop the same way. A future is pumped once, for its value.
+  on a drop the same way. It reads from the writer only once the reader reads, without
+  [read-ahead](#read-ahead-in-pumps): a zero-length write to the reader's end waits for that, as
+  it completes once the reader reads, and leaves the read pending. A future is pumped once, for
+  its value.
 
 So nothing the host does reaches the guest outside an executor run. That's why a step number can
 mark when each host event happened.
@@ -377,6 +381,10 @@ Replay has to know when to perform each host line. There are three kinds of line
    to it. In replay, the executor counts its steps the same way, and a job holding such a line
    waits until the count reaches `n`. There is no host to wake the executor, so a job waiting for
    a later step makes the executor wake itself, by yielding, and its next run is the next step.
+   That run first takes an event that came while it yielded, e.g. a guest's write, as a waiting
+   executor woken by the event does in the recording: wit-bindgen would only take it after a
+   poll, in another run. So the executor's callback, which wraps wit-bindgen's, makes the first
+   poll after a yield a probe, which only lets wit-bindgen take a pending event.
    A task that waits for a step from outside the executor, e.g. the mock of a STARTED call, holds
    the executor from the run it waited for until the task resumes: otherwise a run, e.g. for a
    guest's drop, could come in between, which replay, knowing only the step, would place
@@ -494,7 +502,13 @@ or blocks first.
   the guest only once the host reads. Each of the guest's copies blocks first, so a guest copy
   that completes at once is never recorded, nor is whatever the guest does differently after one.
   The two copies of a chunk, between the host and the pump, and between the pump and the guest,
-  happen together, so one line describes both.
+  happen together, so one line describes both. This is record mode's choice:
+  - A zero-length write to the reader's end tells the pump that the reader reads, but not how
+    much: the pump reads up to its own capacity, 4096 items, and the reader's reads may split the
+    chunk, which replay's writes split alike.
+  - A host's end may answer a zero-length copy at once, without being ready, as the component
+    model allows it; wasmtime's do. The pump then takes a chunk of the guest's as soon as the
+    guest writes it, which a host that isn't ready, e.g. under backpressure, wouldn't have.
 - **With read-ahead**, the pump keeps a read pending on the host's side, and data ready for the
   guest, or the other way, for a stream the guest writes. Immediate copies become reachable, and
   every copy the guest makes is still recorded. What changes is what the host sees: it is read
@@ -700,10 +714,11 @@ depend on runtime patches. wasmtime 49 has the start of its own record and repla
 3. **Replay**, tested on traces that fuzz mode writes, with the checks of
    [Correctness](#checking-the-implementation): done. It replays 100 of 100 fuzz traces of the
    p3 fixture, and 60 of 60 of `wasi_http_p3`.
-4. **Record**, with the executor and its pumps, under `wasmtime serve` and `run`. Async imports
-   are done: `make test-record-p3` records `tests/fixtures/proxy-p3-record` under `wasmtime run`,
-   with delays that make its calls RETURNED or STARTED, and replays each trace. Next are streams
-   and futures, through pumps.
+4. **Record**, with the executor and its pumps, under `wasmtime serve` and `run`. Async imports,
+   streams and futures are done: `make test-record-p3` records `tests/fixtures/p3-record`
+   under `wasmtime run`, with delays that make its calls RETURNED or STARTED, and stdin copied to
+   stderr through their streams, and replays each trace. Next are the hosts: `wasmtime serve`,
+   and `proxy-component run`.
 5. **Portability across runtimes**: the profile proposal, or the shim.
 
 ## Open questions
@@ -713,7 +728,7 @@ depend on runtime patches. wasmtime 49 has the start of its own record and repla
    steps places them exactly.
 2. **[Read-ahead in pumps](#read-ahead-in-pumps)**: whether to read ahead, which makes the
    guest's immediate copies reachable, at the cost of the host's view, and of copy lines that
-   record the host's chunks rather than the guest's.
+   record the host's chunks rather than the guest's. Record mode doesn't, for now.
 3. **`list<u8>`** as WAVE lists or byte strings.
 4. **Which way to portability**: the profile, the shim, or both.
 5. **Hosts that are components**, e.g. virtualized WASI composed with the main component: whether

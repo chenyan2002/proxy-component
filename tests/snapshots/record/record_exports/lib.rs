@@ -10,6 +10,7 @@ impl exports::test::guest::api::Guest for Stub {
     ) -> Vec<u8> {
         let __id = trace_task_id(Table::Exports);
         let mut params: Vec<String> = Vec::new();
+        SENDER.set(Party::Host);
         let p = p.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
         let c = c.to_proxy();
@@ -35,6 +36,7 @@ impl exports::test::guest::api::Guest for Stub {
                 ..trace_return(Party::Guest, __id, Some(wave_res))
             },
         );
+        SENDER.set(Party::Guest);
         res.to_proxy()
     }
     fn classify(
@@ -42,6 +44,7 @@ impl exports::test::guest::api::Guest for Stub {
     ) -> ::core::option::Option<exports::test::guest::api::Point> {
         let __id = trace_task_id(Table::Exports);
         let mut params: Vec<String> = Vec::new();
+        SENDER.set(Party::Host);
         let s = s.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&s)).unwrap());
         let __at: Option<u32> = Some(proxy::conversion::executor::step());
@@ -65,6 +68,7 @@ impl exports::test::guest::api::Guest for Stub {
                 ..trace_return(Party::Guest, __id, Some(wave_res))
             },
         );
+        SENDER.set(Party::Guest);
         res.to_proxy()
     }
     fn begin(
@@ -72,6 +76,7 @@ impl exports::test::guest::api::Guest for Stub {
     ) -> exports::test::guest::api::Session {
         let __id = trace_task_id(Table::Exports);
         let mut params: Vec<String> = Vec::new();
+        SENDER.set(Party::Host);
         let c = c.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
         let __at: Option<u32> = Some(proxy::conversion::executor::step());
@@ -95,6 +100,7 @@ impl exports::test::guest::api::Guest for Stub {
                 ..trace_return(Party::Guest, __id, Some(wave_res))
             },
         );
+        SENDER.set(Party::Guest);
         res.to_proxy()
     }
 }
@@ -102,6 +108,7 @@ impl exports::test::guest::api::GuestSession for wrapped_test::guest::api::Sessi
     fn new(name: String) -> Self {
         let __id = trace_task_id(Table::Exports);
         let mut params: Vec<String> = Vec::new();
+        SENDER.set(Party::Host);
         let name = name.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
         let __at: Option<u32> = Some(proxy::conversion::executor::step());
@@ -125,6 +132,7 @@ impl exports::test::guest::api::GuestSession for wrapped_test::guest::api::Sessi
                 ..trace_return(Party::Guest, __id, Some(wave_res))
             },
         );
+        SENDER.set(Party::Guest);
         res
     }
     fn name(&self) -> String {
@@ -132,6 +140,7 @@ impl exports::test::guest::api::GuestSession for wrapped_test::guest::api::Sessi
         let params: Vec<String> = vec![
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
+        SENDER.set(Party::Host);
         let __at: Option<u32> = Some(proxy::conversion::executor::step());
         proxy::recorder::record::record(
             &Line {
@@ -153,6 +162,7 @@ impl exports::test::guest::api::GuestSession for wrapped_test::guest::api::Sessi
                 ..trace_return(Party::Guest, __id, Some(wave_res))
             },
         );
+        SENDER.set(Party::Guest);
         res.to_proxy()
     }
     unsafe fn resource_from_raw_(handle: *mut Option<Self>) -> Option<Self> {
@@ -1395,6 +1405,16 @@ async fn call_export<T>(id: TaskId, call: impl std::future::Future<Output = T>) 
             poll
         })
         .await
+}
+thread_local! {
+    static SENDER : std::cell::Cell < Party > = const { std::cell::Cell::new(Party::Host)
+    };
+}
+#[allow(dead_code)]
+const TRACE_TABLE: Table = Table::Exports;
+#[allow(dead_code)]
+fn trace_at() -> u32 {
+    proxy::conversion::executor::current_step()
 }
 thread_local! {
     static PENDING_CALLS : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };

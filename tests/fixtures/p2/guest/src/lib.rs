@@ -1,4 +1,4 @@
-//! A main component for the WIT in `tests/fixtures/proxy`, which drops and moves resources both
+//! A main component for the WIT in `tests/fixtures/p2/wit`, which drops and moves resources both
 //! ways, to test that record mode records exactly the drops, and replay replays them. `make
 //! test-fixture` runs it with `../host` and `../driver`, see `../compose.wac`:
 //! - `new session` drops a counter it made, and moves another to the host with `merge`;
@@ -9,7 +9,7 @@
 //! - dropping a session logs, then drops its counter: imports inside an export's drop.
 mod bindings {
     wit_bindgen::generate!({
-        path: "../../proxy",
+        path: "../wit",
         world: "root",
         generate_all,
     });

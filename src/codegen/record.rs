@@ -91,6 +91,7 @@ impl State {
                let (res, __at) = #call;
                let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
                proxy::recorder::record::record(&Line { at: __at, ..trace_return(Party::#callee, __id, Some(wave_res)) });
+               SENDER.set(Party::#callee);
                #res
             }
         };
@@ -98,6 +99,7 @@ impl State {
             #sig {
                 let __id = trace_task_id(Table::#table);
                 let #is_mut params: Vec<String> = #init_vec;
+                SENDER.set(Party::#caller);
                 #(
                     let #arg_names = #arg_names.to_proxy();
                     params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());

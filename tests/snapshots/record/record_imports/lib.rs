@@ -57,6 +57,7 @@ impl exports::wrapped_test::host::types::Guest for Stub {
     fn make_point(x: i32, y: i32) -> exports::wrapped_test::host::types::Point {
         let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
+        SENDER.set(Party::Guest);
         let x = x.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&x)).unwrap());
         let y = y.to_proxy();
@@ -82,6 +83,7 @@ impl exports::wrapped_test::host::types::Guest for Stub {
                 ..trace_return(Party::Host, __id, Some(wave_res))
             },
         );
+        SENDER.set(Party::Host);
         res.to_proxy()
     }
     fn check(
@@ -90,6 +92,7 @@ impl exports::wrapped_test::host::types::Guest for Stub {
     ) -> ::core::result::Result<exports::wrapped_test::host::types::Shape, String> {
         let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
+        SENDER.set(Party::Guest);
         let p = p.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
         let c = c.to_proxy();
@@ -115,6 +118,7 @@ impl exports::wrapped_test::host::types::Guest for Stub {
                 ..trace_return(Party::Host, __id, Some(wave_res))
             },
         );
+        SENDER.set(Party::Host);
         res.to_proxy()
     }
     fn open(
@@ -122,6 +126,7 @@ impl exports::wrapped_test::host::types::Guest for Stub {
     ) -> ::core::result::Result<exports::wrapped_test::host::types::Counter, String> {
         let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
+        SENDER.set(Party::Guest);
         let name = name.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
         let __at: Option<u32> = None;
@@ -145,6 +150,7 @@ impl exports::wrapped_test::host::types::Guest for Stub {
                 ..trace_return(Party::Host, __id, Some(wave_res))
             },
         );
+        SENDER.set(Party::Host);
         res.to_proxy()
     }
 }
@@ -152,6 +158,7 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
     fn new(start: u32) -> Self {
         let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
+        SENDER.set(Party::Guest);
         let start = start.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
         let __at: Option<u32> = None;
@@ -175,6 +182,7 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
                 ..trace_return(Party::Host, __id, Some(wave_res))
             },
         );
+        SENDER.set(Party::Host);
         res
     }
     fn get(&self) -> u32 {
@@ -182,6 +190,7 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
         let params: Vec<String> = vec![
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
+        SENDER.set(Party::Guest);
         let __at: Option<u32> = None;
         proxy::recorder::record::record(
             &Line {
@@ -203,6 +212,7 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
                 ..trace_return(Party::Host, __id, Some(wave_res))
             },
         );
+        SENDER.set(Party::Host);
         res.to_proxy()
     }
     fn add(&self, n: u32) -> () {
@@ -210,6 +220,7 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
         let mut params: Vec<String> = vec![
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
+        SENDER.set(Party::Guest);
         let n = n.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&n)).unwrap());
         let __at: Option<u32> = None;
@@ -239,6 +250,7 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
     ) -> exports::wrapped_test::host::types::Counter {
         let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
+        SENDER.set(Party::Guest);
         let a = a.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&a)).unwrap());
         let b = b.to_proxy();
@@ -264,6 +276,7 @@ impl exports::wrapped_test::host::types::GuestCounter for test::host::types::Cou
                 ..trace_return(Party::Host, __id, Some(wave_res))
             },
         );
+        SENDER.set(Party::Host);
         res.to_proxy()
     }
     unsafe fn resource_from_raw_(handle: *mut Option<Self>) -> Option<Self> {
@@ -281,6 +294,7 @@ impl exports::wrapped_test::log0_1_0::sink::Guest for Stub {
     fn write(msg: String) -> () {
         let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
+        SENDER.set(Party::Guest);
         let msg = msg.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
         let __at: Option<u32> = None;
@@ -309,6 +323,7 @@ impl exports::wrapped_test::log0_2_0::sink::Guest for Stub {
     fn write(msg: String) -> bool {
         let __id = trace_task_id(Table::Imports);
         let mut params: Vec<String> = Vec::new();
+        SENDER.set(Party::Guest);
         let msg = msg.to_proxy();
         params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
         let __at: Option<u32> = None;
@@ -332,6 +347,7 @@ impl exports::wrapped_test::log0_2_0::sink::Guest for Stub {
                 ..trace_return(Party::Host, __id, Some(wave_res))
             },
         );
+        SENDER.set(Party::Host);
         res.to_proxy()
     }
 }
@@ -1465,6 +1481,16 @@ fn trace_return_value(answers: Vec<Line>) -> Option<String> {
         })
         .expect("the trace doesn't answer the call")
 }
+thread_local! {
+    static SENDER : std::cell::Cell < Party > = const { std::cell::Cell::new(Party::Host)
+    };
+}
+#[allow(dead_code)]
+const TRACE_TABLE: Table = Table::Imports;
+#[allow(dead_code)]
+fn trace_at() -> u32 {
+    current_step()
+}
 /// The host's result of an async call: at once, if it is ready on the first poll, so
 /// that the guest sees RETURNED, and otherwise from an executor job, which awaits the
 /// host's subtask, with the step of the run it completed in, as replay returns it in
@@ -1503,6 +1529,8 @@ thread_local! {
     const { std::cell::Cell::new(0) }; static WAKE_AGAIN : std::cell::Cell < bool > =
     const { std::cell::Cell::new(false) }; static HELD : std::cell::Cell < u32 > = const
     { std::cell::Cell::new(0) }; static WOKEN_WHILE_HELD : std::cell::Cell < bool > =
+    const { std::cell::Cell::new(false) }; static PROBE : std::cell::Cell < bool > =
+    const { std::cell::Cell::new(false) }; static PROBED : std::cell::Cell < bool > =
     const { std::cell::Cell::new(false) };
 }
 /// Counts a step, and returns it.
@@ -1680,6 +1708,12 @@ fn wake_executor() {
 async fn run_executor() {
     let mut running: Vec<Job> = Vec::new();
     std::future::poll_fn(|cx| {
+            if PROBE.replace(false) {
+                PROBED.set(true);
+                cx.waker().wake_by_ref();
+                return std::task::Poll::Pending;
+            }
+            PROBED.set(false);
             if HELD.get() > 0 {
                 WOKEN_WHILE_HELD.set(true);
                 EXECUTOR.with_borrow_mut(|e| e.waker = Some(cx.waker().clone()));
@@ -1711,6 +1745,27 @@ async fn run_executor() {
                 })
         })
         .await
+}
+/// The callback of the executor's task, which `run` exports, in place of wit-bindgen's (see
+/// `patch_bindings` in the generator). Resumed after a yield, e.g. by a job waiting for a later
+/// step, the executor first takes an event that came meanwhile, as a waiting executor woken by
+/// that event does, e.g. in record mode: wit-bindgen would only take it after a poll, in the
+/// next run. So its first poll is a probe, which only wakes it: wit-bindgen then takes a
+/// pending event, if any, and polls it again. If there was none, wit-bindgen yields, and the
+/// callback runs it at once instead.
+#[allow(dead_code)]
+unsafe fn executor_callback(event0: u32, event1: u32, event2: u32) -> u32 {
+    const EVENT_NONE: u32 = 0;
+    if event0 == EVENT_NONE {
+        PROBE.set(true);
+    }
+    let code = unsafe {
+        wit_bindgen::rt::async_support::callback(event0, event1, event2)
+    };
+    if PROBED.replace(false) {
+        return unsafe { wit_bindgen::rt::async_support::callback(EVENT_NONE, 0, 0) };
+    }
+    code
 }
 #[allow(dead_code)]
 fn stop_executor() {

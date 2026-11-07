@@ -1,8 +1,8 @@
-//! A main component of `tests/fixtures/proxy-p3`, which `make test-fuzz` fuzzes: it uses each
+//! A main component of `tests/fixtures/p3/wit`, which `make test-fuzz` fuzzes: it uses each
 //! kind of async function, stream, future and error-context of the WIT. It tolerates whatever a
 //! host may do, e.g. stop reading a stream it returned, so that a fuzzed run doesn't trap.
 wit_bindgen::generate!({
-    path: "../../proxy-p3",
+    path: "../wit",
     world: "root",
     generate_all,
 });

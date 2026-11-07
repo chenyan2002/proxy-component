@@ -1,7 +1,7 @@
 //! A host for the fixture guest: counters that count, and a log that prints.
 mod bindings {
     wit_bindgen::generate!({
-        path: ["../../proxy/deps/host.wit", "../../proxy/deps/log@0.1.0.wit", "wit"],
+        path: ["../wit/deps/host.wit", "../wit/deps/log@0.1.0.wit", "wit"],
         world: "test:mockhost/mockhost",
         generate_all,
     });
