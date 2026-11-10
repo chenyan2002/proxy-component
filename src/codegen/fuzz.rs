@@ -16,31 +16,80 @@ impl State {
         let display_name = &wit_func.display_name;
         let args = extract_arg_info(sig);
         let ret_ty = get_return_type(&sig.output);
+        // The streams and futures the guest gives the host, which the host reads or drops.
+        let moved = self.take_moved_args(
+            &wit_func,
+            &args,
+            |arg| quote! { Fuzz::consume(#arg, &mut __host) },
+        );
+        let is_async = wit_func.is_async;
+        let params = params_to_wave(kind.as_ref(), &args);
+        // What the host does, rather than returns: how it reads the streams and futures, and when
+        // an async import returns, at once (RETURNED), or after the executor ran a few times
+        // (STARTED), in whose last run the `return` happens. Random for each call, rather than
+        // drawn from its arguments, as the same call may take its time differently.
+        let delay = if is_async {
+            quote! {
+                let __runs = __host.int_in_range(0..=3u8).unwrap_or(0);
+                let __at = if __runs > 0 {
+                    proxy::recorder::record::record(&Line { by: Party::Host, at: None, event: Event::Started(__id) });
+                    let __cancel = TraceCancel(Some(__id));
+                    let at = wait_for_runs(__runs as u32).await;
+                    __cancel.done();
+                    Some(at)
+                } else {
+                    None
+                };
+            }
+        } else {
+            quote! { let __at: Option<u32> = None; }
+        };
+        let preamble = quote! {
+            #params
+            let __id = trace_task_id(Table::Imports);
+            proxy::recorder::record::record(&trace_call(Party::Guest, __id, #display_name, #is_async, __params.clone()));
+            let __random = proxy::util::debug::get_random();
+            let mut __host = Unstructured::new(&__random);
+            #moved
+            #delay
+        };
+        let record_ret = |value: proc_macro2::TokenStream| {
+            quote! {
+                proxy::recorder::record::record(&Line { at: __at, ..trace_return(Party::Host, __id, #value) });
+            }
+        };
         if ret_ty.is_some() {
-            let params = params_to_wave(kind.as_ref(), &args);
             let gen_ret = match wit_func.constructor_resource() {
                 Some(name) => {
-                    quote! { MockedResource { name: #name.to_string(), ..u.arbitrary().unwrap() } }
+                    quote! { MockedResource { name: #name.to_string(), ..Fuzz::fuzz(&mut u).unwrap() } }
                 }
-                None => quote! { u.arbitrary().unwrap() },
+                None => quote! { Fuzz::fuzz(&mut u).unwrap() },
+            };
+            let record_ret = record_ret(quote! { Some(res_str) });
+            let ret = quote! {
+                let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
+                #record_ret
             };
             parse_quote! {
+                #[allow(unused_variables)]
                 #sig {
-                    #params
-                    let mut __buf = __params.join(",");
-                    proxy::util::debug::print(&format!("import: {}({})", #display_name, __buf));
-                    __buf += #display_name;
-                    let mut u = Unstructured::new(&__buf.as_bytes());
+                    #preamble
+                    // The result, drawn from the arguments (see `fuzz_data`).
+                    let __data = fuzz_data(&(__params.join(",") + #display_name));
+                    let mut u = Unstructured::new(&__data);
                     let res = #gen_ret;
-                    let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
-                    proxy::util::debug::print(&format!("ret: {}", res_str));
+                    #ret
                     res
                 }
             }
         } else {
+            let record_ret = record_ret(quote! { None });
             parse_quote! {
                 #[allow(unused_variables)]
-                #sig {}
+                #sig {
+                    #preamble
+                    #record_ret
+                }
             }
         }
     }
@@ -51,29 +100,43 @@ impl State {
             .map(|func| {
                 let ExportFunc {
                     display_name,
-                    func,
                     arg_names,
                     arg_tys,
-                    call_params,
+                    is_async,
                     ..
-                } = func;
-                quote! {
-                    {
-                        let mut __params: Vec<String> = Vec::new();
-                        #(
-                            let #arg_names: #arg_tys = u.arbitrary().unwrap();
-                            __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
-                        )*
-                        proxy::util::debug::print(&format!("export: {}({})", #display_name, __params.join(", ")));
-                        let _ = #func(#(#call_params),*);
-                    }
-                }
+                } = &func;
+                // The guest, and the host's background work, run a few steps before the call, as
+                // they do before replay's, in the steps the trace has. Then the arguments are
+                // made, as replay makes them from the trace once it is in the call's step, so that
+                // the jobs of their streams and futures come after the call that hands them out.
+                let args = quote! {
+                    let __runs = u.int_in_range(0..=3u8).unwrap() as u32;
+                    let __at = proxy::conversion::executor::step_after(proxy::conversion::executor::current_step() + __runs).await;
+                    let mut __params: Vec<String> = Vec::new();
+                    #(
+                        let #arg_names: #arg_tys = Fuzz::fuzz(&mut u).unwrap();
+                        __params.push(wasm_wave::to_string(&ToValue::to_value(&#arg_names)).unwrap());
+                    )*
+                };
+                let before = quote! {
+                    let __id = trace_task_id(Table::Exports);
+                    proxy::recorder::record::record(&Line {
+                        at: Some(__at),
+                        ..trace_call(Party::Host, __id, #display_name, #is_async, __params)
+                    });
+                };
+                // The streams and futures the guest returns, which the host reads or drops, and
+                // its resources, which the host drops.
+                let after = quote! { Fuzz::consume(res, &mut u); };
+                let call = self.start_call(&func, args, before, after);
+                quote! { { #call } }
             })
             .collect();
         let func_len = arms.len();
         let idxs = 1..=func_len;
-        parse_quote! {
-            #sig {
+        self.generate_start(
+            sig,
+            quote! {
                 let __buf = proxy::util::debug::get_random();
                 let mut u = Unstructured::new(&__buf);
                 for _ in 0..10 {
@@ -82,12 +145,8 @@ impl State {
                         #(#idxs => #arms)*
                         _ => unreachable!(),
                     }
-                    // clean up borrowed resources from input args
-                    SCOPED_ALLOC.with(|alloc| {
-                        alloc.borrow_mut().clear();
-                    });
                 }
-            }
-        }
+            },
+        )
     }
 }

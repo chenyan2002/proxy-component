@@ -14,81 +14,62 @@ impl State {
         let wit_func = self.expect_wit_func(module_path, resource, func_name);
         let kind = wit_func.kind;
         let display_name = &wit_func.display_name;
+        let is_async = wit_func.is_async;
         let args = extract_arg_info(sig);
         let ret_ty = get_return_type(&sig.output);
-        let replay_import = if let Some(ret_ty) = ret_ty {
-            let to_rust = match wit_func.constructor_resource() {
+        let params = params_to_wave(kind.as_ref(), &args);
+        // The streams and futures the guest gives the host, which the trace reads, after the
+        // call has checked, and so paired, their labels.
+        let moved = self.take_moved_args(&wit_func, &args, |arg| quote! { Replay::consume(#arg) });
+        // The value of the `return` that answers the call: for an async call, at once or in its
+        // step, as the trace has it RETURNED or STARTED.
+        let answer = if is_async {
+            quote! {{
+                let __cancel = TraceCancel(Some(__id));
+                let answer = trace_answer(__id, __answers).await;
+                __cancel.done();
+                answer
+            }}
+        } else {
+            quote! { trace_return_value(__answers) }
+        };
+        let ret = if let Some(ret_ty) = ret_ty {
+            let replay = match wit_func.constructor_resource() {
                 Some(name) => {
-                    quote! { MockedResource { name: #name.to_string(), ..ret.to_rust() } }
+                    quote! { MockedResource { name: #name.to_string(), ..Replay::replay(&ret) } }
                 }
-                None => quote! { ret.to_rust() },
+                None => quote! { Replay::replay(&ret) },
             };
             quote! {
-                let wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&__params)).unwrap();
-                let ret: Value = wasm_wave::from_str(&<#ret_ty as ValueTyped>::value_type(), &wave).unwrap();
-                #to_rust
+                let ret: Value = wasm_wave::from_str(&<#ret_ty as ValueTyped>::value_type(), &wave.unwrap()).unwrap();
+                #replay
             }
         } else {
-            quote! {
-                let wave = proxy::recorder::replay::replay_import(Some(#display_name), Some(&__params));
-                assert!(wave.is_none());
-            }
+            quote! { assert!(wave.is_none()); }
         };
-        let params = params_to_wave(kind.as_ref(), &args);
-        // The host takes the resources the arguments own, so dropping them is not a drop.
-        let owned_args: Vec<_> = args
-            .iter()
-            .zip(&wit_func.params_own)
-            .filter(|(_, owns)| **owns)
-            .map(|(arg, _)| &arg.ident)
-            .collect();
-        if owned_args.is_empty() {
-            return parse_quote! {
-                #sig {
-                    #params
-                    #replay_import
-                }
-            };
-        }
         parse_quote! {
+            #[allow(unused_variables)]
             #sig {
                 #params
-                let __ret = { #replay_import };
-                MOVING.with(|moving| moving.set(true));
-                drop((#(#owned_args,)*));
-                MOVING.with(|moving| moving.set(false));
-                __ret
-            }
-        }
-    }
-    /// Overrides wit-bindgen's `resource_from_raw_`, which the `[dtor]` of a mocked resource
-    /// calls, to check the drop with the trace.
-    pub fn generate_replay_drop(&self) -> syn::ImplItemFn {
-        let drop_name = trace::DROP;
-        parse_quote! {
-            unsafe fn resource_from_raw_(handle: *mut Option<Self>) -> Option<Self> {
-                // `None` if `into_inner` moved the resource out: not a drop.
-                if let Some(res) = *unsafe { Box::from_raw(handle) } {
-                    if !MOVING.with(|moving| moving.get()) {
-                        let params = vec![wasm_wave::to_string(&res.to_value()).unwrap()];
-                        let ret = proxy::recorder::replay::replay_import(Some(#drop_name), Some(&params));
-                        assert!(ret.is_none());
-                    }
-                }
-                None
+                let __id = trace_task_id(Table::Imports);
+                let __call = trace_call(Party::Guest, __id, #display_name, #is_async, __params);
+                let __answers = proxy::recorder::replay::check(&__call);
+                #moved
+                let wave = #answer;
+                #ret
             }
         }
     }
     /// Items the replay functions use.
     pub fn replay_defs(&self) -> Vec<Item> {
         // `MOVING` is set while an import drops the resources its arguments own, which the guest
-        // moved to the host, so that `generate_replay_drop` doesn't check them as drops.
+        // moved to the host, so that `generate_mock_drop` doesn't take them for the guest's drops.
         //
-        // Only replay needs it. In record mode, the import passes the host resource of each
-        // argument on to the host, taking it out with `into_inner` (see `ToProxy`), so the
-        // destructor finds no resource to record. In replay there's no host to take them: the
+        // Only replay and fuzz modes need it. In record mode, the import passes the host resource
+        // of each argument on to the host, taking it out with `into_inner` (see `ToProxy`), so the
+        // destructor finds no resource to record. With mocks there's no host to take them: the
         // import drops its arguments, and the destructors find their mocked resources. A flag
-        // spares replay a type-directed trait like `ToProxy`, to take the resources out of nested
+        // spares a type-directed trait like `ToProxy`, to take the resources out of nested
         // arguments, e.g. `list<counter>`. A thread-local, as `[dtor]`s take no other arguments.
         let file: syn::File = parse_quote! {
             thread_local! {
@@ -98,10 +79,9 @@ impl State {
         };
         file.items
     }
-    /// The arm of the `start` function dropping a resource of the main component, which the
-    /// trace labels by its handle in this component, e.g. `#session-1`.
+    /// The arm of the `start` function for the host's drop of a resource of the main component,
+    /// which the trace labels by its handle in this component, e.g. `#session-1`.
     fn replay_export_drop(&self) -> Option<proc_macro2::TokenStream> {
-        let drop_name = trace::DROP;
         let resources: Vec<_> = self
             .types
             .iter()
@@ -125,17 +105,20 @@ impl State {
             }
         });
         Some(quote! {
-            #drop_name => {
-                let (name, handle) = args[0]
-                    .strip_prefix('#')
-                    .and_then(|label| label.rsplit_once('-'))
-                    .and_then(|(name, handle)| Some((name, handle.parse::<u32>().ok()?)))
+            Event::Drop(label) => {
+                // E.g. `#session-1`, or `#session-1-2` for a later binding of the number (see
+                // `crates/trace`'s renaming): the name ends before the first number.
+                let label = label.name.strip_prefix('#').expect("invalid handle label");
+                let words: Vec<&str> = label.split('-').collect();
+                let number = words
+                    .iter()
+                    .position(|word| word.parse::<u32>().is_ok())
                     .expect("invalid handle label");
-                match name {
+                let (name, handle) = (words[..number].join("-"), words[number].parse::<u32>().unwrap());
+                match name.as_str() {
                     #(#arms)*
                     _ => unreachable!(),
                 }
-                proxy::recorder::replay::assert_export_ret(Some(#drop_name), None);
             }
         })
     }
@@ -143,59 +126,48 @@ impl State {
         let arms = self.export_funcs().into_iter().map(|func| {
             let ExportFunc {
                 display_name,
-                func,
                 arg_names,
                 arg_tys,
-                call_params,
-                has_ret,
-                ret_owns,
                 ..
-            } = func;
+            } = &func;
             let arg_idx = (0..arg_names.len()).map(|idx| quote! { args[#idx] });
-            let assert_ret = if has_ret {
-                quote! {
-                    let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                    proxy::recorder::replay::assert_export_ret(Some(#display_name), Some(&wave_res));
-                }
-            } else {
-                quote! {
-                    assert!(res == ());
-                    proxy::recorder::replay::assert_export_ret(Some(#display_name), None);
-                }
+            let args = quote! {
+                #(
+                    let arg_value: Value = wasm_wave::from_str(&<#arg_tys as ValueTyped>::value_type(), &#arg_idx).unwrap();
+                    let #arg_names: #arg_tys = Replay::replay(&arg_value);
+                )*
             };
-            // The host keeps the resources it gets, until the trace drops them.
-            let keep_ret = if ret_owns {
-                quote! { std::mem::forget(res); }
-            } else {
-                quote! {}
-            };
-            quote! {
-                #display_name => {
-                    #(
-                        let arg_value: Value = wasm_wave::from_str(&<#arg_tys as ValueTyped>::value_type(), &#arg_idx).unwrap();
-                        let #arg_names: #arg_tys = arg_value.to_rust();
-                    )*
-                    let res = #func(#(#call_params),*);
-                    #assert_ret
-                    #keep_ret
-                }
-            }
+            // The streams and futures the guest returns, which the trace reads, and its resources,
+            // which the host keeps, until the trace drops them.
+            let after = quote! { Replay::consume(res); };
+            // The call's id is the trace's, as the trace makes the call, in its step (see
+            // below).
+            let call = self.start_call(&func, args, quote! {}, after);
+            quote! { #display_name => { #call } }
         });
         let drop_arm = self.replay_export_drop();
-        parse_quote! {
-            #sig {
-                while let Some((method, args)) = proxy::recorder::replay::replay_export() {
-                    match method.as_str() {
-                        #(#arms)*
-                        #drop_arm
-                        _ => unreachable!(),
+        self.generate_start(
+            sig,
+            quote! {
+                while let Some(line) = proxy::recorder::replay::next_host_line() {
+                    // A line in step `at` follows the step before it, and takes its own step, as
+                    // an export call's arrival does.
+                    if let Some(at) = line.at {
+                        let step = proxy::conversion::executor::step_after(at - 1).await;
+                        assert_eq!(step, at, "replay came to {:?} in step {step}", line.event);
                     }
-                    // clean up borrowed resources from input args
-                    SCOPED_ALLOC.with(|alloc| {
-                        alloc.borrow_mut().clear();
-                    });
+                    match line.event {
+                        Event::Call(Call { id: __id, func, args, .. }) => {
+                            match func.as_str() {
+                                #(#arms)*
+                                _ => unreachable!("the trace calls an unknown export {func}"),
+                            }
+                        }
+                        #drop_arm
+                        event => unreachable!("`start` doesn't perform {event:?}"),
+                    }
                 }
-            }
-        }
+            },
+        )
     }
 }

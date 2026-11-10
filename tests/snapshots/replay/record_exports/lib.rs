@@ -3,174 +3,141 @@ use bindings::*;
 struct Stub;
 bindings::export!(Stub with_types_in bindings);
 impl exports::proxy::recorder::start_replay::Guest for Stub {
-    fn start() -> () {
-        while let Some((method, args)) = proxy::recorder::replay::replay_export() {
-            match method.as_str() {
-                "test:guest/api@0.1.0.run" => {
-                    let arg_value: Value = wasm_wave::from_str(
-                            &<test::guest::api::Point as ValueTyped>::value_type(),
-                            &args[0usize],
-                        )
-                        .unwrap();
-                    let p: test::guest::api::Point = arg_value.to_rust();
-                    let arg_value: Value = wasm_wave::from_str(
-                            &<test::guest::api::Counter as ValueTyped>::value_type(),
-                            &args[1usize],
-                        )
-                        .unwrap();
-                    let c: test::guest::api::Counter = arg_value.to_rust();
-                    let res = test::guest::api::run(&p, &c);
-                    let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                    proxy::recorder::replay::assert_export_ret(
-                        Some("test:guest/api@0.1.0.run"),
-                        Some(&wave_res),
-                    );
+    async fn start() -> () {
+        static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
+        PANIC_HOOK
+            .call_once(|| std::panic::set_hook(
+                Box::new(|info| proxy::recorder::replay::fail(&info.to_string())),
+            ));
+        let __executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
+        while let Some(line) = proxy::recorder::replay::next_host_line() {
+            if let Some(at) = line.at {
+                let step = proxy::conversion::executor::step_after(at - 1).await;
+                assert_eq!(step, at, "replay came to {:?} in step {step}", line.event);
+            }
+            match line.event {
+                Event::Call(Call { id: __id, func, args, .. }) => {
+                    match func.as_str() {
+                        "test:guest/api@0.1.0.run" => {
+                            let res = {
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<test::guest::api::Point as ValueTyped>::value_type(),
+                                        &args[0usize],
+                                    )
+                                    .unwrap();
+                                let p: test::guest::api::Point = Replay::replay(&arg_value);
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<test::guest::api::Counter as ValueTyped>::value_type(),
+                                        &args[1usize],
+                                    )
+                                    .unwrap();
+                                let c: test::guest::api::Counter = Replay::replay(
+                                    &arg_value,
+                                );
+                                let res = test::guest::api::run(&p, &c);
+                                trace_guest(
+                                    &trace_return(
+                                        Party::Guest,
+                                        __id,
+                                        Some(wasm_wave::to_string(&res.to_value()).unwrap()),
+                                    ),
+                                );
+                                proxy::conversion::executor::host_drops(true);
+                                res
+                            };
+                            Replay::consume(res);
+                            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                            proxy::conversion::executor::host_drops(false);
+                        }
+                        "test:guest/api@0.1.0.classify" => {
+                            let res = {
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<test::guest::api::Shape as ValueTyped>::value_type(),
+                                        &args[0usize],
+                                    )
+                                    .unwrap();
+                                let s: test::guest::api::Shape = Replay::replay(&arg_value);
+                                let res = test::guest::api::classify(&s);
+                                trace_guest(
+                                    &trace_return(
+                                        Party::Guest,
+                                        __id,
+                                        Some(wasm_wave::to_string(&res.to_value()).unwrap()),
+                                    ),
+                                );
+                                proxy::conversion::executor::host_drops(true);
+                                res
+                            };
+                            Replay::consume(res);
+                            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                            proxy::conversion::executor::host_drops(false);
+                        }
+                        "test:guest/api@0.1.0.begin" => {
+                            let res = {
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<test::guest::api::Counter as ValueTyped>::value_type(),
+                                        &args[0usize],
+                                    )
+                                    .unwrap();
+                                let c: test::guest::api::Counter = Replay::replay(
+                                    &arg_value,
+                                );
+                                let res = test::guest::api::begin(c);
+                                trace_guest(
+                                    &trace_return(
+                                        Party::Guest,
+                                        __id,
+                                        Some(wasm_wave::to_string(&res.to_value()).unwrap()),
+                                    ),
+                                );
+                                proxy::conversion::executor::host_drops(true);
+                                res
+                            };
+                            Replay::consume(res);
+                            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                            proxy::conversion::executor::host_drops(false);
+                        }
+                        "new test:guest/api/session@0.1.0" => {
+                            let res = {
+                                let arg_value: Value = wasm_wave::from_str(
+                                        &<String as ValueTyped>::value_type(),
+                                        &args[0usize],
+                                    )
+                                    .unwrap();
+                                let name: String = Replay::replay(&arg_value);
+                                let res = test::guest::api::Session::new(&name);
+                                trace_guest(
+                                    &trace_return(
+                                        Party::Guest,
+                                        __id,
+                                        Some(wasm_wave::to_string(&res.to_value()).unwrap()),
+                                    ),
+                                );
+                                proxy::conversion::executor::host_drops(true);
+                                res
+                            };
+                            Replay::consume(res);
+                            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+                            proxy::conversion::executor::host_drops(false);
+                        }
+                        _ => unreachable!("the trace calls an unknown export {func}"),
+                    }
                 }
-                "test:guest/api@0.1.0.classify" => {
-                    let arg_value: Value = wasm_wave::from_str(
-                            &<test::guest::api::Shape as ValueTyped>::value_type(),
-                            &args[0usize],
-                        )
-                        .unwrap();
-                    let s: test::guest::api::Shape = arg_value.to_rust();
-                    let res = test::guest::api::classify(&s);
-                    let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                    proxy::recorder::replay::assert_export_ret(
-                        Some("test:guest/api@0.1.0.classify"),
-                        Some(&wave_res),
-                    );
-                }
-                "test:guest/api@0.1.0.begin" => {
-                    let arg_value: Value = wasm_wave::from_str(
-                            &<test::guest::api::Counter as ValueTyped>::value_type(),
-                            &args[0usize],
-                        )
-                        .unwrap();
-                    let c: test::guest::api::Counter = arg_value.to_rust();
-                    let res = test::guest::api::begin(c);
-                    let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                    proxy::recorder::replay::assert_export_ret(
-                        Some("test:guest/api@0.1.0.begin"),
-                        Some(&wave_res),
-                    );
-                    std::mem::forget(res);
-                }
-                "new test:guest/api/session@0.1.0" => {
-                    let arg_value: Value = wasm_wave::from_str(
-                            &<String as ValueTyped>::value_type(),
-                            &args[0usize],
-                        )
-                        .unwrap();
-                    let name: String = arg_value.to_rust();
-                    let res = test::guest::api::Session::new(&name);
-                    let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                    proxy::recorder::replay::assert_export_ret(
-                        Some("new test:guest/api/session@0.1.0"),
-                        Some(&wave_res),
-                    );
-                    std::mem::forget(res);
-                }
-                "test:host/types@0.1.0.make-point" => {
-                    let arg_value: Value = wasm_wave::from_str(
-                            &<i32 as ValueTyped>::value_type(),
-                            &args[0usize],
-                        )
-                        .unwrap();
-                    let x: i32 = arg_value.to_rust();
-                    let arg_value: Value = wasm_wave::from_str(
-                            &<i32 as ValueTyped>::value_type(),
-                            &args[1usize],
-                        )
-                        .unwrap();
-                    let y: i32 = arg_value.to_rust();
-                    let res = test::host::types::make_point(x, y);
-                    let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                    proxy::recorder::replay::assert_export_ret(
-                        Some("test:host/types@0.1.0.make-point"),
-                        Some(&wave_res),
-                    );
-                }
-                "test:host/types@0.1.0.check" => {
-                    let arg_value: Value = wasm_wave::from_str(
-                            &<test::host::types::Perms as ValueTyped>::value_type(),
-                            &args[0usize],
-                        )
-                        .unwrap();
-                    let p: test::host::types::Perms = arg_value.to_rust();
-                    let arg_value: Value = wasm_wave::from_str(
-                            &<test::host::types::Color as ValueTyped>::value_type(),
-                            &args[1usize],
-                        )
-                        .unwrap();
-                    let c: test::host::types::Color = arg_value.to_rust();
-                    let res = test::host::types::check(p, c);
-                    let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                    proxy::recorder::replay::assert_export_ret(
-                        Some("test:host/types@0.1.0.check"),
-                        Some(&wave_res),
-                    );
-                }
-                "test:host/types@0.1.0.open" => {
-                    let arg_value: Value = wasm_wave::from_str(
-                            &<String as ValueTyped>::value_type(),
-                            &args[0usize],
-                        )
-                        .unwrap();
-                    let name: String = arg_value.to_rust();
-                    let res = test::host::types::open(&name);
-                    let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                    proxy::recorder::replay::assert_export_ret(
-                        Some("test:host/types@0.1.0.open"),
-                        Some(&wave_res),
-                    );
-                    std::mem::forget(res);
-                }
-                "new test:host/types/counter@0.1.0" => {
-                    let arg_value: Value = wasm_wave::from_str(
-                            &<u32 as ValueTyped>::value_type(),
-                            &args[0usize],
-                        )
-                        .unwrap();
-                    let start: u32 = arg_value.to_rust();
-                    let res = test::host::types::Counter::new(start);
-                    let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                    proxy::recorder::replay::assert_export_ret(
-                        Some("new test:host/types/counter@0.1.0"),
-                        Some(&wave_res),
-                    );
-                    std::mem::forget(res);
-                }
-                "test:host/types/counter@0.1.0.merge" => {
-                    let arg_value: Value = wasm_wave::from_str(
-                            &<test::host::types::Counter as ValueTyped>::value_type(),
-                            &args[0usize],
-                        )
-                        .unwrap();
-                    let a: test::host::types::Counter = arg_value.to_rust();
-                    let arg_value: Value = wasm_wave::from_str(
-                            &<test::host::types::Counter as ValueTyped>::value_type(),
-                            &args[1usize],
-                        )
-                        .unwrap();
-                    let b: test::host::types::Counter = arg_value.to_rust();
-                    let res = test::host::types::Counter::merge(&a, b);
-                    let wave_res = wasm_wave::to_string(&res.to_value()).unwrap();
-                    proxy::recorder::replay::assert_export_ret(
-                        Some("test:host/types/counter@0.1.0.merge"),
-                        Some(&wave_res),
-                    );
-                    std::mem::forget(res);
-                }
-                "drop" => {
-                    let (name, handle) = args[0]
+                Event::Drop(label) => {
+                    let label = label
+                        .name
                         .strip_prefix('#')
-                        .and_then(|label| label.rsplit_once('-'))
-                        .and_then(|(name, handle)| Some((
-                            name,
-                            handle.parse::<u32>().ok()?,
-                        )))
                         .expect("invalid handle label");
-                    match name {
+                    let words: Vec<&str> = label.split('-').collect();
+                    let number = words
+                        .iter()
+                        .position(|word| word.parse::<u32>().is_ok())
+                        .expect("invalid handle label");
+                    let (name, handle) = (
+                        words[..number].join("-"),
+                        words[number].parse::<u32>().unwrap(),
+                    );
+                    match name.as_str() {
                         "session" => {
                             drop(unsafe {
                                 test::guest::api::Session::from_handle(handle)
@@ -178,15 +145,14 @@ impl exports::proxy::recorder::start_replay::Guest for Stub {
                         }
                         _ => unreachable!(),
                     }
-                    proxy::recorder::replay::assert_export_ret(Some("drop"), None);
                 }
-                _ => unreachable!(),
+                event => unreachable!("`start` doesn't perform {event:?}"),
             }
-            SCOPED_ALLOC
-                .with(|alloc| {
-                    alloc.borrow_mut().clear();
-                });
         }
+        join_spawned().await;
+        proxy::conversion::executor::stop();
+        __executor.await;
+        proxy::recorder::replay::finish();
     }
 }
 impl ValueTyped for test::guest::api::Session {
@@ -211,45 +177,6 @@ impl<'a> ToValue for &'a test::guest::api::Session {
         Value::make_handle(label.into())
     }
 }
-impl ToRust<test::guest::api::Session> for Value {
-    fn to_rust(&self) -> test::guest::api::Session {
-        let label = self.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("{}-", "session"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        {
-            fn cannot_mock<T>() -> T {
-                unimplemented!("cannot mock `session`, a resource of the main component")
-            }
-            let _ = handle;
-            cannot_mock()
-        }
-    }
-}
-impl<'a> ToRust<&'a test::guest::api::Session> for Value {
-    fn to_rust(&self) -> &'a test::guest::api::Session {
-        let label = self.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("borrow-{}-", "session"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        SCOPED_ALLOC
-            .with(|alloc| {
-                let mut alloc = alloc.borrow_mut();
-                alloc
-                    .alloc({
-                        fn cannot_mock<T>() -> T {
-                            unimplemented!(
-                                "cannot mock `session`, a resource of the main component"
-                            )
-                        }
-                        let _ = handle;
-                        cannot_mock()
-                    })
-            })
-    }
-}
 impl ValueTyped for test::host::types::Point {
     #[allow(unused_imports)]
     fn value_type() -> Type {
@@ -269,16 +196,6 @@ impl ToValue for test::host::types::Point {
             .to_value())
         ];
         Value::make_record(&ty, fields).unwrap()
-    }
-}
-impl ToRust<test::host::types::Point> for Value {
-    fn to_rust(&self) -> test::host::types::Point {
-        let fields: std::collections::BTreeMap<_, _> = self.unwrap_record().collect();
-        test::host::types::Point {
-            x: fields["x"].to_rust(),
-            y: fields["y"].to_rust(),
-            label: fields["label"].to_rust(),
-        }
     }
 }
 impl ValueTyped for test::host::types::Shape {
@@ -306,23 +223,6 @@ impl ToValue for test::host::types::Shape {
             .unwrap()
     }
 }
-impl ToRust<test::host::types::Shape> for Value {
-    fn to_rust(&self) -> test::host::types::Shape {
-        match self.unwrap_variant() {
-            (ref case, Some(val)) if case == "circle" => {
-                test::host::types::Shape::Circle(val.to_rust())
-            }
-            (ref case, Some(val)) if case == "rect" => {
-                test::host::types::Shape::Rect(val.to_rust())
-            }
-            (ref case, Some(val)) if case == "HTTP-error" => {
-                test::host::types::Shape::HttpError(val.to_rust())
-            }
-            (ref case, None) if case == "empty" => test::host::types::Shape::Empty,
-            _ => unreachable!(),
-        }
-    }
-}
 impl ValueTyped for test::host::types::Color {
     #[allow(unused_imports)]
     fn value_type() -> Type {
@@ -339,16 +239,6 @@ impl ToValue for test::host::types::Color {
             Self::DnsBlue => Value::make_variant(&ty, "DNS-blue", None),
         }
             .unwrap()
-    }
-}
-impl ToRust<test::host::types::Color> for Value {
-    fn to_rust(&self) -> test::host::types::Color {
-        match self.unwrap_variant() {
-            (ref case, None) if case == "red" => test::host::types::Color::Red,
-            (ref case, None) if case == "green" => test::host::types::Color::Green,
-            (ref case, None) if case == "DNS-blue" => test::host::types::Color::DnsBlue,
-            _ => unreachable!(),
-        }
     }
 }
 impl ValueTyped for test::host::types::Perms {
@@ -372,22 +262,6 @@ impl ToValue for test::host::types::Perms {
         Value::make_flags(&ty, flags).unwrap()
     }
 }
-impl ToRust<test::host::types::Perms> for Value {
-    fn to_rust(&self) -> test::host::types::Perms {
-        let flags: Vec<_> = self.unwrap_flags().map(|f| f.into_owned()).collect();
-        let mut res = test::host::types::Perms::empty();
-        if flags.iter().any(|flag| flag == "read") {
-            res |= test::host::types::Perms::READ;
-        }
-        if flags.iter().any(|flag| flag == "write") {
-            res |= test::host::types::Perms::WRITE;
-        }
-        if flags.iter().any(|flag| flag == "exec") {
-            res |= test::host::types::Perms::EXEC;
-        }
-        res
-    }
-}
 impl ValueTyped for test::host::types::Counter {
     fn value_type() -> Type {
         Type::handle("counter")
@@ -400,43 +274,20 @@ impl<'a> ValueTyped for &'a test::host::types::Counter {
 }
 impl ToValue for test::host::types::Counter {
     fn to_value(&self) -> Value {
-        let label = format!("{}-{}", "counter", self.handle());
+        let label = format!(
+            "{}-{}", "counter",
+            proxy::conversion::conversion::get_handle_mock_test_host_types_counter(self)
+        );
         Value::make_handle(label.into())
     }
 }
 impl<'a> ToValue for &'a test::host::types::Counter {
     fn to_value(&self) -> Value {
-        let label = format!("borrow-{}-{}", "counter", self.handle());
+        let label = format!(
+            "borrow-{}-{}", "counter",
+            proxy::conversion::conversion::get_handle_mock_test_host_types_counter(self)
+        );
         Value::make_handle(label.into())
-    }
-}
-impl ToRust<test::host::types::Counter> for Value {
-    fn to_rust(&self) -> test::host::types::Counter {
-        let label = self.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("{}-", "counter"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        proxy::conversion::conversion::get_mock_test_host_types_counter(handle)
-    }
-}
-impl<'a> ToRust<&'a test::host::types::Counter> for Value {
-    fn to_rust(&self) -> &'a test::host::types::Counter {
-        let label = self.unwrap_handle();
-        let handle = label
-            .strip_prefix(&format!("borrow-{}-", "counter"))
-            .and_then(|s| s.parse::<u32>().ok())
-            .expect("invalid handle label");
-        SCOPED_ALLOC
-            .with(|alloc| {
-                let mut alloc = alloc.borrow_mut();
-                alloc
-                    .alloc(
-                        proxy::conversion::conversion::get_mock_test_host_types_counter(
-                            handle,
-                        ),
-                    )
-            })
     }
 }
 #[allow(unused_imports)]
@@ -503,9 +354,227 @@ impl ToValue for &MockedResource {
         Value::make_handle(label.into())
     }
 }
-impl ToRust<MockedResource> for Value {
-    fn to_rust(&self) -> MockedResource {
-        let label = self.unwrap_handle();
+impl Replay for test::guest::api::Session {
+    fn replay(value: &Value) -> Self {
+        let label = value.unwrap_handle();
+        let handle = label
+            .strip_prefix(&format!("{}-", "session"))
+            .and_then(|s| s.split('-').next()?.parse::<u32>().ok())
+            .expect("invalid handle label");
+        {
+            fn cannot_mock<T>() -> T {
+                unimplemented!("cannot mock `session`, a resource of the main component")
+            }
+            let _ = handle;
+            cannot_mock()
+        }
+    }
+    fn consume(self) {
+        std::mem::forget(self);
+    }
+}
+impl<'a> Replay for &'a test::guest::api::Session {
+    fn replay(value: &Value) -> Self {
+        let label = value.unwrap_handle();
+        let handle = label
+            .strip_prefix(&format!("borrow-{}-", "session"))
+            .and_then(|s| s.split('-').next()?.parse::<u32>().ok())
+            .expect("invalid handle label");
+        SCOPED_ALLOC
+            .with(|alloc| {
+                let mut alloc = alloc.borrow_mut();
+                alloc
+                    .alloc({
+                        fn cannot_mock<T>() -> T {
+                            unimplemented!(
+                                "cannot mock `session`, a resource of the main component"
+                            )
+                        }
+                        let _ = handle;
+                        cannot_mock()
+                    })
+            })
+    }
+}
+impl Replay for test::host::types::Point {
+    #[allow(unused_variables)]
+    fn replay(value: &Value) -> Self {
+        let fields: std::collections::BTreeMap<_, _> = value.unwrap_record().collect();
+        test::host::types::Point {
+            x: Replay::replay(&fields["x"]),
+            y: Replay::replay(&fields["y"]),
+            label: Replay::replay(&fields["label"]),
+        }
+    }
+    #[allow(unused_variables)]
+    fn consume(self) {
+        Replay::consume(self.x);
+        Replay::consume(self.y);
+        Replay::consume(self.label);
+    }
+}
+impl Replay for test::host::types::Shape {
+    fn replay(value: &Value) -> Self {
+        match value.unwrap_variant() {
+            (ref case, Some(val)) if case == "circle" => {
+                test::host::types::Shape::Circle(Replay::replay(&val))
+            }
+            (ref case, Some(val)) if case == "rect" => {
+                test::host::types::Shape::Rect(Replay::replay(&val))
+            }
+            (ref case, Some(val)) if case == "HTTP-error" => {
+                test::host::types::Shape::HttpError(Replay::replay(&val))
+            }
+            (ref case, None) if case == "empty" => test::host::types::Shape::Empty,
+            _ => unreachable!(),
+        }
+    }
+    fn consume(self) {
+        match self {
+            test::host::types::Shape::Circle(x) => Replay::consume(x),
+            test::host::types::Shape::Rect(x) => Replay::consume(x),
+            test::host::types::Shape::HttpError(x) => Replay::consume(x),
+            test::host::types::Shape::Empty => {}
+        }
+    }
+}
+impl Replay for test::host::types::Color {
+    fn replay(value: &Value) -> Self {
+        match value.unwrap_variant() {
+            (ref case, None) if case == "red" => test::host::types::Color::Red,
+            (ref case, None) if case == "green" => test::host::types::Color::Green,
+            (ref case, None) if case == "DNS-blue" => test::host::types::Color::DnsBlue,
+            _ => unreachable!(),
+        }
+    }
+    fn consume(self) {
+        match self {
+            test::host::types::Color::Red => {}
+            test::host::types::Color::Green => {}
+            test::host::types::Color::DnsBlue => {}
+        }
+    }
+}
+impl Replay for test::host::types::Perms {
+    fn replay(value: &Value) -> Self {
+        let flags: Vec<_> = value.unwrap_flags().map(|f| f.into_owned()).collect();
+        let mut res = test::host::types::Perms::empty();
+        if flags.iter().any(|flag| flag == "read") {
+            res |= test::host::types::Perms::READ;
+        }
+        if flags.iter().any(|flag| flag == "write") {
+            res |= test::host::types::Perms::WRITE;
+        }
+        if flags.iter().any(|flag| flag == "exec") {
+            res |= test::host::types::Perms::EXEC;
+        }
+        res
+    }
+}
+impl Replay for test::host::types::Counter {
+    fn replay(value: &Value) -> Self {
+        let label = value.unwrap_handle();
+        let handle = label
+            .strip_prefix(&format!("{}-", "counter"))
+            .and_then(|s| s.split('-').next()?.parse::<u32>().ok())
+            .expect("invalid handle label");
+        proxy::conversion::conversion::get_mock_test_host_types_counter(handle)
+    }
+}
+impl<'a> Replay for &'a test::host::types::Counter {
+    fn replay(value: &Value) -> Self {
+        let label = value.unwrap_handle();
+        let handle = label
+            .strip_prefix(&format!("borrow-{}-", "counter"))
+            .and_then(|s| s.split('-').next()?.parse::<u32>().ok())
+            .expect("invalid handle label");
+        SCOPED_ALLOC
+            .with(|alloc| {
+                let mut alloc = alloc.borrow_mut();
+                alloc
+                    .alloc(
+                        proxy::conversion::conversion::get_mock_test_host_types_counter(
+                            handle,
+                        ),
+                    )
+            })
+    }
+}
+trait Replay: Sized {
+    fn replay(value: &Value) -> Self;
+    fn replay_payload(value: Option<&Value>) -> Self {
+        Self::replay(value.expect("the case has a payload"))
+    }
+    #[allow(dead_code)]
+    fn consume(self) {}
+}
+/// The WAVE value of `text`, of type `T`.
+#[allow(dead_code)]
+fn wave_value<T: ValueTyped>(text: &str) -> Value {
+    wasm_wave::from_str(&T::value_type(), text).unwrap()
+}
+macro_rules! impl_replay_primitive {
+    ($($t:ty),*) => {
+        $(impl Replay for $t { fn replay(value : & Value) -> Self { value.to_rust() } })*
+    };
+}
+impl_replay_primitive!(
+    bool, u8, u16, u32, u64, i8, i16, i32, i64, f32, f64, char, String
+);
+impl Replay for () {
+    fn replay(_value: &Value) -> Self {}
+    fn replay_payload(_value: Option<&Value>) -> Self {}
+}
+impl<T: Replay> Replay for Vec<T> {
+    fn replay(value: &Value) -> Self {
+        value.unwrap_list().map(|x| T::replay(&x)).collect()
+    }
+    fn consume(self) {
+        self.into_iter().for_each(Replay::consume);
+    }
+}
+impl<T: Replay> Replay for Option<T> {
+    fn replay(value: &Value) -> Self {
+        value.unwrap_option().map(|x| T::replay(&x))
+    }
+    fn consume(self) {
+        self.into_iter().for_each(Replay::consume);
+    }
+}
+impl<T: Replay, E: Replay> Replay for core::result::Result<T, E> {
+    fn replay(value: &Value) -> Self {
+        match value.unwrap_result() {
+            Ok(x) => Ok(T::replay_payload(x.as_deref())),
+            Err(x) => Err(E::replay_payload(x.as_deref())),
+        }
+    }
+    fn consume(self) {
+        match self {
+            Ok(x) => x.consume(),
+            Err(x) => x.consume(),
+        }
+    }
+}
+macro_rules! impl_replay_tuple {
+    ($($T:ident),+) => {
+        impl < $($T : Replay),+ > Replay for ($($T,)+) { fn replay(value : & Value) ->
+        Self { let mut items = value.unwrap_tuple(); ($($T ::replay(& items.next()
+        .unwrap()),)+) } #[allow(non_snake_case)] fn consume(self) { let ($($T,)+) =
+        self; $($T .consume();)+ } }
+    };
+}
+impl_replay_tuple!(T1);
+impl_replay_tuple!(T1, T2);
+impl_replay_tuple!(T1, T2, T3);
+impl_replay_tuple!(T1, T2, T3, T4);
+impl_replay_tuple!(T1, T2, T3, T4, T5);
+impl_replay_tuple!(T1, T2, T3, T4, T5, T6);
+impl_replay_tuple!(T1, T2, T3, T4, T5, T6, T7);
+impl_replay_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
+impl_replay_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
+impl Replay for MockedResource {
+    fn replay(value: &Value) -> Self {
+        let label = value.unwrap_handle();
         let (name, handle) = label
             .rsplit_once('-')
             .and_then(|(name, handle_str)| {
@@ -515,7 +584,163 @@ impl ToRust<MockedResource> for Value {
         MockedResource { handle, name }
     }
 }
+impl Replay for wit_bindgen::rt::async_support::ErrorContext {
+    fn replay(_value: &Value) -> Self {
+        Self::new("")
+    }
+}
+use bindings::proxy::recorder::types::*;
+thread_local! {
+    static TASK_ID : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+}
+#[allow(dead_code)]
+fn trace_task_id(table: Table) -> TaskId {
+    let id = TASK_ID
+        .with(|id| {
+            id.set(id.get() + 1);
+            id.get()
+        });
+    TaskId { table, id }
+}
+#[allow(dead_code)]
+fn trace_call(
+    by: Party,
+    id: TaskId,
+    func: &str,
+    is_async: bool,
+    args: Vec<String>,
+) -> Line {
+    let call = Call {
+        id,
+        is_async,
+        func: func.to_string(),
+        args,
+    };
+    Line {
+        by,
+        at: None,
+        event: Event::Call(call),
+    }
+}
+#[allow(dead_code)]
+fn trace_return(by: Party, id: TaskId, value: Option<String>) -> Line {
+    let ret = ReturnValue { id, value };
+    Line {
+        by,
+        at: None,
+        event: Event::Return(ret),
+    }
+}
+#[allow(dead_code)]
+fn trace_drop(by: Party, table: Table, name: String) -> Line {
+    let label = Label { table, name };
+    Line {
+        by,
+        at: None,
+        event: Event::Drop(label),
+    }
+}
+/// The value of the `return` among the host's answers to a call.
+#[allow(dead_code)]
+fn trace_return_value(answers: Vec<Line>) -> Option<String> {
+    answers
+        .into_iter()
+        .find_map(|line| match line.event {
+            Event::Return(ret) => Some(ret.value),
+            _ => None,
+        })
+        .expect("the trace doesn't answer the call")
+}
+/// The guard over an async import call while its wrapper waits (see `cancel_defs` in the
+/// generator); `done` once it returns.
+#[allow(dead_code)]
+struct TraceCancel(Option<TaskId>);
+impl TraceCancel {
+    #[allow(dead_code)]
+    fn done(mut self) {
+        self.0 = None;
+    }
+}
+impl Drop for TraceCancel {
+    fn drop(&mut self) {
+        if let Some(id) = self.0 {
+            proxy::recorder::replay::check(
+                &Line {
+                    by: Party::Guest,
+                    at: None,
+                    event: Event::Cancel(id),
+                },
+            );
+        }
+    }
+}
+#[allow(dead_code)]
+const TRACE_TABLE: Table = Table::Exports;
+#[allow(dead_code)]
+fn trace_at() -> u32 {
+    proxy::conversion::executor::current_step()
+}
+#[allow(dead_code)]
+async fn trace_reach(at: Option<u32>) {
+    if let Some(at) = at {
+        proxy::conversion::executor::wait_until_step(at).await;
+    }
+}
+#[allow(dead_code)]
+fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
+    proxy::conversion::executor::host_drops(true);
+    let res = f();
+    proxy::conversion::executor::host_drops(false);
+    res
+}
+/// A line of the guest, which record and fuzz modes record, and replay checks.
+#[allow(dead_code)]
+fn trace_guest(line: &Line) {
+    proxy::recorder::replay::check(line);
+}
+/// Calls an async export, and reports that the guest started it, if it blocks.
+#[allow(dead_code)]
+async fn call_export<T>(id: TaskId, call: impl std::future::Future<Output = T>) -> T {
+    let mut call = std::pin::pin!(call);
+    let mut started = false;
+    std::future::poll_fn(|cx| {
+            let poll = call.as_mut().poll(cx);
+            if poll.is_pending() && !started {
+                started = true;
+                trace_guest(
+                    &Line {
+                        by: Party::Guest,
+                        at: None,
+                        event: Event::Started(id),
+                    },
+                );
+            }
+            poll
+        })
+        .await
+}
 thread_local! {
     #[allow(dead_code)] static MOVING : std::cell::Cell < bool > = const {
     std::cell::Cell::new(false) };
+}
+thread_local! {
+    static SPAWNED : std::cell::RefCell < Vec < wit_bindgen::JoinHandle < () >> > = const
+    { std::cell::RefCell::new(Vec::new()) };
+}
+#[allow(dead_code)]
+fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
+    let handle = wit_bindgen::spawn_local(job);
+    SPAWNED.with_borrow_mut(|spawned| spawned.push(handle));
+}
+#[allow(dead_code)]
+async fn join_spawned() {
+    loop {
+        let spawned = SPAWNED.with_borrow_mut(std::mem::take);
+        if spawned.is_empty() {
+            break;
+        }
+        for handle in spawned {
+            handle.await;
+        }
+    }
 }

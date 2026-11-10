@@ -353,8 +353,193 @@ impl Trait for ProxyTrait<'_> {
         for n in 1..=9 {
             items.extend(tuple_trait(n));
         }
+        items.extend(pump_defs(self.state.has_streams, self.state.has_futures));
         items
     }
+}
+/// Record mode's pumps: a stream or future the proxy receives, e.g. the host's in an import's
+/// result, isn't passed on, as the copies would then go between the host and the guest without
+/// it. Its conversion makes a pair of the other side's type, hands on its reader, and spawns a
+/// job, the pump, which copies from the end it received to the pair's writer, and records each
+/// copy, and each side's drop. The stream is labeled by the end the proxy received, which the pump
+/// keeps for its lifetime. `SENDER` says who sent it.
+///
+/// A call's arguments are printed converted, and its result as received, so the reader handed
+/// on in the arguments is printed by the received end's label too, which `label_by_writer`
+/// registers, and so are the items of a stream or future the caller sends.
+fn pump_defs(has_streams: bool, has_futures: bool) -> Vec<Item> {
+    let mut items = crate::traits::host_end_defs(has_streams, has_futures);
+    if !has_streams && !has_futures {
+        return items;
+    }
+    let file: File = parse_quote! {
+        /// The other party.
+        fn trace_receiver(sender: Party) -> Party {
+            match sender {
+                Party::Host => Party::Guest,
+                Party::Guest => Party::Host,
+            }
+        }
+        /// A line of `by`, which has a step if it is the host's.
+        fn pump_line(by: Party, at: u32, event: Event) -> Line {
+            let at = matches!(by, Party::Host).then_some(at);
+            Line { by, at, event }
+        }
+        /// Whether the caller of the call sends the value, rather than the callee: the guest's
+        /// imports component, and the host's exports component, which call.
+        fn sent_by_caller(sender: Party) -> bool {
+            matches!(TRACE_TABLE, Table::Imports) == matches!(sender, Party::Guest)
+        }
+    };
+    items.extend(file.items);
+    if has_streams {
+        let file: File = parse_quote! {
+            impl<T> ToProxy for wit_bindgen::StreamReader<T>
+            where
+                T: ToProxy + ToValue + wit_stream::StreamPayload + 'static,
+                T::Output: ToValue + wit_stream::StreamPayload + 'static,
+            {
+                type Output = wit_bindgen::StreamReader<T::Output>;
+                fn to_proxy(self) -> Self::Output {
+                    let (writer, reader) = wit_stream::new::<T::Output>();
+                    let sender = SENDER.get();
+                    if sent_by_caller(sender) {
+                        label_by_writer(reader.handle(), self.handle());
+                    }
+                    let label = Label { table: TRACE_TABLE, name: handle_label(&self) };
+                    spawn(pump_stream(self, writer, label, sender));
+                    reader
+                }
+            }
+            /// Copies the items of a stream from `from`, which `sender` writes, to `to`, which
+            /// the other party reads, once both are ready, so that each copy completes in the
+            /// run it's issued in, and its line is recorded before either party goes on, e.g.
+            /// the guest traps:
+            ///
+            /// - A zero-length write waits until the reader reads, so that the writer is read
+            ///   only then, as without the proxy. A host's end may answer it at once, without
+            ///   being ready, e.g. wasmtime's, which then takes a chunk of the guest's early.
+            /// - A zero-length read waits until the writer writes, leaving its write pending.
+            async fn pump_stream<T, U>(
+                mut from: wit_bindgen::StreamReader<T>,
+                mut to: wit_bindgen::StreamWriter<U>,
+                label: Label,
+                sender: Party,
+            ) where
+                T: ToProxy<Output = U> + ToValue + wit_stream::StreamPayload,
+                U: ToValue + wit_stream::StreamPayload,
+            {
+                let receiver = trace_receiver(sender);
+                let wave = |item: &dyn ToValue| wasm_wave::to_string(&item.to_value()).unwrap();
+                let dropped = |by: Party| {
+                    proxy::recorder::record::record(&pump_line(by, trace_at(), Event::Drop(label.clone())));
+                };
+                loop {
+                    let (ready, _) = to.write(Vec::new()).await;
+                    if let wit_bindgen::StreamResult::Dropped = ready {
+                        return dropped(receiver);
+                    }
+                    let (ready, _) = from.read(Vec::new()).await;
+                    if let wit_bindgen::StreamResult::Dropped = ready {
+                        return dropped(sender);
+                    }
+                    let read_at = trace_at();
+                    let (result, items) = from.read(Vec::with_capacity(4096)).await;
+                    let received: Vec<String> = items.iter().map(|item| wave(item)).collect();
+                    let mut items: Vec<U> = items.into_iter().map(ToProxy::to_proxy).collect();
+                    let waves = if sent_by_caller(sender) {
+                        items.iter().map(|item| wave(item)).collect()
+                    } else {
+                        received
+                    };
+                    // The host's read of the guest's items, in its step.
+                    if matches!(sender, Party::Guest) && !items.is_empty() {
+                        let chunk = Chunk { stream: label.clone(), items: format!("[{}]", waves.join(", ")) };
+                        proxy::recorder::record::record(&pump_line(Party::Host, read_at, Event::Read(chunk)));
+                    }
+                    // The host's write of its items, a line per part the guest takes.
+                    let mut offset = 0;
+                    while !items.is_empty() {
+                        let (write_at, count) = (trace_at(), items.len());
+                        let (written_result, rest) = to.write(items).await;
+                        let rest = rest.into_vec();
+                        let written = count - rest.len();
+                        if matches!(sender, Party::Host) && written > 0 {
+                            let items = format!("[{}]", waves[offset..offset + written].join(", "));
+                            let chunk = Chunk { stream: label.clone(), items };
+                            proxy::recorder::record::record(&pump_line(Party::Host, write_at, Event::Write(chunk)));
+                        }
+                        offset += written;
+                        if let wit_bindgen::StreamResult::Dropped = written_result {
+                            return dropped(receiver);
+                        }
+                        items = rest;
+                        if !items.is_empty() {
+                            let (ready, _) = to.write(Vec::new()).await;
+                            if let wit_bindgen::StreamResult::Dropped = ready {
+                                return dropped(receiver);
+                            }
+                        }
+                    }
+                    if let wit_bindgen::StreamResult::Dropped = result {
+                        return dropped(sender);
+                    }
+                }
+            }
+        };
+        items.extend(file.items);
+    }
+    if has_futures {
+        let file: File = parse_quote! {
+            impl<T> ToProxy for wit_bindgen::FutureReader<T>
+            where
+                T: ToProxy + ToValue + wit_future::FuturePayload + 'static,
+                T::Output: ToValue + wit_future::FuturePayload + 'static,
+            {
+                type Output = wit_bindgen::FutureReader<T::Output>;
+                fn to_proxy(self) -> Self::Output {
+                    // The pump always writes the value, unless the reader is dropped first.
+                    let (writer, reader) =
+                        wit_future::new::<T::Output>(|| unreachable!("the value is always written"));
+                    let sender = SENDER.get();
+                    if sent_by_caller(sender) {
+                        label_by_writer(reader.handle(), self.handle());
+                    }
+                    let label = Label { table: TRACE_TABLE, name: handle_label(&self) };
+                    spawn(pump_future(self, writer, label, sender));
+                    reader
+                }
+            }
+            /// Passes the value of a future from `from`, which `sender` writes, to `to`, which
+            /// the other party reads, unless it drops it first, which isn't recorded. The value's
+            /// line is recorded as the pump writes it, before the reader can take it and go on,
+            /// e.g. trap. A future can't wait until the other side reads, so the guest's value is
+            /// recorded once the pump's read of it completes.
+            async fn pump_future<T, U>(
+                from: wit_bindgen::FutureReader<T>,
+                to: wit_bindgen::FutureWriter<U>,
+                label: Label,
+                sender: Party,
+            ) where
+                T: ToProxy<Output = U> + ToValue + wit_future::FuturePayload,
+                U: ToValue + wit_future::FuturePayload,
+            {
+                let value = from.await;
+                let received = wasm_wave::to_string(&value.to_value()).unwrap();
+                let value = value.to_proxy();
+                let wave = if sent_by_caller(sender) {
+                    wasm_wave::to_string(&value.to_value()).unwrap()
+                } else {
+                    received
+                };
+                let value_line = Event::Value(FutureValue { future: label.clone(), value: wave });
+                proxy::recorder::record::record(&pump_line(sender, trace_at(), value_line));
+                drop(to.write(value).await);
+            }
+        };
+        items.extend(file.items);
+    }
+    items
 }
 // Overrides `ToProxy::cast` for impls where `Output == Self`.
 fn identity_cast() -> TokenStream {
@@ -431,14 +616,13 @@ impl ProxyTrait<'_> {
     fn get_proxy_path(&self, src_path: &[String]) -> Vec<String> {
         let from_export = src_path[0] == "exports";
         let mut res = crate::codegen::get_proxy_path(src_path);
-        if from_export {
-            assert!(self.state.module_paths.contains(&res));
-        } else if !self.state.module_paths.contains(&res) {
+        if !from_export && !self.state.module_paths.contains(&res) {
             res.remove(0);
-            assert!(self.state.module_paths.contains(&res));
-        } else {
-            assert!(self.state.module_paths.contains(&res));
-        };
+        }
+        assert!(
+            self.state.module_paths.contains(&res),
+            "no module {res:?} for the types of {src_path:?}"
+        );
         res
     }
 }

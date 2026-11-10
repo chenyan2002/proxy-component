@@ -1,10 +1,15 @@
 use crate::codegen::util::make_path;
 use crate::codegen::wit::WitType;
-use crate::traits::{Trait, new_mock};
+use crate::traits::{Trait, host_end_defs, new_mock};
 use quote::quote;
 use syn::{Item, ItemEnum, ItemStruct, parse_quote};
 
-pub struct DialogTrait;
+pub struct DialogTrait {
+    /// Whether the bindings have streams, whose `Dialog` impl needs their `wit_stream` module
+    pub has_streams: bool,
+    /// Whether the bindings have futures, whose `Dialog` impl needs their `wit_future` module
+    pub has_futures: bool,
+}
 
 impl Trait for DialogTrait {
     fn resource_trait(
@@ -18,16 +23,11 @@ impl Trait for DialogTrait {
         let wit_name = &wit.name;
         let in_import = module_path[0] != "exports";
         if in_import {
-            let mock = new_mock(wit, quote! { handle });
+            // The imports component, which makes the mock, labels it by its handle.
+            let mock = new_mock(wit, quote! { 0 });
             res.push(parse_quote! {
             impl Dialog for #resource_path {
                 fn read_value(_dep: u32) -> Self {
-                    let handle = HANDLE_ID.with(|id| {
-                        let mut id = id.borrow_mut();
-                        let current_id = *id;
-                        *id += 1;
-                        current_id
-                    });
                     #mock
                 }
             }
@@ -35,12 +35,6 @@ impl Trait for DialogTrait {
             res.push(parse_quote! {
             impl<'a> Dialog for &'a #resource_path {
                 fn read_value(_dep: u32) -> Self {
-                    let handle = HANDLE_ID.with(|id| {
-                        let mut id = id.borrow_mut();
-                        let current_id = *id;
-                        *id += 1;
-                        current_id
-                    });
                     SCOPED_ALLOC.with(|alloc| {
                         let mut alloc = alloc.borrow_mut();
                         alloc.alloc(#mock)
@@ -53,14 +47,8 @@ impl Trait for DialogTrait {
             res.push(parse_quote! {
             impl Dialog for #resource_path {
                 fn read_value(_dep: u32) -> Self {
-                    let handle = HANDLE_ID.with(|id| {
-                        let mut id = id.borrow_mut();
-                        let current_id = *id;
-                        *id += 1;
-                        current_id
-                    });
                     #resource_path::new(MockedResource {
-                        handle,
+                        handle: next_mock_label(),
                         name: #wit_name.to_string(),
                     })
                 }
@@ -184,11 +172,13 @@ impl Trait for DialogTrait {
     }
     fn trait_defs(&self) -> Vec<Item> {
         let ast: syn::File = parse_quote! {
-          trait Dialog {
+          trait Dialog: Sized {
+            // A value the virtualized host gives the guest, which the user enters.
             fn read_value(dep: u32) -> Self;
-          }
-          thread_local! {
-            static HANDLE_ID: std::cell::RefCell<u32> = std::cell::RefCell::new(1);
+            // What the virtualized host does with a value the guest gives it: by default, drop it.
+            // Only streams and futures override it, which p2 worlds don't have.
+            #[allow(dead_code)]
+            fn consume(self, _dep: u32) {}
           }
           impl Dialog for () {
               fn read_value(_dep: u32) -> Self {
@@ -202,6 +192,11 @@ impl Trait for DialogTrait {
                       None
                   } else {
                       Some(Dialog::read_value(dep + 1))
+                  }
+              }
+              fn consume(self, dep: u32) {
+                  if let Some(x) = self {
+                      x.consume(dep);
                   }
               }
           }
@@ -219,6 +214,11 @@ impl Trait for DialogTrait {
                   (0..len).map(|_| Dialog::read_value(dep + 1)).collect()
                 }
               }
+              fn consume(self, dep: u32) {
+                  for x in self {
+                      x.consume(dep);
+                  }
+              }
           }
           impl <O: Dialog, E: Dialog> Dialog for Result<O, E> {
               fn read_value(dep: u32) -> Self {
@@ -229,17 +229,18 @@ impl Trait for DialogTrait {
                       Err(Dialog::read_value(dep + 1))
                   }
               }
+              fn consume(self, dep: u32) {
+                  match self {
+                      Ok(x) => x.consume(dep),
+                      Err(x) => x.consume(dep),
+                  }
+              }
           }
           impl Dialog for MockedResource {
               fn read_value(_dep: u32) -> Self {
-                  let handle = HANDLE_ID.with(|id| {
-                        let mut id = id.borrow_mut();
-                        let current_id = *id;
-                        *id += 1;
-                        current_id
-                  });
+                  // A constructor's.
                   Self {
-                      handle,
+                      handle: next_mock_label(),
                       name: "mocked-resource".to_string(),
                   }
               }
@@ -278,6 +279,11 @@ impl Trait for DialogTrait {
                       fn read_value(dep: u32) -> Self {
                           ($($T::read_value(dep + 1),)+)
                       }
+                      #[allow(non_snake_case)]
+                      fn consume(self, dep: u32) {
+                          let ($($T,)+) = self;
+                          $($T.consume(dep);)+
+                      }
                   }
               };
           }
@@ -290,6 +296,118 @@ impl Trait for DialogTrait {
           impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7);
           impl_dialog_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
         };
-        ast.items
+        let mut items = ast.items;
+        items.extend(self.async_defs());
+        items
+    }
+}
+
+impl DialogTrait {
+    /// `Dialog` for streams, futures and error-contexts. The bindings only have the `wit_stream`
+    /// and `wit_future` modules for them if the world has streams or futures. They are labeled as
+    /// in fuzz mode, by the end the component keeps (see `host_end_defs`).
+    ///
+    /// The virtualized host writes the streams and futures it gives the guest, and reads those
+    /// the guest gives it, in jobs of `assets/executor.rs`, which ask the user, one chunk at a
+    /// time, what to write, or whether to keep reading.
+    fn async_defs(&self) -> Vec<Item> {
+        let mut items = host_end_defs(self.has_streams, self.has_futures);
+        if self.has_streams {
+            let ast: syn::File = parse_quote! {
+              impl<T> Dialog for wit_bindgen::StreamReader<T>
+              where
+                  T: Dialog + ToValue + ValueTyped + wit_stream::StreamPayload + 'static,
+              {
+                  fn read_value(_dep: u32) -> Self {
+                      let (mut writer, reader, label) = host_stream::<T>(true);
+                      spawn(async move {
+                          let choices = ["write a chunk".to_string(), "end the stream".to_string()];
+                          loop {
+                              let prompt = format!("The host writes {label}");
+                              if proxy::util::dialog::read_select(0, &prompt, &choices) == 1 {
+                                  proxy::util::dialog::print(0, &format!("{label}.read() = dropped"));
+                                  return;
+                              }
+                              let chunk: Vec<T> = Dialog::read_value(1);
+                              let items = wasm_wave::to_string(&chunk.to_value()).unwrap();
+                              if !writer.write_all(chunk).await.is_empty() {
+                                  proxy::util::dialog::print(0, &format!("{label} dropped by guest"));
+                                  return;
+                              }
+                              proxy::util::dialog::print(0, &format!("{label}.read() = {items}"));
+                          }
+                      });
+                      reader
+                  }
+                  fn consume(mut self, _dep: u32) {
+                      let label = handle_label(&self);
+                      spawn(async move {
+                          let choices = ["read a chunk".to_string(), "drop the stream".to_string()];
+                          loop {
+                              let prompt = format!("The host reads {label}");
+                              if proxy::util::dialog::read_select(0, &prompt, &choices) == 1 {
+                                  proxy::util::dialog::print(0, &format!("{label} dropped by host"));
+                                  return;
+                              }
+                              let (result, items) = self.read(Vec::with_capacity(4096)).await;
+                              if let wit_bindgen::StreamResult::Dropped = result {
+                                  proxy::util::dialog::print(0, &format!("{label} -> dropped"));
+                                  return;
+                              }
+                              let items = wasm_wave::to_string(&items.to_value()).unwrap();
+                              proxy::util::dialog::print(0, &format!("{label} -> {items}"));
+                          }
+                      });
+                  }
+              }
+            };
+            items.extend(ast.items);
+        }
+        if self.has_futures {
+            let ast: syn::File = parse_quote! {
+              impl<T> Dialog for wit_bindgen::FutureReader<T>
+              where
+                  T: Dialog + ToValue + ValueTyped + wit_future::FuturePayload,
+              {
+                  fn read_value(_dep: u32) -> Self {
+                      let (writer, reader, label) = host_future::<T>(true);
+                      spawn(async move {
+                          proxy::util::dialog::print(0, &format!("The host writes {label}"));
+                          let value: T = Dialog::read_value(1);
+                          let wave = wasm_wave::to_string(&value.to_value()).unwrap();
+                          if writer.write(value).await.is_ok() {
+                              proxy::util::dialog::print(0, &format!("{label}.read() = {wave}"));
+                          } else {
+                              proxy::util::dialog::print(0, &format!("{label} dropped by guest"));
+                          }
+                      });
+                      reader
+                  }
+                  fn consume(self, _dep: u32) {
+                      let label = handle_label(&self);
+                      spawn(async move {
+                          let choices = ["read the value".to_string(), "drop the future".to_string()];
+                          let prompt = format!("The host reads {label}");
+                          if proxy::util::dialog::read_select(0, &prompt, &choices) == 1 {
+                              drop(self);
+                              proxy::util::dialog::print(0, &format!("{label} dropped by host"));
+                              return;
+                          }
+                          let value = wasm_wave::to_string(&self.await.to_value()).unwrap();
+                          proxy::util::dialog::print(0, &format!("{label} -> {value}"));
+                      });
+                  }
+              }
+            };
+            items.extend(ast.items);
+        }
+        items.push(parse_quote! {
+          impl Dialog for wit_bindgen::rt::async_support::ErrorContext {
+              fn read_value(dep: u32) -> Self {
+                  Self::new(&proxy::util::dialog::read_raw_string(dep, "Enter the message of an error-context"))
+              }
+          }
+        });
+        items
     }
 }

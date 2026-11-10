@@ -1,5 +1,6 @@
 use crate::Mode;
 use anyhow::Result;
+use proc_macro2::TokenStream;
 use quote::quote;
 use std::collections::{BTreeMap, BTreeSet};
 use syn::{
@@ -14,6 +15,7 @@ use wit_parser::{InterfaceId, Resolve, TypeId, WorldId};
 
 mod dialog;
 mod fuzz;
+mod mock;
 mod parse;
 mod record;
 mod replay;
@@ -30,10 +32,16 @@ pub struct State {
     pub conversions: BTreeMap<TypeId, String>,
     /// What each WIT type has, e.g. own handles
     pub type_info: wit_bindgen_core::Types,
+    /// The interfaces of the virtualized host, which the imports component exports
+    pub host_interfaces: BTreeSet<InterfaceId>,
     pub traits: BTreeMap<Vec<String>, Vec<ItemTrait>>,
     pub types: BTreeMap<Vec<String>, Vec<(TypeId, TypeInfo)>>,
     pub funcs: BTreeMap<Vec<String>, BTreeMap<Option<String>, Vec<Signature>>>,
     pub module_paths: BTreeSet<Vec<String>>,
+    /// Whether the bindings have streams, i.e. the `wit_stream` module
+    pub has_streams: bool,
+    /// Whether the bindings have futures, i.e. the `wit_future` module
+    pub has_futures: bool,
     pub output: Vec<Item>,
 }
 pub enum TypeInfo {
@@ -60,14 +68,17 @@ struct ExportFunc {
     /// Arguments at the call site, borrowed where the function expects a reference
     call_params: Vec<syn::Expr>,
     has_ret: bool,
-    /// Whether the result owns a resource
-    ret_owns: bool,
+    is_async: bool,
+    /// Whether the result has a stream or future
+    ret_async: bool,
 }
 
 /// Interface for converting resources between the generated components.
 const CONVERSION_MODULE: &str = "exports::proxy::conversion::conversion";
 /// Interface whose `start` function drives the main component's exports in virtualized modes.
 const START_REPLAY_MODULE: &str = "exports::proxy::recorder::start_replay";
+/// Interface running the background work of the virtualized host, see `assets/executor.rs`.
+const EXECUTOR_MODULE: &str = "exports::proxy::conversion::executor";
 
 /// Generates the `lib.rs` implementing the traits of `bindings`, which wit-bindgen generated
 /// from `world` of `resolve`.
@@ -85,11 +96,39 @@ pub fn generate(
     state.generate_stubs();
     let traits = crate::traits::TraitGenerator::new(&state).generate();
     state.output.extend(traits);
-    if matches!(mode, Mode::Replay) {
+    if matches!(mode, Mode::Record | Mode::Replay | Mode::Fuzz) {
+        state.output.extend(trace_defs());
+        state.output.extend(cancel_defs(mode));
+    }
+    let has_executor = state.has_executor();
+    if matches!(mode, Mode::Replay | Mode::Fuzz) {
+        state.output.extend(job_defs(mode, has_executor));
+    }
+    if matches!(has_executor, Some(HasExecutor::Imports)) {
+        state.output.extend(export_call_defs(mode));
+    }
+    if matches!(mode, Mode::Record) {
+        state.output.extend(record_defs(has_executor));
+    }
+    if matches!(mode, Mode::Replay | Mode::Fuzz) {
         let defs = state.replay_defs();
         state.output.extend(defs);
     }
+    if matches!(mode, Mode::Fuzz | Mode::Dialog) {
+        let defs = state.mock_defs();
+        state.output.extend(defs);
+    }
     let mut file = state.into_output_file();
+    // The imports component's jobs run in the executor, and the exports component's on the task
+    // of `start`.
+    match has_executor {
+        Some(HasExecutor::Exports) => {
+            let executor = syn::parse_file(include_str!("../../assets/executor.rs"))?;
+            file.items.extend(executor.items);
+        }
+        Some(HasExecutor::Imports) => file.items.extend(start_spawn_defs()),
+        None => {}
+    }
     if use_custom_allocator {
         // dlmalloc with a memory source that grows by bytes, for `--page-size=1`.
         let alloc = syn::parse_file(include_str!("../../assets/one_byte_page_alloc.rs"))?;
@@ -101,12 +140,28 @@ pub fn generate(
     }
     Ok(prettyplease::unparse(&file))
 }
+impl ExportFunc {
+    /// The call of the export, awaited if it's async.
+    fn call(&self) -> TokenStream {
+        let ExportFunc {
+            func, call_params, ..
+        } = self;
+        if self.is_async {
+            quote! { #func(#(#call_params),*).await }
+        } else {
+            quote! { #func(#(#call_params),*) }
+        }
+    }
+}
 impl State {
     fn new(mode: Mode, resolve: Resolve, world: WorldId) -> Self {
         State {
             mode,
             interfaces: wit::interface_modules(&resolve, world),
             conversions: wit::conversion_funcs(&resolve),
+            host_interfaces: wit::host_interfaces(&resolve, world),
+            has_streams: false,
+            has_futures: false,
             type_info: {
                 let mut types = wit_bindgen_core::Types::default();
                 types.analyze(&resolve);
@@ -184,6 +239,10 @@ impl State {
                         methods.push(syn::ImplItem::Fn(stub_impl));
                         continue;
                     }
+                    if module_full_name == EXECUTOR_MODULE {
+                        methods.push(syn::ImplItem::Fn(self.generate_executor_func(&sig)));
+                        continue;
+                    }
                     let is_start = module_full_name == START_REPLAY_MODULE;
                     if is_start {
                         assert!(sig.ident == "start");
@@ -214,7 +273,9 @@ impl State {
             (Mode::Record, Some(_)) => {
                 methods.push(syn::ImplItem::Fn(self.generate_record_drop(module_path)))
             }
-            (Mode::Replay, Some(_)) => methods.push(syn::ImplItem::Fn(self.generate_replay_drop())),
+            (Mode::Replay | Mode::Fuzz, Some(_)) => {
+                methods.push(syn::ImplItem::Fn(self.generate_mock_drop()))
+            }
             _ => (),
         }
         parse_quote! {
@@ -228,13 +289,23 @@ impl State {
         let func_name = &sig.ident.to_string();
         let body = if func_name.starts_with("get_wrapped_") || func_name.starts_with("get_host_") {
             quote! { x.to_proxy() }
+        } else if func_name.starts_with("get_handle_mock_") {
+            quote! { x.get::<MockedResource>().handle }
         } else if func_name.starts_with("get_handle_") {
             quote! { x.to_proxy().handle() }
         } else if func_name.starts_with("get_mock_") {
             let resource = get_return_type(&sig.output).unwrap();
             let name = self.conversion_resource(&sig.ident);
-            quote! {
-                #resource::new(MockedResource { handle, name: #name.to_string() })
+            // In fuzz and dialog modes, the mock gets the next label (see `next_mock_label`); in
+            // replay mode, the trace's.
+            match self.mode {
+                Mode::Fuzz | Mode::Dialog => quote! {
+                    let _ = handle;
+                    #resource::new(MockedResource { handle: next_mock_label(), name: #name.to_string() })
+                },
+                _ => quote! {
+                    #resource::new(MockedResource { handle, name: #name.to_string() })
+                },
             }
         } else {
             unreachable!()
@@ -263,6 +334,14 @@ impl State {
                     if matches!(wit_func.kind, Some(ResourceFuncKind::Method)) {
                         continue;
                     }
+                    // The host's own functions, which the main component imports, aren't called,
+                    // as the real host doesn't call them through the proxy. A trace could have
+                    // such a call, but not one with streams or futures, e.g. `body.consume` of a
+                    // body the host made: both ends would be in the generated components, whose
+                    // copies replay can't place in their steps.
+                    if self.host_interfaces.contains(&self.interfaces[path]) {
+                        continue;
+                    }
                     let args = extract_arg_info(sig);
                     let arg_tys = args
                         .iter()
@@ -284,12 +363,174 @@ impl State {
                         arg_tys,
                         call_params: args.iter().map(|arg| arg.call_param()).collect(),
                         has_ret: get_return_type(&sig.output).is_some(),
-                        ret_owns: wit_func.result_owns,
+                        is_async: wit_func.is_async,
+                        ret_async: wit_func.result_async,
                     });
                 }
             }
         }
         res
+    }
+    /// Whether this component exports `proxy:conversion/executor` or imports it; `None` for
+    /// bindings without it, e.g. of the tests.
+    fn has_executor(&self) -> Option<HasExecutor> {
+        let import = EXECUTOR_MODULE.strip_prefix("exports::").unwrap();
+        self.module_paths
+            .iter()
+            .find_map(|path| match path.join("::") {
+                path if path == EXECUTOR_MODULE => Some(HasExecutor::Exports),
+                path if path == import => Some(HasExecutor::Imports),
+                _ => None,
+            })
+    }
+    /// The async `start` function running `body`. The imports component's jobs run in
+    /// `proxy:conversion/executor` until the exports `start` called are done, and the jobs of this
+    /// component, which `start` made, on the task of `start` (see `start_spawn_defs`). In dialog
+    /// mode, `body` also waits for them after each export call (see `generate_dialog_start_func`),
+    /// and runs `__executor` again.
+    fn generate_start(&self, sig: &Signature, body: TokenStream) -> syn::ImplItemFn {
+        let executor = match self.mode {
+            Mode::Dialog => quote! { mut __executor },
+            _ => quote! { __executor },
+        };
+        // Replay checks that it reached every line, once everything is done.
+        let finish = match self.mode {
+            Mode::Replay => quote! { proxy::recorder::replay::finish(); },
+            _ => quote! {},
+        };
+        let panic_hook = panic_hook(&self.mode);
+        parse_quote! {
+            #sig {
+                #panic_hook
+                let #executor = wit_bindgen::spawn_local(proxy::conversion::executor::run());
+                #body
+                join_spawned().await;
+                proxy::conversion::executor::stop();
+                __executor.await;
+                #finish
+            }
+        }
+    }
+    /// What an import's mock does with the arguments the guest moved to the host, in fuzz and
+    /// replay modes: `consume`, the mode's, of each stream and future, and a drop of the other
+    /// resources. These are the host's drops, not the guest's, so `MOVING` is set; and they happen
+    /// before the call can wait, while no other task runs.
+    fn take_moved_args(
+        &self,
+        wit_func: &wit::WitFunc,
+        args: &[util::ArgInfo],
+        consume: impl Fn(&Ident) -> TokenStream,
+    ) -> TokenStream {
+        let consumed = wit_func.consumed_args(args).into_iter().map(consume);
+        let owned: Vec<_> = args
+            .iter()
+            .zip(&wit_func.params_own)
+            .zip(&wit_func.params_async)
+            .filter(|((arg, owns), is_async)| **owns && !**is_async && !arg.is_borrowed)
+            .map(|((arg, _), _)| &arg.ident)
+            .collect();
+        let drop_owned = if owned.is_empty() {
+            quote! {}
+        } else {
+            quote! { drop((#(#owned,)*)); }
+        };
+        quote! {
+            MOVING.with(|moving| moving.set(true));
+            #(#consumed;)*
+            #drop_owned
+            MOVING.with(|moving| moving.set(false));
+        }
+    }
+    /// An export call of `start`, in fuzz and replay modes: `args` binds the arguments, `before`
+    /// runs before the call, with `__id` the call's, and `after` gets the result, `res`. The
+    /// guest's `return` is reported (see `trace_guest`), and the arguments the call borrowed are
+    /// dropped at the end of their block, which, like those of the result, are the host's drops.
+    fn start_call(
+        &self,
+        func: &ExportFunc,
+        args: TokenStream,
+        before: TokenStream,
+        after: TokenStream,
+    ) -> TokenStream {
+        let ExportFunc {
+            func,
+            call_params,
+            is_async,
+            has_ret,
+            ..
+        } = func;
+        // An async call that blocks gives the host a subtask, which the guest started.
+        let call = if *is_async {
+            quote! { call_export(__id, #func(#(#call_params),*)).await }
+        } else {
+            quote! { #func(#(#call_params),*) }
+        };
+        let value = if *has_ret {
+            quote! { Some(wasm_wave::to_string(&res.to_value()).unwrap()) }
+        } else {
+            quote! { None }
+        };
+        quote! {
+            let res = {
+                #args
+                #before
+                let res = #call;
+                trace_guest(&trace_return(Party::Guest, __id, #value));
+                proxy::conversion::executor::host_drops(true);
+                res
+            };
+            #after
+            SCOPED_ALLOC.with(|alloc| alloc.borrow_mut().clear());
+            proxy::conversion::executor::host_drops(false);
+        }
+    }
+    /// The functions of `proxy:conversion/executor`, which the imports component exports, for the
+    /// `start` function of the exports component to run its jobs (see `assets/executor.rs`).
+    fn generate_executor_func(&self, sig: &Signature) -> syn::ImplItemFn {
+        let body = match (sig.ident.to_string().as_str(), &self.mode) {
+            // In dialog mode, `start` runs the executor again after each export call.
+            ("run", Mode::Dialog) => quote! {
+                run_executor().await;
+                EXECUTOR.with_borrow_mut(|e| e.stopped = false);
+            },
+            // In record mode, the exports component runs it for each call of an async export (see
+            // `call_export_recorded`): a call while it runs, or still finishes its jobs after a
+            // `stop`, keeps it running instead.
+            ("run", Mode::Record) => quote! {
+                thread_local! {
+                    static RUNNING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+                }
+                if RUNNING.replace(true) {
+                    EXECUTOR.with_borrow_mut(|e| e.stopped = false);
+                    return;
+                }
+                run_executor().await;
+                RUNNING.set(false);
+                EXECUTOR.with_borrow_mut(|e| e.stopped = false);
+            },
+            ("run", _) => {
+                let panic_hook = panic_hook(&self.mode);
+                quote! {
+                    #panic_hook
+                    run_executor().await
+                }
+            }
+            ("stop", _) => quote! { stop_executor() },
+            ("step", _) => quote! { next_step() },
+            ("current_step", _) => quote! { current_step() },
+            ("wait_until_step", _) => quote! { wait_until_step(step).await },
+            ("step_after", _) => quote! { step_after(step).await },
+            ("host_drops", Mode::Replay | Mode::Fuzz) => {
+                quote! { MOVING.with(|moving| moving.set(dropping)) }
+            }
+            ("host_drops", _) => quote! { let _ = dropping; },
+            (name, _) => unreachable!("unexpected executor function {name}"),
+        };
+        parse_quote! {
+            #sig {
+                #body
+            }
+        }
     }
     fn into_output_file(self) -> File {
         File {
@@ -298,6 +539,371 @@ impl State {
             attrs: Vec::new(),
         }
     }
+}
+
+/// How a component has `proxy:conversion/executor`, in the modes with `start`.
+#[derive(Clone, Copy)]
+enum HasExecutor {
+    /// It exports it, to run its jobs: the imports component.
+    Exports,
+    /// It imports it, which its `start` runs: the exports component, whose jobs run on the task
+    /// of `start`.
+    Imports,
+}
+
+/// Items for the jobs of replay and fuzz modes, which differ by where the jobs run: the table the
+/// component labels its handles in; `trace_at`, the step in which a job makes a host line, and
+/// `trace_reach`, which waits for it in replay; and `host_dropping`, which runs `f`, dropping
+/// mocks for the host, e.g. those in a value a job read from the guest: the host's drops, which
+/// take no step, as the guest doesn't see them.
+fn job_defs(mode: &Mode, has_executor: Option<HasExecutor>) -> Vec<Item> {
+    let file: File = match has_executor {
+        // The imports component's jobs run in the executor: a line's step is the executor's run.
+        Some(HasExecutor::Exports) => parse_quote! {
+            #[allow(dead_code)]
+            const TRACE_TABLE: Table = Table::Imports;
+            #[allow(dead_code)]
+            fn trace_at() -> u32 { current_step() }
+            #[allow(dead_code)]
+            async fn trace_reach(at: Option<u32>) {
+                if let Some(at) = at {
+                    reach_step(at).await;
+                }
+            }
+            #[allow(dead_code)]
+            fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
+                MOVING.with(|moving| moving.set(true));
+                let res = f();
+                MOVING.with(|moving| moving.set(false));
+                res
+            }
+        },
+        // The exports component's jobs run on the task of `start`: a line's step is the last
+        // step, which replay's waits for.
+        Some(HasExecutor::Imports) => parse_quote! {
+            #[allow(dead_code)]
+            const TRACE_TABLE: Table = Table::Exports;
+            #[allow(dead_code)]
+            fn trace_at() -> u32 { proxy::conversion::executor::current_step() }
+            #[allow(dead_code)]
+            async fn trace_reach(at: Option<u32>) {
+                if let Some(at) = at {
+                    proxy::conversion::executor::wait_until_step(at).await;
+                }
+            }
+            #[allow(dead_code)]
+            fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
+                proxy::conversion::executor::host_drops(true);
+                let res = f();
+                proxy::conversion::executor::host_drops(false);
+                res
+            }
+        },
+        None => return Vec::new(),
+    };
+    let mut items = file.items;
+    if matches!(mode, Mode::Replay) && matches!(has_executor, Some(HasExecutor::Exports)) {
+        let file: File = parse_quote! {
+            /// The value of the `return` that answers an async call: at once, if the trace has
+            /// the call RETURNED, or, if STARTED, in the step of its `return`, which the mock
+            /// waits for.
+            async fn trace_answer(id: TaskId, answers: Vec<Line>) -> Option<String> {
+                if !answers.iter().any(|line| matches!(line.event, Event::Started(_))) {
+                    return trace_return_value(answers);
+                }
+                let line = proxy::recorder::replay::take_host_line(&LineKey::Task(id))
+                    .expect("the trace doesn't return the call");
+                let ret = match line.event {
+                    Event::Return(ret) => ret,
+                    // The guest cancels the call, which the mock waits for, as the recording's
+                    // didn't return (see `TraceCancel`).
+                    Event::Cancelled(_) => return std::future::pending().await,
+                    event => panic!("the trace answers the call with {event:?}"),
+                };
+                // A STARTED call blocks, so it returns in a later step than the one it was
+                // called in; if replay is there already, it is ahead of the recording.
+                let at = line.at.expect("a STARTED call returns in a step");
+                let now = current_step();
+                assert!(now < at, "replay is in step {now}, past step {at} of the return of {id:?}");
+                wait_until_step(at).await;
+                let now = current_step();
+                assert_eq!(now, at, "replay returned {id:?} in step {now}, not in step {at}");
+                ret.value
+            }
+        };
+        items.extend(file.items);
+    }
+    items
+}
+
+/// Helpers of the exports component's calls of the main component's exports, which record,
+/// fuzz and replay modes share, so that they stay alike, as replay requires: record and fuzz
+/// modes record a guest line, which replay checks.
+fn export_call_defs(mode: &Mode) -> Vec<Item> {
+    let trace_guest = match mode {
+        Mode::Record | Mode::Fuzz => quote! { proxy::recorder::record::record(line); },
+        Mode::Replay => quote! { proxy::recorder::replay::check(line); },
+        Mode::Dialog => return Vec::new(),
+    };
+    let file: File = parse_quote! {
+        /// A line of the guest, which record and fuzz modes record, and replay checks.
+        #[allow(dead_code)]
+        fn trace_guest(line: &Line) {
+            #trace_guest
+        }
+        /// Calls an async export, and reports that the guest started it, if it blocks.
+        #[allow(dead_code)]
+        async fn call_export<T>(id: TaskId, call: impl std::future::Future<Output = T>) -> T {
+            let mut call = std::pin::pin!(call);
+            let mut started = false;
+            std::future::poll_fn(|cx| {
+                let poll = call.as_mut().poll(cx);
+                if poll.is_pending() && !started {
+                    started = true;
+                    trace_guest(&Line { by: Party::Guest, at: None, event: Event::Started(id) });
+                }
+                poll
+            })
+            .await
+        }
+    };
+    file.items
+}
+
+/// Helpers of record mode, which forwards the main component's calls to the host, and the host's
+/// to it, for each component.
+fn record_defs(has_executor: Option<HasExecutor>) -> Vec<Item> {
+    let common: File = parse_quote! {
+        thread_local! {
+            // Who sends the values being converted, for a stream's or future's pump (see
+            // `pump_defs`): the caller for the arguments, the callee for the result.
+            static SENDER: std::cell::Cell<Party> = const { std::cell::Cell::new(Party::Host) };
+        }
+    };
+    let file: File = match has_executor {
+        // The imports component, whose executor awaits the host's async calls, and runs the
+        // pumps, which record in the step of its run.
+        Some(HasExecutor::Exports) => parse_quote! {
+            #[allow(dead_code)]
+            const TRACE_TABLE: Table = Table::Imports;
+            #[allow(dead_code)]
+            fn trace_at() -> u32 { current_step() }
+            /// The host's result of an async call: at once, if it is ready on the first poll, so
+            /// that the guest sees RETURNED, and otherwise from an executor job, which awaits the
+            /// host's subtask, with the step of the run it completed in, as replay returns it in
+            /// that step. The call may borrow the guest's arguments, e.g. a method's `self`.
+            #[allow(dead_code)]
+            async fn host_result<T: 'static>(
+                id: TaskId,
+                call: impl std::future::Future<Output = T>,
+            ) -> (T, Option<u32>) {
+                let mut call = Box::pin(call);
+                let first = std::future::poll_fn(|cx| std::task::Poll::Ready(call.as_mut().poll(cx))).await;
+                if let std::task::Poll::Ready(value) = first {
+                    return (value, None);
+                }
+                proxy::recorder::record::record(&Line { by: Party::Host, at: None, event: Event::Started(id) });
+                let (value, at) = wait_for_job(call).await;
+                (value, Some(at))
+            }
+        },
+        // The exports component, which runs the imports component's executor while the host's
+        // calls of async exports are pending: there is no `start` to run it. Its pumps run on
+        // the task of the call, and record in the last step, as fuzz mode's jobs there do.
+        Some(HasExecutor::Imports) => parse_quote! {
+            #[allow(dead_code)]
+            const TRACE_TABLE: Table = Table::Exports;
+            #[allow(dead_code)]
+            fn trace_at() -> u32 { proxy::conversion::executor::current_step() }
+            thread_local! {
+                // The host's calls of async exports that haven't returned.
+                static PENDING_CALLS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+            }
+            /// Calls an async export, as `call_export` does, running the executor until the last
+            /// pending call returns, then stopping it, which lets it finish its jobs and return.
+            #[allow(dead_code)]
+            async fn call_export_recorded<T>(id: TaskId, call: impl std::future::Future<Output = T>) -> T {
+                PENDING_CALLS.set(PENDING_CALLS.get() + 1);
+                spawn(proxy::conversion::executor::run());
+                let res = call_export(id, call).await;
+                PENDING_CALLS.set(PENDING_CALLS.get() - 1);
+                if PENDING_CALLS.get() == 0 {
+                    proxy::conversion::executor::stop();
+                }
+                res
+            }
+        },
+        None => return Vec::new(),
+    };
+    common.items.into_iter().chain(file.items).collect()
+}
+
+/// Sends the panics of the component to the recorder, which reports them (see `fail`), in
+/// fuzz and replay modes: the generated components have no stderr of their own to print them,
+/// e.g. when the main component's is virtualized.
+fn panic_hook(mode: &Mode) -> TokenStream {
+    let fail = match mode {
+        Mode::Fuzz => quote! { proxy::recorder::record::fail },
+        Mode::Replay => quote! { proxy::recorder::replay::fail },
+        _ => return quote! {},
+    };
+    quote! {
+        static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
+        PANIC_HOOK.call_once(|| std::panic::set_hook(Box::new(|info| #fail(&info.to_string()))));
+    }
+}
+
+/// `TraceCancel`, which an async import's wrapper holds while it waits for its answer, in
+/// record, replay and fuzz modes. The guest cancels the call by dropping it while it waits, which
+/// drops the wrapper's future, and wit-bindgen answers with `task.cancel`, at once. So the
+/// guard's drop, before it returns, is the guest's `cancel`, and the host's `cancelled` that
+/// answers it, which record and fuzz modes record, and replay checks. In record mode, the host's
+/// call is dropped with the wrapper, which cancels it too.
+fn cancel_defs(mode: &Mode) -> Vec<Item> {
+    let on_cancel = match mode {
+        Mode::Record | Mode::Fuzz => quote! {
+            proxy::recorder::record::record(&Line { by: Party::Guest, at: None, event: Event::Cancel(id) });
+            proxy::recorder::record::record(&Line { by: Party::Host, at: None, event: Event::Cancelled(id) });
+        },
+        Mode::Replay => quote! {
+            proxy::recorder::replay::check(&Line { by: Party::Guest, at: None, event: Event::Cancel(id) });
+        },
+        Mode::Dialog => return Vec::new(),
+    };
+    let file: File = parse_quote! {
+        /// The guard over an async import call while its wrapper waits (see `cancel_defs` in the
+        /// generator); `done` once it returns.
+        #[allow(dead_code)]
+        struct TraceCancel(Option<TaskId>);
+        impl TraceCancel {
+            #[allow(dead_code)]
+            fn done(mut self) {
+                self.0 = None;
+            }
+        }
+        impl Drop for TraceCancel {
+            fn drop(&mut self) {
+                if let Some(id) = self.0 {
+                    #on_cancel
+                }
+            }
+        }
+    };
+    file.items
+}
+
+/// Helpers of record, replay and fuzz modes, which make the lines of `proxy:recorder/types`. Each
+/// component numbers the calls it sees with its own counter: the exports component the host's
+/// calls of exports, and the imports component the guest's calls of imports (see
+/// `crates/trace`).
+fn trace_defs() -> Vec<Item> {
+    let file: File = parse_quote! {
+        use bindings::proxy::recorder::types::*;
+        thread_local! {
+            // The number of the last call this component saw.
+            static TASK_ID: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+        }
+        #[allow(dead_code)]
+        fn trace_task_id(table: Table) -> TaskId {
+            let id = TASK_ID.with(|id| {
+                id.set(id.get() + 1);
+                id.get()
+            });
+            TaskId { table, id }
+        }
+        #[allow(dead_code)]
+        fn trace_call(by: Party, id: TaskId, func: &str, is_async: bool, args: Vec<String>) -> Line {
+            let call = Call { id, is_async, func: func.to_string(), args };
+            Line { by, at: None, event: Event::Call(call) }
+        }
+        #[allow(dead_code)]
+        fn trace_return(by: Party, id: TaskId, value: Option<String>) -> Line {
+            let ret = ReturnValue { id, value };
+            Line { by, at: None, event: Event::Return(ret) }
+        }
+        #[allow(dead_code)]
+        fn trace_drop(by: Party, table: Table, name: String) -> Line {
+            let label = Label { table, name };
+            Line { by, at: None, event: Event::Drop(label) }
+        }
+        /// The value of the `return` among the host's answers to a call.
+        #[allow(dead_code)]
+        fn trace_return_value(answers: Vec<Line>) -> Option<String> {
+            answers
+                .into_iter()
+                .find_map(|line| match line.event {
+                    Event::Return(ret) => Some(ret.value),
+                    _ => None,
+                })
+                .expect("the trace doesn't answer the call")
+        }
+    };
+    file.items
+}
+
+/// `spawn` of the exports component, whose jobs, e.g. reading a stream an export returned, are
+/// only made by `start`, which is async: it spawns them on the task of `start`, which awaits them
+/// with `join_spawned`. The imports component's `spawn` queues them instead, as sync functions
+/// make them (see `assets/executor.rs`).
+fn start_spawn_defs() -> Vec<Item> {
+    let file: File = parse_quote! {
+        thread_local! {
+            static SPAWNED: std::cell::RefCell<Vec<wit_bindgen::JoinHandle<()>>> =
+                const { std::cell::RefCell::new(Vec::new()) };
+        }
+        #[allow(dead_code)]
+        fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
+            let handle = wit_bindgen::spawn_local(job);
+            SPAWNED.with_borrow_mut(|spawned| spawned.push(handle));
+        }
+        // Awaits the spawned jobs, including those they spawn.
+        #[allow(dead_code)]
+        async fn join_spawned() {
+            loop {
+                let spawned = SPAWNED.with_borrow_mut(std::mem::take);
+                if spawned.is_empty() {
+                    break;
+                }
+                for handle in spawned {
+                    handle.await;
+                }
+            }
+        }
+    };
+    file.items
+}
+
+/// The bindings of a generated component, with the callback of the executor's task, if it
+/// exports `proxy:conversion/executor`, replaced by `executor_callback` (see
+/// `assets/executor.rs`), which wraps wit-bindgen's.
+///
+/// Panics if the bindings don't have wit-bindgen's callback of `run` where it is expected.
+pub fn patch_bindings(bindings: String) -> String {
+    const EXPORT: &str = "[callback][async-lift]proxy:conversion/executor#run";
+    const CALLBACK: &str = "pub unsafe fn __callback_run(";
+    const BODY: &str = "wit_bindgen::rt::async_support::callback(event0, event1, event2)";
+    if !bindings.contains(EXPORT) {
+        return bindings;
+    }
+    // The `executor` module's, which has no module of its own, so it ends before the next one.
+    let callbacks: Vec<usize> = bindings
+        .match_indices("pub mod executor {")
+        .filter_map(|(start, _)| {
+            let module = &bindings[start..];
+            let end = module[1..].find("pub mod ").map_or(module.len(), |end| end + 1);
+            module[..end].find(CALLBACK).map(|callback| start + callback)
+        })
+        .collect();
+    let [callback] = callbacks[..] else {
+        panic!("expected one `__callback_run` of the executor in the bindings, found {callbacks:?}");
+    };
+    let body = bindings[callback..]
+        .find(BODY)
+        .map(|body| callback + body)
+        .expect("expected wit-bindgen's callback in the executor's `__callback_run`");
+    let mut patched = bindings;
+    patched.replace_range(body..body + BODY.len(), "crate::executor_callback(event0, event1, event2)");
+    patched
 }
 
 pub fn get_proxy_path(src_path: &[String]) -> Vec<String> {

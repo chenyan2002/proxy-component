@@ -15,7 +15,7 @@ To build the CLI tool, just run `make all`.
 To test record and fuzzing, run `make test`.
 
 `cargo test` checks the generated sources against the snapshots in `tests/snapshots`, generated
-from the WIT in `tests/fixtures/proxy`. After an intended change, run `BLESS=1 cargo test` and
+from the WIT in `tests/fixtures/p2/wit` and `tests/fixtures/p3/wit`. After an intended change, run `BLESS=1 cargo test` and
 review the snapshots' diff.
 
 ## Usage
@@ -29,6 +29,12 @@ $ <your_wasm_runtime> composed.wasm > trace.out  # store the stdout trace to tra
 Run `composed.wasm` in the host runtime which the original wasm is supposed to run. The tool provides a [guest implementation](components/recorder/) for record and replay APIs, which outputs the trace to stdout while recording, and reads the trace from stdin while replay.
 
 The host runtime can also choose to implement the [`record` interface](https://github.com/chenyan2002/proxy-component/blob/main/assets/recorder.wit#L3). Then we can use the `--use-host-recorder` flag to skip composing the guest-side record implementation.
+
+Note that the recorded handle id is not an exact match with the handle id the main component sees. Each
+component instance has its own handle table, and the main component can allocate handles in it
+that the proxy never sees, e.g., its own resources and streams. Each of those
+shifts the main component's handle ids, so the imports component's handle ids, from its own table,
+can't match them exactly.
 
 ### Replay
 
@@ -54,7 +60,7 @@ $ proxy-component instrument -m fuzz <component.wasm>
 $ wasmtime --invoke 'start()' composed.wasm
 ```
 
-Fuzzing the import return and export input based on the WIT type. This mode requires a [Debug component](components/debug/) to get random numbers and logging. The `composed.wasm` can be run in
+Fuzzing the import return and export input based on the WIT type. This mode requires a [Debug component](components/debug/) to get random numbers. An import's result is drawn from a hash of its arguments and a seed for the run, so the same call gets the same result within a run, and another in the next run. The run prints its trace to stdout, in the same format as record mode, so `wasmtime --invoke 'start()' composed.wasm > trace.out` stores it, for replay mode to replay. To read the trace instead, `wasmtime --env PROXY_TRACE=text --invoke 'start()' composed.wasm` prints it as text. The `composed.wasm` can be run in
 a standalone `wasmtime` without any special host functions.
 
 ### Dialog

@@ -8,7 +8,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 trace = { path = "../../crates/trace" }
-serde_json.workspace = true
 wit-bindgen.workspace = true
 libc-alloc = { path = "../../crates/libc-alloc", optional = true }
 

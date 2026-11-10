@@ -1,23 +1,99 @@
 package proxy:recorder@0.1.0;
 
+// The lines of a trace, as `crates/trace` defines them (see `docs/p3-record-replay.md`, Trace
+// format). Values are WAVE text, e.g. `ok(#response-3)`.
+interface types {
+  enum party { host, guest }
+
+  // The generated component that numbers a handle or a task.
+  enum table { imports, exports }
+
+  // A call, numbered in order by the component that sees it.
+  record task-id { table: table, id: u32 }
+
+  // A handle, by its name as WAVE writes it, e.g. `#stream-7`.
+  record label { table: table, name: string }
+
+  record call { id: task-id, is-async: bool, %func: string, args: list<string> }
+  record return-value { id: task-id, value: option<string> }
+  record chunk { %stream: label, items: string }
+  record future-value { %future: label, value: string }
+
+  variant event {
+    // `by` is the caller.
+    call(call),
+    // The callee blocked before returning, so the caller got a subtask.
+    started(task-id),
+    %return(return-value),
+    cancel(task-id),
+    cancelled(task-id),
+    // The host wrote `items`, which the guest read.
+    write(chunk),
+    // The host read `items`, which the guest wrote.
+    read(chunk),
+    // A future's value, and who wrote it (`by`). If the host wrote it, the line is recorded when
+    // the host writes, before the guest can read it; the guest may drop its end instead, which
+    // isn't recorded. If the guest wrote it, the line is recorded when the host reads it.
+    value(future-value),
+    // `by` is who dropped it.
+    drop(label),
+  }
+
+  // `at` is the step of a host line the guest observes outside its calls.
+  record line { by: party, at: option<u32>, event: event }
+
+  // What a line is about: a call, or a stream or future.
+  variant line-key { task(task-id), handle(label) }
+}
+
 interface %record {
-  record-args: func(method: option<string>, args: list<string>, is-export: bool);
-  record-ret: func(method: option<string>, ret: option<string>, is-export: bool);
+  use types.{line};
+  // Records a line, in the order the proxy observes it.
+  %record: func(line: line);
+  // Reports a panic of a generated component, which can't print its own, and traps.
+  fail: func(message: string);
 }
 
 interface replay {
-  replay-export: func() -> option<tuple<string, list<string>>>;
-  assert-export-ret: func(method: option<string>, ret: option<string>);
-  replay-import: func(method: option<string>, args: option<list<string>>) -> option<string>;
+  use types.{line, line-key, label};
+  // The next line `start` performs, in trace order: an export call, or the host's drop of a
+  // resource of the guest. `none` once there are none.
+  next-host-line: func() -> option<line>;
+  // The next host line about `key`, e.g. the `return` of a STARTED call, which its mock waits
+  // for.
+  take-host-line: func(key: line-key) -> option<line>;
+  // Pairs the trace's label of a stream or future replay makes with replay's, of the end it
+  // keeps; the trace's first appears in a host line, which `check` doesn't pair.
+  pair: func(trace: label, replay: label);
+  // Checks that replay reached every line, once it is done; traps on the first it didn't.
+  finish: func();
+  // Reports a panic of a generated component, e.g. a divergence a job found, which it can't
+  // print itself, and traps.
+  fail: func(message: string);
+  // Checks a guest line against the trace, and returns the host lines that answer it at once,
+  // e.g. the `return` of an import call. Traps on a mismatch, with the expected and the actual
+  // line, except for a guest's line about a stream or future that a cut trace lacks.
+  check: func(line: line) -> list<line>;
+  // Whether the trace is cut short: an export call has no answer, e.g. the run trapped during
+  // it. Its last lines that the host records once it sees a copy complete may be missing, e.g.
+  // the guest's drop of a stream, or the value of a future it wrote.
+  trace-cut: func() -> bool;
 }
 
+// Async, so that it can await the main component's async exports, and run the jobs of
+// `proxy:conversion/executor`.
 interface start-replay {
-  start: func();
+  start: async func();
 }
 
 world host {
   import %record;
   import replay;
+}
+
+// The types alone, which `crates/trace` generates its Rust types from.
+world trace {
+  import types;
 }
 
 world guest {

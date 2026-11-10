@@ -1,0 +1,9 @@
+package spike:replay;
+let proxy = new spike:proxy { ... };
+let guest = new spike:guest { "spike:race/host": proxy["spike:race/host"], ... };
+let driver = new spike:driver {
+  "spike:race/executor": proxy["spike:race/executor"],
+  "spike:race/guest": guest["spike:race/guest"],
+  ...
+};
+export driver...;

@@ -1,12 +1,13 @@
 use anyhow::Context;
 use clap::Parser;
 use std::path::PathBuf;
-use trace::Logger;
+use trace::{Replay, Trace};
 use wasmtime::component::types::{ComponentExtern, ComponentFunc, ComponentItem as CItem};
 use wasmtime::component::wasm_wave::{untyped::UntypedFuncCall, wasm::WasmFunc};
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable, Val};
 use wasmtime::*;
-use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView, p2::add_to_linker_sync};
+use wasmtime_wasi::runtime::in_tokio;
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView, p2::add_to_linker_async};
 
 #[derive(Parser)]
 pub struct RunArgs {
@@ -24,43 +25,87 @@ mod bindings {
     wasmtime::component::bindgen!({
         path: "assets/recorder.wit",
         world: "host",
+        // To convert the lines to `crates/trace`'s types, which serialize alike (`trace::convert`).
+        additional_derives: [serde::Serialize, serde::Deserialize],
     });
 }
+
+use bindings::proxy::recorder::types::Line;
 
 pub struct State {
     wasi_ctx: WasiCtx,
     resource_table: ResourceTable,
-    logger: Logger,
+    // The lines recorded, which `run` writes to `trace.out` at the end, with their labels'
+    // bindings named apart as they come.
+    recorded: Vec<trace::Line>,
+    labels: trace::Labels,
+    replay: Option<Replay>,
     exit_called: bool,
 }
+impl bindings::proxy::recorder::types::Host for State {}
 impl bindings::proxy::recorder::record::Host for State {
-    fn record_args(&mut self, method: Option<String>, args: Vec<String>, is_export: bool) {
-        let call = self.logger.record_args(method, args, is_export);
-        println!("call: {}", call.to_string());
+    fn fail(&mut self, message: String) {
+        panic!("{message}");
     }
-    fn record_ret(&mut self, method: Option<String>, ret: Option<String>, is_export: bool) {
-        let call = self.logger.record_ret(method, ret, is_export);
-        println!("ret: {}", call.to_string());
+    fn record(&mut self, line: Line) {
+        let line = self.labels.label(trace::convert(line));
+        println!("{line}");
+        self.recorded.push(line);
     }
 }
 impl bindings::proxy::recorder::replay::Host for State {
-    fn replay_export(&mut self) -> Option<(String, Vec<String>)> {
-        self.logger.replay_export()
+    fn next_host_line(&mut self) -> Option<Line> {
+        let line = self.replay.as_mut().unwrap().next_host_line()?;
+        println!("{line}");
+        Some(trace::convert(line))
     }
-    fn assert_export_ret(&mut self, assert_method: Option<String>, assert_ret: Option<String>) {
-        self.logger.assert_export_ret(assert_method, assert_ret);
+    fn take_host_line(&mut self, key: bindings::proxy::recorder::types::LineKey) -> Option<Line> {
+        let key: trace::LineKey = trace::convert(key);
+        let line = self.replay.as_mut().unwrap().take_host_line(&key)?;
+        println!("{line}");
+        Some(trace::convert(line))
     }
-    fn replay_import(
+    fn pair(
         &mut self,
-        assert_method: Option<String>,
-        assert_args: Option<Vec<String>>,
-    ) -> Option<String> {
-        let (exit_called, ret) = self.logger.replay_import(assert_method, assert_args, false);
-        if exit_called {
-            self.exit_called = exit_called;
-            return Some("Something that can crash".to_string());
+        trace: bindings::proxy::recorder::types::Label,
+        replay: bindings::proxy::recorder::types::Label,
+    ) {
+        let (trace, replay): (trace::Label, trace::Label) =
+            (trace::convert(trace), trace::convert(replay));
+        self.replay.as_mut().unwrap().pair(&trace, &replay);
+    }
+    fn fail(&mut self, message: String) {
+        panic!("{message}");
+    }
+    fn finish(&mut self) {
+        self.replay.as_ref().unwrap().finish();
+    }
+    fn trace_cut(&mut self) -> bool {
+        self.replay.as_ref().unwrap().is_cut()
+    }
+    fn check(&mut self, line: Line) -> Vec<Line> {
+        let line: trace::Line = trace::convert(line);
+        println!("{line}");
+        let mut answers = self.replay.as_mut().unwrap().check(&line);
+        for answer in &answers {
+            println!("{answer}");
         }
-        ret
+        // A replayed `wasi:cli/exit` traps the guest on purpose: the import has no result, so
+        // the mock traps on one.
+        if line.exit_status().is_some() {
+            self.exit_called = true;
+            let id = line.event.task().unwrap();
+            let crash = trace::Event::Return(trace::ReturnValue {
+                id,
+                value: Some("Something that can crash".to_string()),
+            });
+            answers = vec![trace::Line {
+                by: trace::Party::Host,
+                at: None,
+                event: crash,
+            }];
+        }
+        trace::convert(answers)
     }
 }
 
@@ -76,17 +121,24 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
     config
         .consume_fuel(true)
         .wasm_custom_page_sizes(true)
+        // The generated `start` is async, and WASI p3 components have async exports and imports.
+        .wasm_component_model_async(true)
+        .wasm_component_model_error_context(true)
+        .concurrency_support(true)
         //.debug_info(true)
         .wasm_backtrace_details(WasmBacktraceDetails::Enable);
     let engine = Engine::new(&config)?;
 
     let mut linker = Linker::<State>::new(&engine);
-    add_to_linker_sync(&mut linker)?;
+    // The WASI p2 host functions are async ones, as the store runs async exports.
+    add_to_linker_async(&mut linker)?;
     let wasi = WasiCtxBuilder::new().inherit_stdio().inherit_args().build();
     let mut state = State {
         wasi_ctx: wasi,
         resource_table: ResourceTable::new(),
-        logger: Logger::new(),
+        recorded: Vec::new(),
+        labels: trace::Labels::default(),
+        replay: None,
         exit_called: false,
     };
     dialog_bindings::proxy::util::dialog::add_to_linker::<State, HasSelf<State>>(
@@ -98,7 +150,7 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
             state
         })?;
         let trace = std::fs::read_to_string(path)?;
-        state.logger.load_trace(&trace);
+        state.replay = Some(Replay::new(Trace::parse(&trace)));
     } else {
         bindings::proxy::recorder::record::add_to_linker::<State, HasSelf<State>>(
             &mut linker,
@@ -123,14 +175,14 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
                 component.get_export_index(instance.as_ref(), name)
             })
             .unwrap();
-        let instance = linker.instantiate(&mut store, &component)?;
+        let instance = in_tokio(linker.instantiate_async(&mut store, &component))?;
 
         let param_types = WasmFunc::params(&func_type).collect::<Vec<_>>();
         let params = untyped_call.to_wasm_params(&param_types)?;
         let func = instance.get_func(&mut store, export).unwrap();
         let mut results = vec![Val::Bool(false); func_type.results().len()];
         // A replayed `wasi:cli/exit` traps the guest on purpose.
-        func.call(&mut store, &params, &mut results).or_else(|e| {
+        in_tokio(func.call_async(&mut store, &params, &mut results)).or_else(|e| {
             if store.data().exit_called {
                 Ok(())
             } else {
@@ -138,8 +190,13 @@ pub fn run(args: RunArgs) -> anyhow::Result<()> {
             }
         })?;
         if args.trace.is_none() {
-            let trace = store.data().logger.dump_trace();
-            std::fs::write("trace.out", &trace)?;
+            let lines: Vec<_> = store
+                .data()
+                .recorded
+                .iter()
+                .map(trace::Line::to_json)
+                .collect();
+            std::fs::write("trace.out", lines.join("\n"))?;
         }
     }
     let fuel = MAX_FUEL - store.get_fuel()?;

@@ -6,29 +6,83 @@ impl exports::proxy::conversion::conversion::Guest for Stub {
     fn get_mock_test_host_types_counter(
         handle: u32,
     ) -> exports::proxy::conversion::conversion::TestHostTypesCounter {
+        let _ = handle;
         exports::proxy::conversion::conversion::TestHostTypesCounter::new(MockedResource {
-            handle,
+            handle: next_mock_label(),
             name: "counter".to_string(),
         })
+    }
+    fn get_handle_mock_test_host_types_counter(
+        x: exports::proxy::conversion::conversion::TestHostTypesCounterBorrow<'_>,
+    ) -> u32 {
+        x.get::<MockedResource>().handle
+    }
+}
+impl exports::proxy::conversion::executor::Guest for Stub {
+    async fn run() -> () {
+        static PANIC_HOOK: std::sync::Once = std::sync::Once::new();
+        PANIC_HOOK
+            .call_once(|| std::panic::set_hook(
+                Box::new(|info| proxy::recorder::record::fail(&info.to_string())),
+            ));
+        run_executor().await
+    }
+    fn stop() -> () {
+        stop_executor()
+    }
+    fn step() -> u32 {
+        next_step()
+    }
+    fn current_step() -> u32 {
+        current_step()
+    }
+    async fn wait_until_step(step: u32) -> () {
+        wait_until_step(step).await
+    }
+    async fn step_after(step: u32) -> u32 {
+        step_after(step).await
+    }
+    fn host_drops(dropping: bool) -> () {
+        MOVING.with(|moving| moving.set(dropping))
     }
 }
 impl exports::test::host::types::Guest for Stub {
     type Counter = MockedResource;
+    #[allow(unused_variables)]
     fn make_point(x: i32, y: i32) -> exports::test::host::types::Point {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&x)).unwrap());
         __params.push(wasm_wave::to_string(&ToValue::to_value(&y)).unwrap());
-        let mut __buf = __params.join(",");
-        proxy::util::debug::print(
-            &format!("import: {}({})", "test:host/types@0.1.0.make-point", __buf),
+        let __id = trace_task_id(Table::Imports);
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "test:host/types@0.1.0.make-point",
+                false,
+                __params.clone(),
+            ),
         );
-        __buf += "test:host/types@0.1.0.make-point";
-        let mut u = Unstructured::new(&__buf.as_bytes());
-        let res = u.arbitrary().unwrap();
+        let __random = proxy::util::debug::get_random();
+        let mut __host = Unstructured::new(&__random);
+        MOVING.with(|moving| moving.set(true));
+        MOVING.with(|moving| moving.set(false));
+        let __at: Option<u32> = None;
+        let __data = fuzz_data(
+            &(__params.join(",") + "test:host/types@0.1.0.make-point"),
+        );
+        let mut u = Unstructured::new(&__data);
+        let res = Fuzz::fuzz(&mut u).unwrap();
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
-        proxy::util::debug::print(&format!("ret: {}", res_str));
+        proxy::recorder::record::record(
+            &Line {
+                at: __at,
+                ..trace_return(Party::Host, __id, Some(res_str))
+            },
+        );
         res
     }
+    #[allow(unused_variables)]
     fn check(
         p: exports::test::host::types::Perms,
         c: exports::test::host::types::Color,
@@ -36,69 +90,167 @@ impl exports::test::host::types::Guest for Stub {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&p)).unwrap());
         __params.push(wasm_wave::to_string(&ToValue::to_value(&c)).unwrap());
-        let mut __buf = __params.join(",");
-        proxy::util::debug::print(
-            &format!("import: {}({})", "test:host/types@0.1.0.check", __buf),
+        let __id = trace_task_id(Table::Imports);
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "test:host/types@0.1.0.check",
+                false,
+                __params.clone(),
+            ),
         );
-        __buf += "test:host/types@0.1.0.check";
-        let mut u = Unstructured::new(&__buf.as_bytes());
-        let res = u.arbitrary().unwrap();
+        let __random = proxy::util::debug::get_random();
+        let mut __host = Unstructured::new(&__random);
+        MOVING.with(|moving| moving.set(true));
+        MOVING.with(|moving| moving.set(false));
+        let __at: Option<u32> = None;
+        let __data = fuzz_data(&(__params.join(",") + "test:host/types@0.1.0.check"));
+        let mut u = Unstructured::new(&__data);
+        let res = Fuzz::fuzz(&mut u).unwrap();
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
-        proxy::util::debug::print(&format!("ret: {}", res_str));
+        proxy::recorder::record::record(
+            &Line {
+                at: __at,
+                ..trace_return(Party::Host, __id, Some(res_str))
+            },
+        );
         res
     }
+    #[allow(unused_variables)]
     fn open(
         name: String,
     ) -> ::core::result::Result<exports::test::host::types::Counter, String> {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&name)).unwrap());
-        let mut __buf = __params.join(",");
-        proxy::util::debug::print(
-            &format!("import: {}({})", "test:host/types@0.1.0.open", __buf),
+        let __id = trace_task_id(Table::Imports);
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "test:host/types@0.1.0.open",
+                false,
+                __params.clone(),
+            ),
         );
-        __buf += "test:host/types@0.1.0.open";
-        let mut u = Unstructured::new(&__buf.as_bytes());
-        let res = u.arbitrary().unwrap();
+        let __random = proxy::util::debug::get_random();
+        let mut __host = Unstructured::new(&__random);
+        MOVING.with(|moving| moving.set(true));
+        MOVING.with(|moving| moving.set(false));
+        let __at: Option<u32> = None;
+        let __data = fuzz_data(&(__params.join(",") + "test:host/types@0.1.0.open"));
+        let mut u = Unstructured::new(&__data);
+        let res = Fuzz::fuzz(&mut u).unwrap();
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
-        proxy::util::debug::print(&format!("ret: {}", res_str));
+        proxy::recorder::record::record(
+            &Line {
+                at: __at,
+                ..trace_return(Party::Host, __id, Some(res_str))
+            },
+        );
         res
     }
 }
 impl exports::test::host::types::GuestCounter for MockedResource {
+    #[allow(unused_variables)]
     fn new(start: u32) -> Self {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&start)).unwrap());
-        let mut __buf = __params.join(",");
-        proxy::util::debug::print(
-            &format!("import: {}({})", "new test:host/types/counter@0.1.0", __buf),
+        let __id = trace_task_id(Table::Imports);
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "new test:host/types/counter@0.1.0",
+                false,
+                __params.clone(),
+            ),
         );
-        __buf += "new test:host/types/counter@0.1.0";
-        let mut u = Unstructured::new(&__buf.as_bytes());
+        let __random = proxy::util::debug::get_random();
+        let mut __host = Unstructured::new(&__random);
+        MOVING.with(|moving| moving.set(true));
+        MOVING.with(|moving| moving.set(false));
+        let __at: Option<u32> = None;
+        let __data = fuzz_data(
+            &(__params.join(",") + "new test:host/types/counter@0.1.0"),
+        );
+        let mut u = Unstructured::new(&__data);
         let res = MockedResource {
             name: "counter".to_string(),
-            ..u.arbitrary().unwrap()
+            ..Fuzz::fuzz(&mut u).unwrap()
         };
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
-        proxy::util::debug::print(&format!("ret: {}", res_str));
+        proxy::recorder::record::record(
+            &Line {
+                at: __at,
+                ..trace_return(Party::Host, __id, Some(res_str))
+            },
+        );
         res
     }
+    #[allow(unused_variables)]
     fn get(&self) -> u32 {
         let mut __params: Vec<String> = vec![
             wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
         ];
-        let mut __buf = __params.join(",");
-        proxy::util::debug::print(
-            &format!("import: {}({})", "test:host/types/counter@0.1.0.get", __buf),
+        let __id = trace_task_id(Table::Imports);
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "test:host/types/counter@0.1.0.get",
+                false,
+                __params.clone(),
+            ),
         );
-        __buf += "test:host/types/counter@0.1.0.get";
-        let mut u = Unstructured::new(&__buf.as_bytes());
-        let res = u.arbitrary().unwrap();
+        let __random = proxy::util::debug::get_random();
+        let mut __host = Unstructured::new(&__random);
+        MOVING.with(|moving| moving.set(true));
+        MOVING.with(|moving| moving.set(false));
+        let __at: Option<u32> = None;
+        let __data = fuzz_data(
+            &(__params.join(",") + "test:host/types/counter@0.1.0.get"),
+        );
+        let mut u = Unstructured::new(&__data);
+        let res = Fuzz::fuzz(&mut u).unwrap();
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
-        proxy::util::debug::print(&format!("ret: {}", res_str));
+        proxy::recorder::record::record(
+            &Line {
+                at: __at,
+                ..trace_return(Party::Host, __id, Some(res_str))
+            },
+        );
         res
     }
     #[allow(unused_variables)]
-    fn add(&self, n: u32) -> () {}
+    fn add(&self, n: u32) -> () {
+        let mut __params: Vec<String> = vec![
+            wasm_wave::to_string(& ToValue::to_value(& self)).unwrap()
+        ];
+        __params.push(wasm_wave::to_string(&ToValue::to_value(&n)).unwrap());
+        let __id = trace_task_id(Table::Imports);
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "test:host/types/counter@0.1.0.add",
+                false,
+                __params.clone(),
+            ),
+        );
+        let __random = proxy::util::debug::get_random();
+        let mut __host = Unstructured::new(&__random);
+        MOVING.with(|moving| moving.set(true));
+        MOVING.with(|moving| moving.set(false));
+        let __at: Option<u32> = None;
+        proxy::recorder::record::record(
+            &Line {
+                at: __at,
+                ..trace_return(Party::Host, __id, None)
+            },
+        );
+    }
+    #[allow(unused_variables)]
     fn merge(
         a: exports::test::host::types::CounterBorrow<'_>,
         b: exports::test::host::types::Counter,
@@ -106,35 +258,108 @@ impl exports::test::host::types::GuestCounter for MockedResource {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&a)).unwrap());
         __params.push(wasm_wave::to_string(&ToValue::to_value(&b)).unwrap());
-        let mut __buf = __params.join(",");
-        proxy::util::debug::print(
-            &format!("import: {}({})", "test:host/types/counter@0.1.0.merge", __buf),
+        let __id = trace_task_id(Table::Imports);
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "test:host/types/counter@0.1.0.merge",
+                false,
+                __params.clone(),
+            ),
         );
-        __buf += "test:host/types/counter@0.1.0.merge";
-        let mut u = Unstructured::new(&__buf.as_bytes());
-        let res = u.arbitrary().unwrap();
+        let __random = proxy::util::debug::get_random();
+        let mut __host = Unstructured::new(&__random);
+        MOVING.with(|moving| moving.set(true));
+        drop((b,));
+        MOVING.with(|moving| moving.set(false));
+        let __at: Option<u32> = None;
+        let __data = fuzz_data(
+            &(__params.join(",") + "test:host/types/counter@0.1.0.merge"),
+        );
+        let mut u = Unstructured::new(&__data);
+        let res = Fuzz::fuzz(&mut u).unwrap();
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
-        proxy::util::debug::print(&format!("ret: {}", res_str));
+        proxy::recorder::record::record(
+            &Line {
+                at: __at,
+                ..trace_return(Party::Host, __id, Some(res_str))
+            },
+        );
         res
+    }
+    unsafe fn resource_from_raw_(handle: *mut Option<Self>) -> Option<Self> {
+        if let Some(res) = *unsafe { Box::from_raw(handle) } {
+            let name = wasm_wave::to_string(&res.to_value()).unwrap();
+            let by = if MOVING.with(|moving| moving.get()) {
+                Party::Host
+            } else {
+                Party::Guest
+            };
+            let line = trace_drop(by, Table::Imports, name);
+            proxy::recorder::record::record(&line);
+        }
+        None
     }
 }
 impl exports::test::log0_1_0::sink::Guest for Stub {
     #[allow(unused_variables)]
-    fn write(msg: String) -> () {}
+    fn write(msg: String) -> () {
+        let mut __params: Vec<String> = Vec::new();
+        __params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
+        let __id = trace_task_id(Table::Imports);
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "test:log/sink@0.1.0.write",
+                false,
+                __params.clone(),
+            ),
+        );
+        let __random = proxy::util::debug::get_random();
+        let mut __host = Unstructured::new(&__random);
+        MOVING.with(|moving| moving.set(true));
+        MOVING.with(|moving| moving.set(false));
+        let __at: Option<u32> = None;
+        proxy::recorder::record::record(
+            &Line {
+                at: __at,
+                ..trace_return(Party::Host, __id, None)
+            },
+        );
+    }
 }
 impl exports::test::log0_2_0::sink::Guest for Stub {
+    #[allow(unused_variables)]
     fn write(msg: String) -> bool {
         let mut __params: Vec<String> = Vec::new();
         __params.push(wasm_wave::to_string(&ToValue::to_value(&msg)).unwrap());
-        let mut __buf = __params.join(",");
-        proxy::util::debug::print(
-            &format!("import: {}({})", "test:log/sink@0.2.0.write", __buf),
+        let __id = trace_task_id(Table::Imports);
+        proxy::recorder::record::record(
+            &trace_call(
+                Party::Guest,
+                __id,
+                "test:log/sink@0.2.0.write",
+                false,
+                __params.clone(),
+            ),
         );
-        __buf += "test:log/sink@0.2.0.write";
-        let mut u = Unstructured::new(&__buf.as_bytes());
-        let res = u.arbitrary().unwrap();
+        let __random = proxy::util::debug::get_random();
+        let mut __host = Unstructured::new(&__random);
+        MOVING.with(|moving| moving.set(true));
+        MOVING.with(|moving| moving.set(false));
+        let __at: Option<u32> = None;
+        let __data = fuzz_data(&(__params.join(",") + "test:log/sink@0.2.0.write"));
+        let mut u = Unstructured::new(&__data);
+        let res = Fuzz::fuzz(&mut u).unwrap();
         let res_str = wasm_wave::to_string(&ToValue::to_value(&res)).unwrap();
-        proxy::util::debug::print(&format!("ret: {}", res_str));
+        proxy::recorder::record::record(
+            &Line {
+                at: __at,
+                ..trace_return(Party::Host, __id, Some(res_str))
+            },
+        );
         res
     }
 }
@@ -312,64 +537,44 @@ impl ToValue for &MockedResource {
         Value::make_handle(label.into())
     }
 }
-impl ToRust<MockedResource> for Value {
-    fn to_rust(&self) -> MockedResource {
-        let label = self.unwrap_handle();
-        let (name, handle) = label
-            .rsplit_once('-')
-            .and_then(|(name, handle_str)| {
-                handle_str.parse::<u32>().ok().map(|h| (name.to_string(), h))
-            })
-            .expect("invalid handle label");
-        MockedResource { handle, name }
-    }
-}
-impl Arbitrary<'_> for exports::test::host::types::Point {
-    fn arbitrary(u: &mut Unstructured<'_>) -> Result<Self> {
+impl Fuzz for exports::test::host::types::Point {
+    fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
         Ok(exports::test::host::types::Point {
-            x: u.arbitrary()?,
-            y: u.arbitrary()?,
-            label: u.arbitrary()?,
+            x: Fuzz::fuzz(u)?,
+            y: Fuzz::fuzz(u)?,
+            label: Fuzz::fuzz(u)?,
         })
     }
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let mut res = (0, Some(0));
-        let size = <i32 as Arbitrary>::size_hint(depth + 1);
-        res = arbitrary::size_hint::and(res, size);
-        let size = <i32 as Arbitrary>::size_hint(depth + 1);
-        res = arbitrary::size_hint::and(res, size);
-        let size = <::core::option::Option<String> as Arbitrary>::size_hint(depth + 1);
-        res = arbitrary::size_hint::and(res, size);
-        res
+    #[allow(unused_variables)]
+    fn consume(self, u: &mut Unstructured<'_>) {
+        Fuzz::consume(self.x, u);
+        Fuzz::consume(self.y, u);
+        Fuzz::consume(self.label, u);
     }
 }
-impl Arbitrary<'_> for exports::test::host::types::Shape {
-    fn arbitrary(u: &mut Unstructured<'_>) -> Result<Self> {
+impl Fuzz for exports::test::host::types::Shape {
+    fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
         let idx = u.choose_index(4usize)?;
         match idx {
-            0usize => Ok(exports::test::host::types::Shape::Circle(u.arbitrary()?)),
-            1usize => Ok(exports::test::host::types::Shape::Rect(u.arbitrary()?)),
-            2usize => Ok(exports::test::host::types::Shape::HttpError(u.arbitrary()?)),
+            0usize => Ok(exports::test::host::types::Shape::Circle(Fuzz::fuzz(u)?)),
+            1usize => Ok(exports::test::host::types::Shape::Rect(Fuzz::fuzz(u)?)),
+            2usize => Ok(exports::test::host::types::Shape::HttpError(Fuzz::fuzz(u)?)),
             3usize => Ok(exports::test::host::types::Shape::Empty),
             _ => unreachable!(),
         }
     }
-    #[allow(unused_variables, unused_mut)]
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let mut res = (1, Some(1));
-        let size = <u32 as Arbitrary>::size_hint(depth + 1);
-        res = arbitrary::size_hint::or(res, size);
-        let size = <exports::test::host::types::Point as Arbitrary>::size_hint(
-            depth + 1,
-        );
-        res = arbitrary::size_hint::or(res, size);
-        let size = <String as Arbitrary>::size_hint(depth + 1);
-        res = arbitrary::size_hint::or(res, size);
-        res
+    #[allow(unused_variables)]
+    fn consume(self, u: &mut Unstructured<'_>) {
+        match self {
+            exports::test::host::types::Shape::Circle(x) => Fuzz::consume(x, u),
+            exports::test::host::types::Shape::Rect(x) => Fuzz::consume(x, u),
+            exports::test::host::types::Shape::HttpError(x) => Fuzz::consume(x, u),
+            exports::test::host::types::Shape::Empty => {}
+        }
     }
 }
-impl Arbitrary<'_> for exports::test::host::types::Color {
-    fn arbitrary(u: &mut Unstructured<'_>) -> Result<Self> {
+impl Fuzz for exports::test::host::types::Color {
+    fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
         let idx = u.choose_index(3usize)?;
         match idx {
             0usize => Ok(exports::test::host::types::Color::Red),
@@ -378,14 +583,17 @@ impl Arbitrary<'_> for exports::test::host::types::Color {
             _ => unreachable!(),
         }
     }
-    #[allow(unused_variables, unused_mut)]
-    fn size_hint(depth: usize) -> (usize, Option<usize>) {
-        let mut res = (1, Some(1));
-        res
+    #[allow(unused_variables)]
+    fn consume(self, u: &mut Unstructured<'_>) {
+        match self {
+            exports::test::host::types::Color::Red => {}
+            exports::test::host::types::Color::Green => {}
+            exports::test::host::types::Color::DnsBlue => {}
+        }
     }
 }
-impl Arbitrary<'_> for exports::test::host::types::Perms {
-    fn arbitrary(u: &mut Unstructured<'_>) -> Result<Self> {
+impl Fuzz for exports::test::host::types::Perms {
+    fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
         let flag_count = u.int_in_range(0..=2usize)?;
         let mut res = exports::test::host::types::Perms::empty();
         let choices = [
@@ -399,38 +607,508 @@ impl Arbitrary<'_> for exports::test::host::types::Perms {
         }
         Ok(res)
     }
-    fn size_hint(_: usize) -> (usize, Option<usize>) {
-        (1, Some(1 + 2usize))
-    }
 }
-impl Arbitrary<'_> for exports::test::host::types::Counter {
-    fn arbitrary(_u: &mut Unstructured<'_>) -> Result<Self> {
+impl Fuzz for exports::test::host::types::Counter {
+    fn fuzz(_u: &mut Unstructured<'_>) -> Result<Self> {
         Ok(
             exports::test::host::types::Counter::new(MockedResource {
-                handle: 42,
+                handle: next_mock_label(),
                 name: "counter".to_string(),
             }),
         )
     }
-    fn size_hint(_: usize) -> (usize, Option<usize>) {
-        (0, Some(0))
-    }
 }
-impl<'a> Arbitrary<'_> for exports::test::host::types::CounterBorrow<'a> {
-    fn arbitrary(_u: &mut Unstructured<'_>) -> Result<Self> {
+impl<'a> Fuzz for exports::test::host::types::CounterBorrow<'a> {
+    fn fuzz(_u: &mut Unstructured<'_>) -> Result<Self> {
         unreachable!()
     }
 }
 #[allow(unused_imports)]
 use arbitrary::{Arbitrary, Unstructured, Result};
-impl Arbitrary<'_> for MockedResource {
-    fn arbitrary(_u: &mut Unstructured<'_>) -> Result<Self> {
+trait Fuzz: Sized {
+    fn fuzz(u: &mut Unstructured<'_>) -> Result<Self>;
+    #[allow(dead_code)]
+    fn consume(self, _u: &mut Unstructured<'_>) {}
+}
+thread_local! {
+    static FUZZ_SEED : u64 = { let random = proxy::util::debug::get_random();
+    u64::from_le_bytes(random[..8].try_into().unwrap()) };
+}
+/// Fuzz data drawn from `text`, e.g. a call's arguments: the same for the same text in
+/// a run, so that the host answers alike, and different in another run. The text's
+/// hash seeds splitmix64, which makes as much data as `get-random` gives.
+#[allow(dead_code)]
+fn fuzz_data(text: &str) -> Vec<u8> {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    FUZZ_SEED.with(|seed| seed.hash(&mut hasher));
+    text.hash(&mut hasher);
+    let mut state = hasher.finish();
+    (0..128)
+        .flat_map(|_| {
+            state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            (z ^ (z >> 31)).to_le_bytes()
+        })
+        .collect()
+}
+impl Fuzz for MockedResource {
+    fn fuzz(_u: &mut Unstructured<'_>) -> Result<Self> {
         Ok(Self {
-            handle: 42,
+            handle: next_mock_label(),
             name: "mocked-resource".to_string(),
         })
     }
-    fn size_hint(_: usize) -> (usize, Option<usize>) {
-        (0, Some(0))
+}
+macro_rules! impl_fuzz_primitive {
+    ($($t:ty),*) => {
+        $(impl Fuzz for $t { fn fuzz(u : & mut Unstructured < '_ >) -> Result < Self > {
+        u.arbitrary() } })*
+    };
+}
+impl_fuzz_primitive!(
+    u8, u16, u32, u64, i8, i16, i32, i64, f32, f64, bool, char, String, ()
+);
+impl<T: Fuzz> Fuzz for Option<T> {
+    fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
+        Ok(if u.arbitrary()? { Some(Fuzz::fuzz(u)?) } else { None })
     }
+    fn consume(self, u: &mut Unstructured<'_>) {
+        if let Some(x) = self {
+            x.consume(u);
+        }
+    }
+}
+impl<T: Fuzz> Fuzz for Vec<T> {
+    fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
+        let mut res = Vec::new();
+        while u.arbitrary()? {
+            res.push(Fuzz::fuzz(u)?);
+        }
+        Ok(res)
+    }
+    fn consume(self, u: &mut Unstructured<'_>) {
+        for x in self {
+            x.consume(u);
+        }
+    }
+}
+impl<T: Fuzz, E: Fuzz> Fuzz for core::result::Result<T, E> {
+    fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
+        Ok(if u.arbitrary()? { Ok(Fuzz::fuzz(u)?) } else { Err(Fuzz::fuzz(u)?) })
+    }
+    fn consume(self, u: &mut Unstructured<'_>) {
+        match self {
+            Ok(x) => x.consume(u),
+            Err(x) => x.consume(u),
+        }
+    }
+}
+macro_rules! impl_fuzz_tuple {
+    ($($T:ident),+) => {
+        impl < $($T : Fuzz),+ > Fuzz for ($($T,)+) { fn fuzz(u : & mut Unstructured < '_
+        >) -> Result < Self > { Ok(($($T ::fuzz(u) ?,)+)) } #[allow(non_snake_case)] fn
+        consume(self, u : & mut Unstructured < '_ >) { let ($($T,)+) = self; $($T
+        .consume(u);)+ } }
+    };
+}
+impl_fuzz_tuple!(T1);
+impl_fuzz_tuple!(T1, T2);
+impl_fuzz_tuple!(T1, T2, T3);
+impl_fuzz_tuple!(T1, T2, T3, T4);
+impl_fuzz_tuple!(T1, T2, T3, T4, T5);
+impl_fuzz_tuple!(T1, T2, T3, T4, T5, T6);
+impl_fuzz_tuple!(T1, T2, T3, T4, T5, T6, T7);
+impl_fuzz_tuple!(T1, T2, T3, T4, T5, T6, T7, T8);
+impl_fuzz_tuple!(T1, T2, T3, T4, T5, T6, T7, T8, T9);
+impl Fuzz for wit_bindgen::rt::async_support::ErrorContext {
+    fn fuzz(u: &mut Unstructured<'_>) -> Result<Self> {
+        Ok(Self::new(&String::fuzz(u)?))
+    }
+    fn consume(self, _u: &mut Unstructured<'_>) {
+        let name = wasm_wave::to_string(&self.to_value()).unwrap();
+        proxy::recorder::record::record(&trace_drop(Party::Host, TRACE_TABLE, name));
+    }
+}
+use bindings::proxy::recorder::types::*;
+thread_local! {
+    static TASK_ID : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+}
+#[allow(dead_code)]
+fn trace_task_id(table: Table) -> TaskId {
+    let id = TASK_ID
+        .with(|id| {
+            id.set(id.get() + 1);
+            id.get()
+        });
+    TaskId { table, id }
+}
+#[allow(dead_code)]
+fn trace_call(
+    by: Party,
+    id: TaskId,
+    func: &str,
+    is_async: bool,
+    args: Vec<String>,
+) -> Line {
+    let call = Call {
+        id,
+        is_async,
+        func: func.to_string(),
+        args,
+    };
+    Line {
+        by,
+        at: None,
+        event: Event::Call(call),
+    }
+}
+#[allow(dead_code)]
+fn trace_return(by: Party, id: TaskId, value: Option<String>) -> Line {
+    let ret = ReturnValue { id, value };
+    Line {
+        by,
+        at: None,
+        event: Event::Return(ret),
+    }
+}
+#[allow(dead_code)]
+fn trace_drop(by: Party, table: Table, name: String) -> Line {
+    let label = Label { table, name };
+    Line {
+        by,
+        at: None,
+        event: Event::Drop(label),
+    }
+}
+/// The value of the `return` among the host's answers to a call.
+#[allow(dead_code)]
+fn trace_return_value(answers: Vec<Line>) -> Option<String> {
+    answers
+        .into_iter()
+        .find_map(|line| match line.event {
+            Event::Return(ret) => Some(ret.value),
+            _ => None,
+        })
+        .expect("the trace doesn't answer the call")
+}
+/// The guard over an async import call while its wrapper waits (see `cancel_defs` in the
+/// generator); `done` once it returns.
+#[allow(dead_code)]
+struct TraceCancel(Option<TaskId>);
+impl TraceCancel {
+    #[allow(dead_code)]
+    fn done(mut self) {
+        self.0 = None;
+    }
+}
+impl Drop for TraceCancel {
+    fn drop(&mut self) {
+        if let Some(id) = self.0 {
+            proxy::recorder::record::record(
+                &Line {
+                    by: Party::Guest,
+                    at: None,
+                    event: Event::Cancel(id),
+                },
+            );
+            proxy::recorder::record::record(
+                &Line {
+                    by: Party::Host,
+                    at: None,
+                    event: Event::Cancelled(id),
+                },
+            );
+        }
+    }
+}
+#[allow(dead_code)]
+const TRACE_TABLE: Table = Table::Imports;
+#[allow(dead_code)]
+fn trace_at() -> u32 {
+    current_step()
+}
+#[allow(dead_code)]
+async fn trace_reach(at: Option<u32>) {
+    if let Some(at) = at {
+        reach_step(at).await;
+    }
+}
+#[allow(dead_code)]
+fn host_dropping<R>(f: impl FnOnce() -> R) -> R {
+    MOVING.with(|moving| moving.set(true));
+    let res = f();
+    MOVING.with(|moving| moving.set(false));
+    res
+}
+thread_local! {
+    #[allow(dead_code)] static MOVING : std::cell::Cell < bool > = const {
+    std::cell::Cell::new(false) };
+}
+thread_local! {
+    static MOCK_LABEL : std::cell::Cell < u32 > = const { std::cell::Cell::new(0) };
+}
+/// The label of a new mock.
+#[allow(dead_code)]
+fn next_mock_label() -> u32 {
+    MOCK_LABEL.set(MOCK_LABEL.get() + 1);
+    MOCK_LABEL.get()
+}
+type Job = std::pin::Pin<Box<dyn std::future::Future<Output = ()>>>;
+#[derive(Default)]
+struct Executor {
+    queue: Vec<Job>,
+    stopped: bool,
+    waker: Option<std::task::Waker>,
+}
+thread_local! {
+    static EXECUTOR : std::cell::RefCell < Executor > =
+    std::cell::RefCell::new(Executor::default()); static STEP : std::cell::Cell < u32 > =
+    const { std::cell::Cell::new(0) }; static WAKE_AGAIN : std::cell::Cell < bool > =
+    const { std::cell::Cell::new(false) }; static HELD : std::cell::Cell < u32 > = const
+    { std::cell::Cell::new(0) }; static WOKEN_WHILE_HELD : std::cell::Cell < bool > =
+    const { std::cell::Cell::new(false) }; static PROBE : std::cell::Cell < bool > =
+    const { std::cell::Cell::new(false) }; static PROBED : std::cell::Cell < bool > =
+    const { std::cell::Cell::new(false) };
+}
+/// Counts a step, and returns it.
+#[allow(dead_code)]
+fn next_step() -> u32 {
+    STEP.set(STEP.get() + 1);
+    STEP.get()
+}
+/// The step a job runs in.
+#[allow(dead_code)]
+fn current_step() -> u32 {
+    STEP.get()
+}
+/// Waits, from any task, until the executor has run `runs` more times, and returns the step of
+/// the last run.
+#[allow(dead_code)]
+async fn wait_for_runs(runs: u32) -> u32 {
+    let mut left = runs;
+    wait_for_run(move || {
+            if left == 0 {
+                return true;
+            }
+            left -= 1;
+            false
+        })
+        .await
+}
+/// Waits, from any task, until a run of the executor in `step` or later, or returns at once if
+/// the count is already there, e.g. replay's for a host line recorded in that step, which checks
+/// that it came in that step.
+#[allow(dead_code)]
+async fn wait_until_step(step: u32) {
+    if current_step() >= step {
+        return;
+    }
+    wait_for_run(move || current_step() >= step).await;
+}
+/// Waits, from any task, as `wait_until_step` does, and takes the next step, of a host line
+/// `start` makes, e.g. an export call's arrival, which it returns: the one after the run it
+/// waited for, as the executor doesn't run in between (see `wait_for_run`).
+#[allow(dead_code)]
+async fn step_after(step: u32) -> u32 {
+    wait_until_step(step).await;
+    next_step()
+}
+/// Waits, in a job of the executor, until its run in `step`, waking the executor itself until
+/// then, e.g. replay's job for a copy recorded in that step.
+///
+/// Panics if the count passed `step`: replay diverged from the recording.
+#[allow(dead_code)]
+async fn reach_step(step: u32) {
+    std::future::poll_fn(|_| {
+            let now = current_step();
+            assert!(
+                now <= step, "replay reached step {now} before the run in step {step}"
+            );
+            if now == step {
+                std::task::Poll::Ready(())
+            } else {
+                WAKE_AGAIN.set(true);
+                std::task::Poll::Pending
+            }
+        })
+        .await
+}
+/// Waits until a run of the executor in which `done` returns true, and returns its step. A job
+/// asks in each run, waking the executor itself in between, as no host event would.
+async fn wait_for_run(mut done: impl FnMut() -> bool + 'static) -> u32 {
+    let job = std::future::poll_fn(move |_| {
+        if done() {
+            return std::task::Poll::Ready(());
+        }
+        WAKE_AGAIN.set(true);
+        std::task::Poll::Pending
+    });
+    wait_for_job(job).await.1
+}
+/// Runs `job` in the executor, from any task, and returns its value, and the step of the run it
+/// completed in, e.g. record mode's host call that blocked, whose completion wakes the executor.
+///
+/// The executor doesn't run again until the waiting task resumes, e.g. for a guest's event, so
+/// that what the task does next, e.g. return a STARTED call, or take an export call's step,
+/// follows the run it waited for, in record and replay alike: replay knows only the step.
+///
+/// `job` may borrow from the waiting task, e.g. a host call on the resource the guest passed: it
+/// is only polled while the waiting task waits, and dropped if the task is dropped first, e.g.
+/// the guest cancelled its call, which cancels the host's call too.
+#[allow(dead_code)]
+async fn wait_for_job<'a, T: 'static>(
+    job: impl std::future::Future<Output = T> + 'a,
+) -> (T, u32) {
+    type Job<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'a>>;
+    struct Done<T> {
+        job: Option<Job<'static, T>>,
+        value: Option<(T, u32)>,
+        waker: Option<std::task::Waker>,
+        held: bool,
+    }
+    /// The waiting task's side, which drops the job if it is still pending, and releases the
+    /// executor once the task resumes, or is dropped first.
+    struct Waiter<T>(std::rc::Rc<std::cell::RefCell<Done<T>>>);
+    impl<T> Drop for Waiter<T> {
+        fn drop(&mut self) {
+            let mut done = self.0.borrow_mut();
+            drop(done.job.take());
+            if std::mem::take(&mut done.held) {
+                HELD.set(HELD.get() - 1);
+                if HELD.get() == 0 && WOKEN_WHILE_HELD.replace(false) {
+                    wake_executor();
+                }
+            }
+        }
+    }
+    let job: Job<'a, T> = Box::pin(job);
+    let job: Job<'static, T> = unsafe { std::mem::transmute(job) };
+    let done = Done {
+        job: Some(job),
+        value: None,
+        waker: None,
+        held: false,
+    };
+    let waiter = Waiter(std::rc::Rc::new(std::cell::RefCell::new(done)));
+    let job_shared = waiter.0.clone();
+    spawn(
+        std::future::poll_fn(move |cx| {
+            let mut shared = job_shared.borrow_mut();
+            let Some(job) = shared.job.as_mut() else {
+                return std::task::Poll::Ready(());
+            };
+            let std::task::Poll::Ready(value) = job.as_mut().poll(cx) else {
+                return std::task::Poll::Pending;
+            };
+            shared.job = None;
+            HELD.set(HELD.get() + 1);
+            shared.value = Some((value, current_step()));
+            shared.held = true;
+            if let Some(waker) = shared.waker.take() {
+                waker.wake();
+            }
+            std::task::Poll::Ready(())
+        }),
+    );
+    let value = std::future::poll_fn(|cx| {
+            let mut shared = waiter.0.borrow_mut();
+            match shared.value.take() {
+                Some(value) => std::task::Poll::Ready(value),
+                None => {
+                    shared.waker = Some(cx.waker().clone());
+                    std::task::Poll::Pending
+                }
+            }
+        })
+        .await;
+    drop(waiter);
+    value
+}
+/// Queues `job`, from any function, sync or async.
+#[allow(dead_code)]
+fn spawn(job: impl std::future::Future<Output = ()> + 'static) {
+    EXECUTOR
+        .with_borrow_mut(|e| {
+            e.queue.push(Box::pin(job));
+        });
+    wake_executor();
+}
+/// Wakes `run_executor` from another task, with wit-bindgen's `inter-task-wakeup`.
+fn wake_executor() {
+    let waker = EXECUTOR.with_borrow_mut(|e| e.waker.take());
+    if let Some(waker) = waker {
+        waker.wake();
+    }
+}
+/// Polls the queued jobs until `stop_executor` is called and they are all done.
+#[allow(dead_code)]
+async fn run_executor() {
+    let mut running: Vec<Job> = Vec::new();
+    std::future::poll_fn(|cx| {
+            if PROBE.replace(false) {
+                PROBED.set(true);
+                cx.waker().wake_by_ref();
+                return std::task::Poll::Pending;
+            }
+            PROBED.set(false);
+            if HELD.get() > 0 {
+                WOKEN_WHILE_HELD.set(true);
+                EXECUTOR.with_borrow_mut(|e| e.waker = Some(cx.waker().clone()));
+                return std::task::Poll::Pending;
+            }
+            next_step();
+            WAKE_AGAIN.set(false);
+            running.retain_mut(|job| job.as_mut().poll(cx).is_pending());
+            loop {
+                let mut queued = EXECUTOR
+                    .with_borrow_mut(|e| std::mem::take(&mut e.queue));
+                if queued.is_empty() {
+                    break;
+                }
+                queued.retain_mut(|job| job.as_mut().poll(cx).is_pending());
+                running.append(&mut queued);
+            }
+            EXECUTOR
+                .with_borrow_mut(|e| {
+                    if e.stopped && running.is_empty() {
+                        std::task::Poll::Ready(())
+                    } else {
+                        e.waker = Some(cx.waker().clone());
+                        if WAKE_AGAIN.get() {
+                            cx.waker().wake_by_ref();
+                        }
+                        std::task::Poll::Pending
+                    }
+                })
+        })
+        .await
+}
+/// The callback of the executor's task, which `run` exports, in place of wit-bindgen's (see
+/// `patch_bindings` in the generator). Resumed after a yield, e.g. by a job waiting for a later
+/// step, the executor first takes an event that came meanwhile, as a waiting executor woken by
+/// that event does, e.g. in record mode: wit-bindgen would only take it after a poll, in the
+/// next run. So its first poll is a probe, which only wakes it: wit-bindgen then takes a
+/// pending event, if any, and polls it again. If there was none, wit-bindgen yields, and the
+/// callback runs it at once instead.
+#[allow(dead_code)]
+unsafe fn executor_callback(event0: u32, event1: u32, event2: u32) -> u32 {
+    const EVENT_NONE: u32 = 0;
+    if event0 == EVENT_NONE {
+        PROBE.set(true);
+    }
+    let code = unsafe {
+        wit_bindgen::rt::async_support::callback(event0, event1, event2)
+    };
+    if PROBED.replace(false) {
+        return unsafe { wit_bindgen::rt::async_support::callback(EVENT_NONE, 0, 0) };
+    }
+    code
+}
+#[allow(dead_code)]
+fn stop_executor() {
+    EXECUTOR.with_borrow_mut(|e| e.stopped = true);
+    wake_executor();
 }
