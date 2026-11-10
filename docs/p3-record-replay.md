@@ -1,153 +1,83 @@
 # Record and replay of WASI p3 components
 
-proxy-component records a run of a component and replays it without the host. 
-This is the design for components that use WASI p3, the component
-model's async: async functions, streams, futures and error-contexts. It covers what a trace
-records, how the proxy records a run without changing it, how replay reproduces it, and what
-makes replay portable across runtimes. [Status](#status) says what is implemented.
+proxy-component records a component's interactions with its host and replays them without that
+host. WASI p3 adds async calls, streams, futures, and error-contexts. Replaying their values is
+not enough: the guest can observe when operations complete and which completion arrives first.
 
-## Overview
+This document describes the current design, its invariants, and the conditions under which
+replay is correct. **Exact replay is not established for all p3 guests**; in particular,
+[multiple pending events](#answers-in-the-same-step) can produce a different observation order.
+The implementation currently targets wasmtime 49 and wit-bindgen 0.63.
 
-The proxy is two generated components around the main component, the guest. The imports
-component stands between the guest and the host: in record mode, it forwards each import to the
-host and records it, and in fuzz, dialog and replay modes it plays the host. The exports
-component stands between the host and the guest's exports: in record mode the host calls them
-through it, and in the other modes, its `start` function makes the calls, as the trace.
+## Architecture
 
-Every mode of the proxy has the same structure, so that a run is the same in record and replay.
-In particular, the imports component runs all of the host's side of the run in one task, the
-executor, in whose runs a trace's positions are counted (see [Steps](#steps)).
+```text
+host ↔ exports proxy ↔ guest ↔ imports proxy ↔ host
+```
 
-## Where nondeterminism comes from
+The imports proxy forwards guest imports while recording and substitutes host behavior while
+replaying. The exports proxy forwards host calls while recording; replay's `start` drives the
+guest exports from the trace. Fuzz and dialog modes use the same infrastructure with generated
+or user-chosen host behavior. The recorder component, or a host implementation of its interface,
+stores events; replay's recorder interface checks events and supplies recorded answers.
 
-Component model concurrency is cooperative: within an instance one thread runs at a time, and it
-observes other threads, or the host, only at defined points. Two kinds of choices decide a run:
+### Why p3 needs more machinery than p2
 
-- **The host's timing**: when an async import returns, and whether at once (RETURNED) or after
-  starting a subtask (STARTED); when and how much the host reads from or writes to a stream or
-  future; and when the host calls an export.
-- **The runtime's choices**, which the component model leaves open: which of several pending
-  events a wait returns, which ready thread resumes, and the like.
+For the synchronous p2 interfaces handled here, a call boundary supplies an observation point:
+record the arguments and result, then substitute the result during replay. Even readiness from
+`poll` is returned through an intercepted call.
 
-A trace records the first. The second must be the same in record and replay: wasmtime makes its
-choices without randomness, from the state of the whole store, which replay has to reproduce
-closely enough.
+In p3, work can outlive its introducing call. A sync import can return a stream that must be
+written later; an async import can remain pending while other calls run. Stream/future operations
+are canonical built-ins, not imports the proxy can intercept. To virtualize their contents, the
+proxy creates a wrapper stream or future in place of the original. During recording, a pump
+connects the wrapper to the real stream or future, forwarding and recording the transferred values.
 
-## wasmtime and wit-bindgen
+The wrapper creates two separate requirements:
 
-The design depends on how wasmtime (49) schedules async work, and on how wit-bindgen (0.63) 
-drives a task.
+- **Run work after the call returns.** Pumps need a long-lived async task to drive them, even
+  when a sync function created the wrapper. This is ordinary background-work management.
+- **Reproduce when results become visible.** Replay must deliver pending results and stream
+  contents at the corresponding points in the guest's execution, not merely reproduce their
+  values. This requires a record/replay scheduling policy.
 
-### wasmtime
+The imports proxy's executor currently serves both purposes: it drives the deferred jobs and
+gives their progress a shared logical clock. The runtime still schedules component tasks; the
+executor drives futures inside one of those tasks. The exports proxy's own jobs run separately,
+a [limitation](#limitations).
 
-- **Run queues.** wasmtime keeps a high-priority queue, e.g. delivering an event to a task that
-  waits for it, or starting a call, and a low-priority one, for a task that yielded; it takes from
-  the first while there is work in it. So after the executor yields to wake itself, every task with
-  a pending event, e.g. the guest, runs before the executor's next run.
-- **Which pending event a wait returns.** A waitable set keeps its pending events in a
-  `BTreeSet<Waitable>`, ordered by kind (host task, guest task, stream or future end) and then by
-  index in a table the whole store shares, which reuses freed slots. A task gets the lowest one
-  first, one per callback. The index isn't the guest's handle: it depends on every task and resource
-  in the whole shared store, including the proxy's and the recorder's. This makes the replay difficult
-  to replicate the exact same scheduling, because the replay composition uses different import and export
-  components. See [Answers in the same step](#answers-in-the-same-step).
-- **Events are only delivered to a waiting task.** An event for a task that yielded, rather than
-  waits, stays in its set until the task waits, or polls the set itself.
-- **Copies within one instance.** A copy between two ends of one instance traps unless the payload
-  is numeric ("cannot read from and write to intra-component future/stream with non-numeric
-  payload"), as the component model requires. It's checked when the copy happens, so a component
-  can't tell beforehand; see [Ends that come back](#labels).
-- **Zero-length copies** ask whether the other side is ready: a zero-length write completes once
-  the reader reads, and leaves the read pending for the next write; a zero-length read likewise
-  waits for a write. A host's end may answer at once, without being ready, which wasmtime's do.
-  Futures have no such copies.
-- **A call into a component** runs as a queued work item, which suspends the caller while it stays
-  entered, and holds back calls into it (`do_not_enter`); a sync WASI 0.2 call, e.g. a print, can
-  suspend an instance the same way. Either changes the schedule where the proxy can't see it.
-- **`wasmtime serve`** reuses an instance for many requests of a p3 component, so one instance's
-  trace has a call for each.
-
-### wit-bindgen
-
-- **A task's callback loop.** wit-bindgen runs a task's futures in one callback: it delivers the
-  callback's event, if any, polls the futures that were woken, and then, if one of them woke the
-  task again, polls the task's waitable set itself, delivers an event it finds, and polls again;
-  otherwise it yields (`YIELD`), or waits on the set (`WAIT`). It polls only woken futures, so a
-  future that wants another poll must wake itself.
-- **After a yield**, wasmtime resumes the task without an event, and wit-bindgen polls its futures
-  before it takes the events that came meanwhile, which it gets only in a later poll. A task woken
-  by an event takes it before polling. For the executor, whose polls are steps, that difference
-  would move an event to the next step in replay, where the executor wakes itself, but not in the
-  recording, where the event woke it. So the executor's callback wraps wit-bindgen's: resumed after
-  a yield, its first poll is a probe that only wakes the executor, so that wit-bindgen takes a
-  pending event, if any, before the run. wit-bindgen's generated glue is patched to call the
-  wrapper.
-- **Waking another task**, e.g. a sync mock queuing a job for the executor, goes through
-  wit-bindgen's inter-task wakeup, a stream that the sleeping task reads.
-- **Spawned futures** run in the task of the export that spawned them, which lives until they end;
-  the exports component's own jobs run on the task of `start`, not in the executor.
-- **A pending call moves between tasks.** The proxy's export polls the host's call once, for
-  RETURNED, and hands it to the executor otherwise; the executor's poll moves its waitable to the
-  executor's task.
-- **Cancellation.** Dropping a pending import call cancels it; the callee's export task gets the
-  request, its future is dropped, and wit-bindgen acknowledges with `task.cancel`. So the proxy
-  always answers a cancel with `cancelled`, and a callee's choice between returning and
-  acknowledging isn't visible to its caller.
-- **Streams and futures.** A write of no items is a zero-length write, and a read with no capacity
-  a zero-length read. A future's writer dropped unwritten writes a default value, which the proxy
-  never relies on.
+A custom scheduler is not intrinsic to p3. It is our current readiness-placement mechanism
+without runtime instrumentation. A deterministic runtime could replace part or all of that
+policy, but must control external readiness as well as task ordering; see [Portability](#portability).
+The [proposed executor protocol](executor-protocol.md) specifies a possible refactor and its
+verification obligations, not the implementation described here.
 
 ## Trace format
 
-A trace is the list of lines the proxy observed, in the order it observed them. Its types are
-defined once, in WIT ([`assets/recorder.wit`](../assets/recorder.wit)); values are WAVE text,
-e.g. `ok(#response-3)`, whose type comes from where they appear.
+A trace is a sequence of observations, not a total execution schedule. The authoritative types
+are in [`assets/recorder.wit`](../assets/recorder.wit), implemented by
+[`crates/trace`](../crates/trace). Each line is `(by, at, event)`:
 
-```wit
-enum party { host, guest }
+- `by` is `host` or `guest`, describing the event's party, not the component recording it.
+- `at`, when present, is a logical step, not elapsed time; see [Steps](#steps).
+- Values use WAVE text, with types determined by their position, e.g. `ok(#response-3)`.
 
-// The generated component that numbers a handle or a call: the imports component, for the
-// guest's imports, and the exports component, for its exports.
-enum table { imports, exports }
+| Events | Meaning and identity |
+|---|---|
+| `call`, `started`, `return`, `cancel`, `cancelled` | A call's lifetime, identified by `task-id = (table, id)` |
+| `write`, `read` | Items transferred from host to guest, or guest to host, identified by stream label |
+| `value` | A future's value; `by` identifies its writer |
+| `drop` | A handle's end, attributed to the party that dropped it |
 
-// A call, numbered in order by the component that sees it: `t1, t2, …` for the host's calls of
-// exports, `c1, c2, …` for the guest's calls of imports.
-record task-id { table: table, id: u32 }
+The `table` is the generated component's: `imports` or `exports`, not the guest's handle table.
+The numeric `id` is local to that component: `c1, c2, …` for imports and `t1, t2, …` for exports.
+Replay follows each task's or handle's sequence and the step constraints; unrelated lines need
+not be consumed in file order. The trace has no identity for the guest task that caused an import
+call.
 
-// A handle, by its table and its name, e.g. `#stream-7`; see Labels.
-record label { table: table, name: string }
+For example, an HTTP handler can return its response before the host reads its body:
 
-record call { id: task-id, is-async: bool, %func: string, args: list<string> }
-record return-value { id: task-id, value: option<string> }
-record chunk { %stream: label, items: string }
-record future-value { %future: label, value: string }
-
-variant event {
-  call(call),             // by the caller
-  started(task-id),       // the callee blocked, so the caller got a subtask
-  %return(return-value),  // by the callee
-  cancel(task-id),        // the caller asked to cancel a pending call
-  cancelled(task-id),     // the callee acknowledged it, instead of returning
-  write(chunk),           // the host wrote the items, which the guest read
-  read(chunk),            // the host read the items, which the guest wrote
-  value(future-value),    // a future's value, by its writer
-  drop(label),            // a handle was dropped, by whoever dropped it
-}
-
-// One event, who did it, and, for a host event the guest observes outside its calls, the step in
-// which it happened; see Steps.
-record line { by: party, at: option<u32>, event: event }
-```
-
-The lines of a call (`call`, `started`, `return`, `cancel`, `cancelled`) belong to its task, and
-those of a stream or future (`write`, `read`, `value`, `drop`) to its label. Lines of different
-tasks or handles may come in any order: what orders them is each task's and handle's own sequence,
-and the steps.
-
-An example, for `GET /wait?ms=250` on a wasi-http handler, in the text form, where `<--` puts
-data into a stream or future and `-->` takes it out:
-
-```
+```text
 host @1: t1.call async wasi:http/handler.handle(#request-1)
 guest: c1.call wasi:http/types/request.get-method(#borrow-request-1)
 host: c1.return get
@@ -161,325 +91,281 @@ host @6: #stream-5 --> [97, 115, 107, …]
 guest: drop #stream-5
 ```
 
-The guest returns the response before it writes its body, which the host then reads.
-
-Some properties the types don't show:
-
-- **Copies.** A copy completes once both sides have acted, so it is one line, the items one
-  rendezvous moved; copies are lazy, so a stream nobody reads has no `write`. The host's side waits
-  until the other side is ready, with a zero-length read or write, so that each copy completes as
-  the host issues it, and is recorded before the guest goes on.
-- **Futures.** A future can't wait for its reader, so the host's value is recorded as the host
-  writes it; the guest may drop its end instead, which isn't recorded. The guest's value is
-  recorded when the host takes it.
-- **Cancellation.** The guest cancels an import by dropping its pending call. The proxy
-  acknowledges it at once, so the trace has the guest's `cancel` and the host's `cancelled`; in
-  record mode the host's call is cancelled with it. Only a STARTED call can be cancelled.
-- **No caller identity.** The component model doesn't say which of the guest's tasks made an
-  import call, so a trace can't tell which guest lines a host line caused, only their order.
+Here `<--` denotes host-produced contents and `-->` host-consumed contents. The example's body
+list is abbreviated.
 
 ## Labels
 
-A label names a handle in one of the two generated components' tables, by its type and number,
-e.g. `#fields-3`. Neither table is the guest's, which also holds handles the proxy never sees,
-and the two can hold the same number, so a label carries its table. Labels only need to be
-consistent: replay treats them as names.
+A label names one lifetime of a handle in a generated component's table. For example, handle 7
+can first refer to stream A and later be reused for stream B. The trace must distinguish these
+lifetimes even though the handle number is the same. We call each lifetime a **binding**.
 
-- **Host resources** are labeled by the host's handle in record mode, and in the other modes by a
-  number the mock gets when it is made.
-- **Streams and futures** are labeled by the end the proxy holds for the stream's lifetime: the
-  end it received, or, for one it made, its writer. A stream first appears in the value that
-  brings it across.
+Host resources use host handle numbers in record mode and mock numbers in other modes. Streams
+and futures use the proxy's retained end: the end received, or the writer of a pair it creates.
+Neither numbering scheme is the guest's numbering.
 
-**Bindings.** A number names a handle until the handle leaves the table: at a `drop`, a future's
-`value`, or when the host hands it on, owned, to the guest. The number can then name another
-handle, as a variable can be bound again. So the recorder names each binding apart as it records
-each line, from the earlier lines alone: the first keeps the number, e.g. `#stream-7`, the next
-are `#stream-7-2`, `#stream-7-3`, and so on. A label then names one handle, and a trace cut short
-names its bindings as the whole trace would. A guest's drop can be recorded before the host's
-line that brought the handle in, as the host records a copy once it sees it complete, so an end
-of a label no line has mentioned belongs to the binding that line starts.
+**Lifetime invariant.** Ownership is linear, but mentions are not: a binding may have many
+borrows or stream transfers. It ends on a drop, a future's value, or an owned transfer out of
+the table in a host call/return. Borrowing does not end it. Reusing a handle creates a new
+binding, not a rename of the old one.
 
-**Renaming.** Replay's handle numbers differ from the recording's, as each mode makes handles of
-its own. Replay pairs each trace label with its own label for the same value, one to one, from
-the first line that has both, and requires every later line to agree; a replay label is paired
-again once the trace's label has ended. A stream replay makes itself, from a value it hands out,
-is paired explicitly. So replay checks that labels are used consistently, not their numbers.
+The recorder names successive bindings `#stream-7`, `#stream-7-2`, and so on. Distinguishing the
+lifetimes is necessary for this naming scheme; the suffix spelling is a convention, not an
+additional resource property. Fresh trace IDs would be another possible representation. The
+current convention retains the raw handle number and assigns names from the observed prefix,
+so truncating a trace does not change earlier names.
 
-**Ends that come back.** When the guest hands back a stream or future the proxy gave it, the
-proxy gets a new handle, and nothing tells it that the end is its own:
+**Observation order.** Transferring a value and recording the transfer are distinct actions.
+A pump may record a completed transfer only when its task resumes, after the guest has already
+acted on a resource in that value. The trace can therefore contain a drop of `#body-2` before
+the transfer line that first explains where `#body-2` came from. The resource existed before
+the drop; only the line describing its arrival is late.
 
-- It gets a new label: the trace stays consistent, but doesn't show the two as one.
-- It can't be read by the proxy, if its payload isn't numeric: that would copy between two ends
-  of one instance, which the component model forbids, and wasmtime traps. E.g. an HTTP echo that
-  passes a request's trailers future on to its response can't be recorded. Making the proxy's
-  pairs in another component instance would avoid it.
+This is not the recorder sorting same-step events into a different order: it appends observations
+as they reach it. Guest drops have no `at`, so this ordering does not even require two lines with
+the same clock value. The recorder associates such an early drop with the subsequently recorded
+arrival, retaining one label for that lifetime rather than treating the arrival as handle reuse.
+
+**Renaming invariant.** Correspondence between recorded and replay bindings is a table-scoped
+partial bijection: two distinct live bindings cannot map to the same replay binding. Every
+owned or borrowed occurrence must respect the established correspondence and retain its borrow
+annotation. Replay may reuse a raw handle after the recorded binding it represented has ended.
+Streams/futures created by replay are paired explicitly when needed.
+
+The implementation is [`crates/trace/src/renaming.rs`](../crates/trace/src/renaming.rs).
+This is correspondence of table bindings, not recovery of underlying object identity: an end
+handed back by the guest receives a new handle without revealing that it was the proxy's own.
 
 ## Recording
 
-Recording runs the composition in the real host. The imports component forwards every
-interaction with the host through its executor:
+### Calls and cancellation
 
-- **Async imports.** The proxy polls the host's call once: if the result is ready, it returns it
-  at once, so the guest sees RETURNED. Otherwise the call is STARTED, and an executor job awaits
-  the host's subtask, and records its `return` in the step it completed in.
-- **Streams and futures** pass through pumps. The proxy keeps the end it receives, makes a pair of
-  its own, and hands on the pair's other end; an executor job copies between the two, records each
-  copy and drop, and reads from the writer only once the reader reads, without read-ahead.
-- **The executor runs** while the host's calls of the guest's exports are pending, as there is no
-  `start` in record mode, and finishes its jobs when the last one returns.
+An async import is polled once in the calling task. If ready, its result is returned immediately
+(RETURNED). Otherwise the proxy records STARTED and moves the pending future to an executor job;
+its completion is recorded with that run's step. wit-bindgen moves the call's waitable to the
+executor task when that task polls it. The first-poll path preserves immediate completion for
+the runtime's native host functions, not necessarily for hosts implemented as components.
 
-So nothing the host does reaches the guest outside a run of the executor, which is what lets a step
-mark when each host event happened. Putting the executor in between must not change the run, which
-these rules keep:
+The trace distinguishes a normal `return` from cancellation of a pending guest import. On the
+normal path, the proxy disarms its cancellation guard and records the result. If the pending
+wrapper is dropped instead, its guard records `cancel` followed by `cancelled`; wit-bindgen
+acknowledges cancellation with `task.cancel`. Dropping the wrapper also drops its pending host
+call, cancelling that work.
 
-- **Delivery on arrival.** The executor passes each host result on as soon as it arrives.
-- **RETURNED is preserved**, as above. This needs the host to be the runtime's own functions: a
-  host that is another component suspends the proxy as it calls it, so that the guest sees
-  STARTED, in a way replay can't reproduce.
-- **Nothing suspends where the proxy can't see it**: no blocking WASI 0.2 calls in the proxy or the
-  recorder, e.g. printing, and no epoch deadlines that yield, which pause the guest mid-computation
-  at a point replay has no timer for. A deadline that traps only ends the run.
+Thus `cancelled` records the proxy's acknowledgement, not an inspection of whether the underlying
+host callee acknowledged or returned after the cancellation request. Host cancellation of guest
+exports is a separate, unimplemented recording path.
+
+### Stream and future transfers
+
+The proxy keeps the end it receives, creates a pair, and hands the pair's readable end onward.
+A pump copies between them, converting payloads and recording transfers and drops.
+
+**Copy invariant.** A stream line describes one completed rendezvous, not an attempted read or
+write. Record mode does not read ahead: it waits for the guest side to be ready before issuing
+the matching host operation. Zero-length reads/writes provide this readiness handshake on the
+guest side; native host ends may answer zero-length operations immediately. A stream nobody
+reads has no recorded host write. Recording a completed transfer does not imply its line precedes
+every action on its payload; see [Observation order](#labels).
+
+Futures have no equivalent reader-readiness handshake. A host-produced value is recorded when
+written; the guest may instead drop its reader, which is not recorded. A guest-produced value
+is recorded when the host takes it. The proxy does not rely on the default value wit-bindgen
+writes when a future writer is dropped unwritten.
+
+Instrumentation changes the reachable schedules: pumps make guest copies block, and the extra
+task can delay host results. Read-ahead would admit some immediate copies but would also read
+earlier or more than requested. The goal is replay of the instrumented execution, not preservation
+of every schedule of the uninstrumented component.
 
 ## Steps
 
-The executor is a single task that runs the proxy's jobs. Each of its runs is a **step**, and so is
-each arrival of an export call; one counter, from 1, numbers them in both components. A host line
-the guest observes outside its own calls, e.g. a STARTED call's `return`, a copy, a host's drop, an
-export call, has `at`: the step it happened in. A guest line, or a host line that answers a guest
-call before it returns, e.g. a `return` of a RETURNED call, has none: the guest's call places it.
+The current executor polls its existing jobs once, then polls newly queued jobs until no more
+are queued. All share its task and waker. A blocked operation joins that task's waitable set;
+sync submissions wake it through wit-bindgen's inter-task wakeup stream.
 
-**Replay** counts its steps the same way, and performs each host line in its step. With no host to
-wake the executor, a job waiting for a later step makes the executor wake itself; the next run
-first takes an event that came meanwhile, e.g. a guest's write, as an executor woken by that event
-does in the recording (see [wit-bindgen](#wit-bindgen)). A task that waits for a step from outside
-the executor, e.g. a mock of a STARTED call, or an export call waiting to arrive, holds the
-executor until it resumes: otherwise another run could come in between, which replay, knowing only
-the step, would place differently.
+**Clock invariant.** Starting from zero:
 
-**Why the step is enough, and a gate isn't needed.** The trace order alone isn't a schedule:
-released in trace order, two results could reach the guest before or after a different one of its
-waits. component-ui's design holds every result until the guest is idle, which excludes schedules,
-turns every RETURNED call into a STARTED one, and needs to know when the guest is idle, which the
-proxy can't see. Instead, every host event reaches the guest in a step; if the runtime's choices
-are deterministic, everything between two steps follows from what happened before, so "event H in
-step n" means the same in record and replay. This requires:
+```text
+step = executor runs + explicitly counted external steps
+```
 
-- the same executor in record and replay, with only the leaves different: host calls, or the
-  trace's lines;
-- deterministic runtime choices, given the same state;
-- nothing suspending where the proxy can't see it, as above;
-- at most one event pending for the guest at once, see below.
+Export arrivals take external steps. Probes and polls blocked by a handoff do not count as runs.
+A host event delivered outside an immediate guest-call answer carries `at`, such as an export
+arrival, a STARTED call's return, a copy, or a host drop. Guest lines and immediate answers have
+no `at`: their call or operation sequence places them. An event's `at` need not itself advance
+the clock; several events can share a step.
 
-A spike, [`tests/fixtures/spike-p3-race`](../tests/fixtures/spike-p3-race), confirmed the clock in
-wasmtime, with a guest that joins two results in the order its wakeups receive them.
+Record mode starts the executor while async exports are outstanding and requests draining when
+the last returns. Another export can keep or reopen the running driver; it finishes once its
+jobs finish. Replay/fuzz `start` drives it for the run; dialog drives and drains it per export.
+Sync exports alone cannot keep the executor running.
 
-### Answers in the same step
+### Completion handoff
 
-Steps place each host event, but not the order of two events that reach the guest in one step,
-e.g. two calls returning in the same run of the executor. When both are pending at one of the
-guest's waits, wasmtime gives the guest the lowest waitable first, by its index in a table the
-whole store shares, not by the guest's own handle. That index depends on every task and handle
-the store made before, also the proxy's and the recorder's, which differ between record and replay
-by design. So the guest may take the other event first, while every step agrees, and diverge,
-e.g. a `select` of two such calls.
+**Handoff invariant.** A wait completed in an executor run holds admission of the next run until
+its waiting task resumes or is dropped. Other jobs in the current run still get polled:
 
-The proxy doesn't see which event the guest took, so the trace can't record it; see
-[Ordering answers in the same step](#ordering-answers-in-the-same-step) for ways to make it
-replayable.
+```text
+complete(waiter, step) < resume_or_drop(waiter) < next executor run
+```
 
-## What recording can't reach
+This lets a STARTED call return, or an export's arrival take its step, without another run
+overtaking that continuation. It is not a promise that the guest has consumed every delivered
+event or finished all computation caused by it.
 
-The proxy puts its own task between the host and the guest, and observes only its side:
+### Equal event-delivery boundaries
 
-| | |
-|---|---|
-| RETURNED | preserved, with the runtime's own host functions |
-| several results pending at one guest wait | possible, but which the guest takes first isn't replayed; see above |
-| a guest copy that completes at once | not reached without read-ahead: the guest's copies block first |
-| a host result arriving before the guest's next wait | may arrive after it, as the executor needs a run to pass it on: a slower host, which is legal |
-| the last copies before a trap | the guest's drops, and the values of futures it wrote, which the host sees only after the guest went on, may be missing: see below |
-| an end the guest hands back | traps, unless its payload is numeric; see [Labels](#labels) |
-| the host's cancel of an export | not recorded yet: the proxy would have to see whether the guest returned or acknowledged it |
+**Boundary invariant.** A self-woken run must get the same opportunity to receive a pending
+event before polling jobs as an event-woken run. Otherwise replay, which advances itself toward
+recorded steps, would observe a completion one run later than recording.
 
-Whatever schedule happens is recorded completely; the proxy only makes the host look slower.
-Covering other schedules is exploration, which fuzz mode does.
+wit-bindgen delivers a callback's event before polling tasks. After a yield, however, the callback
+has no event: it polls tasks first, then polls the waitable set if the task self-woke. The executor
+therefore wraps the generated callback: the first poll after a yield is a **probe**, which only
+self-wakes. wit-bindgen can then deliver an event before the real run. If no event is found and
+it returns Yield, the wrapper re-enters once without another probe.
 
-**Traces cut short.** A run that traps, or is killed, during an export call leaves a trace whose
-last guest copies may be missing. Replay treats a trace with an unanswered export call as cut: it
-accepts a guest's line about a stream or future that the trace lacks, and lets the run go on to
-the same trap. The data the guest got, and the host took, is always recorded, as the host's side
-of a copy completes it.
-
-**Read-ahead** would make a guest's immediate copies reachable: a pump that keeps a read pending on
-one side has data ready for the other. But the host is then read earlier, and more, than the guest
-asked, which changes what it sees, e.g. a producer that produces only when read, and a copy line
-is no longer one rendezvous of the guest's. Record mode doesn't read ahead.
+wasmtime prioritizes event-woken tasks over yielded tasks, allowing guest work to run before
+the executor's next self-woken run. Neither this priority rule nor the probe controls which of
+several guest events is selected. The callback adapter and the priority behavior are runtime
+dependencies, not consequences of the clock equation.
 
 ## Replay
 
-Replay runs the composition with no host. The imports component answers every import from the
-trace, the exports component's `start` makes the export calls, and the executor performs each host
-line in its step. Every guest line is checked against the trace, up to renaming; a mismatch is a
-divergence, reported with the expected and the actual line, and a stall shows up as a deadlock.
-At the end, replay checks that it reached every line.
+The imports proxy answers calls and performs transfers from the trace; the exports proxy's
+`start` drives export calls and host drops of guest resources. Immediate answers are returned
+at their call boundary. Deferred executor work waits for its recorded step, self-waking while
+below it and reporting divergence if it has passed it. External step-taking continuations use
+the handoff to keep their placement adjacent to the run they awaited.
 
-The recorder, a component bundled with the proxy or implemented by the host, reads and writes the
-trace, and pairs labels; waiting for steps is the executor's. Fuzz mode writes the same format, so
-that its runs replay too.
+Guest lines are checked against the corresponding task/handle sequence up to label renaming.
+Mismatches report expected and actual events; `finish` checks for unconsumed lines, except host
+drops of its own resources, which require no replay action. These checks detect differences
+visible to the trace, not every possible internal guest difference. A stall may surface as a
+runtime deadlock. Cut traces use a weaker policy, described below.
 
 ## Correctness
 
-Replay is sound if every run that recording sees replays exactly; coverage, recording every
-schedule the composition could have, isn't a goal (see
-[What recording can't reach](#what-recording-cant-reach)).
+Distinguish three claims: recording observes the instrumented execution; replay reproduces that
+execution's guest-visible interactions; instrumentation covers the original component's possible
+schedules. The design aims at the first two, subject to the gaps below, not the third.
 
-**Soundness, by induction on steps.** If record and replay are in the same state when step `n`
-begins, and step `n` performs the same host lines, they are in the same state when step `n + 1`
-begins; between steps, the guest's lines are checked, and its calls answered by the lines without
-an `at`. This holds if the executor is the only way in, the trace holds every input, and the
-requirements of [Steps](#steps) hold. The trace doesn't hold one input wasmtime's choices depend
-on, the store-wide order of pending events, so the induction holds only while the guest finds at
-most one.
+### Conditional replay argument
 
-**Fork-join guests**, without determinacy races, give the same result in every schedule, so
-recording their values would be enough. A component model guest isn't one in general: it can
-observe the order completions arrive in, as a `select` does, which is what steps record.
+Record and replay cannot have literally identical runtime states: host subtasks, proxy objects,
+and recorder activity differ. Let `R` relate states with corresponding guest computation,
+pending guest-visible operations, consumed per-operation trace prefixes, and logical steps,
+with resource bindings related by the label bijection.
 
-**Checking the implementation:**
+The proof obligations are:
 
-- Replay checks itself, for each trace: a wrong replay shows up as a divergence or a stall.
-- Fuzzed schedules are replayed: fuzz mode explores the host's timing, and each trace has to
-  replay, or end in the same trap of the guest's.
-- Recordings under `wasmtime run` and `wasmtime serve` are replayed.
-- Further: a fixpoint test, replaying while recording and comparing the traces; enumerating every
-  placement of completions for small guests; and a model of the spec, whose reference
-  implementation marks its nondeterministic choices, to check the design apart from wasmtime.
+1. **Complete observations:** all relevant external inputs and readiness outcomes are recorded;
+   there are no unobserved suspensions that affect execution.
+2. **Matching progress:** corresponding jobs/calls can perform each recorded operation at its
+   prescribed boundary, preserving RETURNED/STARTED and stream/future transfer semantics.
+3. **Corresponding runtime choices:** scheduling and event selection preserve `R`, despite
+   private allocation differences. Determinism on each runtime's full state alone is insufficient.
+4. **Guest determinism:** given corresponding inputs and scheduling observations, guest execution
+   preserves the relation. Unrecorded sources of guest nondeterminism are outside the claim.
 
-## Portability
+Under these hypotheses, use induction over observation boundaries, grouping executor work by
+step. Initially the guests and empty trace prefixes correspond. Immediate calls receive matching
+answers; an executor run performs matching recorded effects; label correspondence extends or
+ends consistently. The boundary and handoff invariants prevent these effects moving across the
+specified continuations. Corresponding runtime choices then let guest execution reach related
+states at the next boundary. Thus each observed prefix, and complete termination when reached,
+agrees up to renaming. Eventual progress additionally requires terminating polls, fair scheduling,
+and completion or cancellation of outstanding work.
 
-Replay in the runtime that recorded needs the same runtime version and configuration, and the
-proxy, which wasmtime is deterministic enough for, but for
-[answers in the same step](#answers-in-the-same-step). Replay in another runtime needs the
-runtime's choices to be the same in both. Two ways:
+This is a conditional proof argument, **not a proof that the implementation satisfies all four
+hypotheses**. Equal step numbers are necessary placement checks, not sufficient evidence for `R`.
+The separately scheduled exports jobs and the following counterexample are important gaps.
 
-1. **A deterministic scheduling profile** in the component model, as core Wasm has for NaNs: fix
-   each choice the spec leaves open, e.g. the lowest waitable first, by the waiting instance's own
-   handle, the oldest ready thread first, and when a host completion is delivered relative to
-   ready tasks. It fixes the choices rather than recording them; runtimes would adopt it behind a
-   flag, as they do async.
-2. **A shim inside the guest**: rewrite the guest component to put a core module between its core
-   instance and its async built-ins, which reports what each wait returned to the proxy. Replay
-   then releases exactly what each recorded wait saw, also when the guest is suspended where the
-   proxy can't see it. It observes the built-ins, and doesn't reimplement them.
+### Answers in the same step
 
-Patching the runtime would also work, but replay must not depend on runtime patches.
+Two results can become pending before one guest wait. wasmtime selects the lowest waitable by
+kind and then by a store-wide index, not by the guest's own handle. Proxy and recorder allocations
+differ between modes, so recording can select A while replay selects B even when both steps and
+values agree. A guest using `select` can then diverge. The proxy does not see which event the
+guest selected, so the current trace cannot repair this choice. The race fixture has exhibited
+this divergence; at most one pending relevant event avoids this particular ambiguity but does
+not establish the other proof obligations.
 
-## Status
+Restricting releases to one guest-visible event per run is a possible scheduling restriction,
+not a complete implemented fix: one future poll may perform multiple effects, and the guest
+may observe accumulated events or drain/poll its set. A release policy would need to control
+actual observations and would exclude some recordings. Runtime ordering or observation capture
+offers a less restrictive path; see [Portability](#portability).
 
-1. **Trace format and recorder interface**: done.
-2. **Replay**, tested on fuzzed traces: done.
-3. **Record**: async imports, streams and futures, and the guest's cancels, under `wasmtime run`
-   and `wasmtime serve`: done.
-4. **Portability across runtimes**: the profile, or the shim.
+### Verification
 
-## Open problems
+Existing checks include source snapshots, record/replay under `wasmtime run` and `serve`, and
+replaying fuzzed traces. The [race spike](../tests/fixtures/spike-p3-race) exercises clock and
+completion ordering; `make test-record-p3`, `make test-record-http-p3`, and `make test-fuzz-replay`
+cover representative calls, streams, and cancellations. Passing runs are evidence, not a general
+proof; in particular, trace checking cannot certify an observation it never records.
 
-### Ordering answers in the same step
+The [executor verification plan](executor-protocol.md#7-verification-plan) separates a transition
+model, Rust implementation conformance and memory safety, runtime-adapter tests, and end-to-end
+replay. Exhaustive small schedules and a record-during-replay fixpoint test would strengthen the
+evidence. Models must retain nondeterministic event selection to expose, not hide, the known gap.
 
-When two events reach the guest in one step, which it takes first depends on wasmtime's store-wide
-indexes, which differ between record and replay (see
-[Answers in the same step](#answers-in-the-same-step)). Fuzzing a guest that races two calls,
-keeping the first, diverges in about 3 of 100 runs; any guest that merges results, e.g. with
-`select`, is exposed, in record mode too, when two host results arrive before the executor's next
-run.
+## Limitations
 
-- **One answer per run.** The executor releases at most one event for the guest per run, and wakes
-  itself for the next; wasmtime then runs the guest, at high priority, before the executor's next
-  run, so the guest never finds two of the proxy's events pending, and steps order them. It's an
-  executor change: a release queue, and a rule for which event goes first, e.g. the trace's order.
-  The cost: recording can't reach several results pending at one wait, which a guest that drains
-  them would notice, and the second result reaches the guest a run later.
-- **The shim** records what each of the guest's waits returned, which makes the order exact, at
-  the cost of rewriting the guest (see [Portability](#portability)).
-- **A deterministic profile** ordering pending events by the waiting instance's own handles would
-  make wasmtime's choice a function of the guest's own history, and need nothing recorded.
-- **Making the store's history the same** in record and replay isn't practical: the leaves differ,
-  host calls against the trace's lines, and the recorder is called differently.
-
-### Ends the guest hands back
-
-A stream or future the proxy gave the guest, coming back, has its writer in the same instance, so
-the proxy can't read it unless its payload is numeric (see [Labels](#labels)). Passing a request's
-body and trailers on to a response, common in HTTP handlers, traps the recording. Options:
-
-- **Pairs in another instance.** If a separate component instance made the pairs and wrote to them,
-  a returning end would be read across instances. It needs a function per payload type, to make a
-  pair and pump into it there, and the steps of that instance's copies would be placed only as
-  exactly as the exports component's jobs are (see below).
-- **Recognizing the end.** If the proxy knew a returning end was its own, it could pass it on
-  rather than read it. Nothing in the component model identifies an end across components, and
-  handle numbers are reused; it would need a runtime or spec addition.
-
-### The exports component's jobs
-
-The exports component's own jobs, e.g. reading a stream an export returned, run on the task of
-`start`, not in the executor, so their lines have the last step rather than their own, and replay
-places them only by waiting until the count is there. Everything replays so far. Giving each copy
-a step of its own made it worse, as two tasks then took steps in an order the runtime decides.
-Handing these ends to the imports component's executor, with a function per payload type, would
-place them exactly.
-
-### The host's cancels of exports
-
-The host may cancel a pending export call, e.g. `wasmtime serve` when a client goes away. The proxy
-sees the cancel, but not whether the guest then returned or acknowledged it, as wit-bindgen hides
-the callee's choice; and replay's `start` would have to cancel the call in its step. Not recorded
-yet.
+| Boundary | Current limitation and possible direction |
+|---|---|
+| Exports proxy jobs | Pumps run on the task driving the export, not the imports executor. Their events use the last step and replay waits until that count, rather than giving them an exact executor run. Moving typed work into the executor could unify placement; independent counters would not. |
+| Returning stream/future ends | The proxy cannot recognize its own end returned through the guest. Copying it against its writer in the same instance traps for non-numeric payloads. A separate pair-producing instance or a runtime identity facility could avoid this, with additional scheduling work. |
+| Host cancellation of exports | Not recorded. wit-bindgen hides the guest's return-versus-acknowledgement choice; replay would also need to issue cancellation at its recorded point. |
+| Hidden suspension | Blocking WASI 0.2 calls and yielding epoch deadlines can suspend where the trace has no placement information. A trapping deadline only ends execution. |
+| Bundled recorder | It prints through blocking WASI 0.2 calls, violating the no-hidden-suspension assumption in principle. No divergence has been attributed to this yet. A suitable host recorder or executor-driven async output could remove the risk; buffering until exit loses crash traces and does not suit long-lived servers. |
+| Component-based hosts | Calling into another component can suspend even when the proxy's first poll sees a result, so the guest can see STARTED instead of RETURNED. This additional suspension is not reproduced. |
+| Guest wait/poll behavior | General guests can drain or poll waitable sets rather than use wit-bindgen's callback pattern. Replaying those readiness observations requires more than the current event lines. |
+| Sync exports and CLI hosting | Record mode needs an async export to drive queued work. `proxy-component run` does not yet provide p3 WASI/HTTP hosting. |
 
 ### Traces cut short
 
-A trace is cut when the run trapped or was killed during an export call; then the guest's last
-drops, and the values of futures it wrote, may be missing, and replay accepts their absence. A
-trap after every export call returned, e.g. in a task the guest spawned, leaves a trace that looks
-whole, whose replay reports the missing line as a divergence. Recording the run's end, e.g. by the
-host, would tell the two apart.
+An unanswered export marks a trace as cut, for example after a trap or termination during that
+call. Drops and guest-written future values observed only after the guest progresses may be
+absent. Replay accepts otherwise missing guest stream/future lines in this case, aiming to reach
+the same trap; it does not prove the missing suffix matched.
 
-### The recorder's output
+A trap after all exports returned can look like a complete trace and instead produce a missing
+line divergence. An explicit run-end record would distinguish these cases. `wasmtime serve`
+reuses instances across requests, so a trace may contain many export calls without a normal exit.
 
-The bundled recorder prints each line as it records it, a blocking WASI 0.2 call, which can
-suspend an instance where the proxy can't see it. No test has shown a divergence from it, but
-nothing rules it out. Buffering to the end loses the trace on a trap, and a run under
-`wasmtime serve` doesn't end; a host recorder avoids both, but needs a host that implements it;
-writing through a WASI p3 stream from the executor would make output part of the steps.
+Other format limitations are verbosity of `list<u8>` WAVE values and the absence of causal caller
+identity, which limits deriving alternative schedules for systematic exploration.
 
-### Read-ahead in pumps
+## Portability
 
-Without read-ahead, a guest's copy never completes at once, which some guests may behave
-differently on. With it, the host is read earlier and more than the guest asked, which a host that
-produces only when read would see, and a copy line is no longer one rendezvous of the guest's.
-Record mode doesn't read ahead.
+A deterministic scheduler chooses predictably from its state and ready events. Replay must also
+make the corresponding events ready at the corresponding observation points. Stable tie-breaking
+cannot help if recording has only B ready but replay eagerly makes both A and B ready.
 
-### Hosts and guests the design doesn't cover
+Three approaches provide different amounts of support:
 
-- **Hosts that are components**, e.g. virtualized WASI composed with the guest, suspend the proxy
-  as it calls them, so that the guest sees STARTED where the proxy saw RETURNED; replay would have
-  to reproduce their suspensions.
-- **Guests that drain several pending events**, or poll their waitable sets, unlike wit-bindgen's;
-  one answer per run would leave them nothing to drain.
-- **Sync exports** can't run the executor in record mode, so host work they start, e.g. a stream
-  they return, makes no progress until an async export runs it.
-- **`proxy-component run`** doesn't host p3 components yet: it needs wasmtime's p3 WASI and HTTP
-  linkers, and a way to call a handler.
+- **Deterministic scheduling profile:** specify guest-relative event ordering, relevant task
+  ordering, and delivery boundaries independently of private proxy allocations. It can resolve
+  runtime-choice ambiguity; a readiness-placement mechanism such as executor steps still remains.
+- **Guest observation shim:** instrument async built-ins to record wait/poll results and control
+  their replay. It works without runtime adoption but rewrites the guest and needs sufficient
+  coverage of readiness and scheduling observations.
+- **Runtime-assisted recording/replay:** capture external readiness and relevant choices at actual
+  guest boundaries, then inject them during replay. This could remove proxy steps, handoff barriers,
+  and callback probes; ordinary async work, conversion, and possibly pumps would remain.
 
-### Which way to portability
+The current design requires neither runtime patches nor guest rewriting. Using the same runtime
+version/configuration is its baseline, not a guarantee: the store-index counterexample applies
+even there. Cross-runtime replay requires an agreed observation contract or recording the choices
+that differ. See the [runtime alternative](executor-protocol.md#runtime-support-that-could-replace-the-scheduling-policy)
+for the contract needed to replace custom scheduling.
 
-Replay in another runtime needs its choices to match: a deterministic profile, agreed in the
-component model and adopted by runtimes, or a shim, which works without anyone's agreement but
-rewrites the guest. Which one, or both, is open.
+## Status
 
-### Smaller ones
-
-- `list<u8>` items are WAVE lists; byte strings would be shorter.
-- No caller identity: a trace can't tell which guest lines a host line caused, which limits
-  deriving other schedules from it, e.g. for systematic exploration; the shim could add it.
+Implemented: the trace/recorder interfaces, replay and fuzz generation, and recording of async
+imports, stream/future transfers, and guest import cancellation. Tests exercise command and HTTP
+hosting, including reused server instances. General exact replay and cross-runtime portability
+remain conditional on the unresolved observation and scheduling issues above. The executor
+protocol refactor is a proposal; its finite-batch scheduling rule is not current behavior.
