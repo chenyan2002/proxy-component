@@ -148,25 +148,24 @@ impl Logger {
     }
 }
 
-impl FuncCall {
-    pub fn to_string(&self) -> String {
+impl std::fmt::Display for FuncCall {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             // As component-ui writes drops, e.g. `drop #x-1`
             FuncCall::ExportArgs { method, args }
             | FuncCall::ImportArgs {
                 method: Some(method),
                 args,
-            } if method == DROP => {
-                format!("drop {}", args.join(", "))
-            }
-            FuncCall::ExportArgs { method, args } => format!("{method}({})", args.join(", ")),
-            FuncCall::ImportArgs { method, args } => format!(
+            } if method == DROP => write!(f, "drop {}", args.join(", ")),
+            FuncCall::ExportArgs { method, args } => write!(f, "{method}({})", args.join(", ")),
+            FuncCall::ImportArgs { method, args } => write!(
+                f,
                 "{}({})",
                 method.as_deref().unwrap_or("<unknown>"),
                 args.join(", ")
             ),
             FuncCall::ExportRet { ret, .. } | FuncCall::ImportRet { ret, .. } => {
-                ret.as_deref().unwrap_or("()").to_owned()
+                f.write_str(ret.as_deref().unwrap_or("()"))
             }
         }
     }

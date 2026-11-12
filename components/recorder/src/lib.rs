@@ -16,15 +16,49 @@ impl bindings::exports::proxy::recorder::record::Guest for Component {
     fn record_args(method: Option<String>, args: Vec<String>, is_export: bool) {
         let mut logger = Logger::new();
         let call = logger.record_args(method, args, is_export);
-        let json = serde_json::to_string(&call).unwrap();
-        println!("{json}");
+        emit(&call);
     }
     fn record_ret(method: Option<String>, ret: Option<String>, is_export: bool) {
         let mut logger = Logger::new();
         let call = logger.record_ret(method, ret, is_export);
-        let json = serde_json::to_string(&call).unwrap();
-        println!("{json}");
+        emit(&call);
     }
+}
+
+#[cfg(not(feature = "fastly"))]
+fn emit(call: &trace::FuncCall) {
+    println!("{}", serde_json::to_string(call).unwrap());
+}
+
+/// Writes each event to the service's `proxy-trace` log endpoint (any provider), as
+/// `{"id":<sandbox id>,"seq":<n>,"event":<event>}`. Each event is written as it happens, so a
+/// request that crashes keeps its trace up to the crash. Unlike `fastly log-tail`, log endpoints
+/// don't tag lines with the sandbox, and mix many requests' lines in batches, possibly out of
+/// order: `id` (`FASTLY_TRACE_ID`) and `seq` put each request's trace back together. Falls back
+/// to stdout if the endpoint can't be opened.
+#[cfg(feature = "fastly")]
+fn emit(call: &trace::FuncCall) {
+    use fastly_sys::service_0_1::fastly::compute::log::Endpoint;
+    struct Sink {
+        endpoint: Option<Endpoint>,
+        id: String,
+        seq: u64,
+    }
+    thread_local! {
+        static SINK: RefCell<Sink> = RefCell::new(Sink {
+            endpoint: Endpoint::open("proxy-trace").ok(),
+            id: std::env::var("FASTLY_TRACE_ID").unwrap_or_default(),
+            seq: 0,
+        });
+    }
+    SINK.with_borrow_mut(|sink| {
+        let line = serde_json::json!({ "id": sink.id, "seq": sink.seq, "event": call }).to_string();
+        sink.seq += 1;
+        match &sink.endpoint {
+            Some(endpoint) => endpoint.write(line.as_bytes()),
+            None => println!("{line}"),
+        }
+    });
 }
 
 use std::cell::RefCell;

@@ -65,6 +65,7 @@ fn generate(mode: &Mode) -> tempfile::TempDir {
         mode: mode.clone(),
         use_host_recorder: false,
         one_byte_page_size: false,
+        fastly: false,
     };
     generate_sources(&args, dir.path()).unwrap();
     dir

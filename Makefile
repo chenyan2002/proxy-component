@@ -11,7 +11,8 @@ WASMTIME = wasmtime $(WASMTIME_FLAGS)
 all: build-components build-cli
 build-cli:
 	cargo build --all-features --release
-# The CLI embeds both regular and 1-byte-page builds of these components.
+# The CLI embeds both regular and 1-byte-page builds of these components, and a Fastly
+# (always 1-byte-page) build of the recorder for `instrument --fastly`.
 build-components:
 	cargo build -p debug -p recorder --target wasm32-wasip2 --release
 	cargo build -p debug -p recorder --target wasm32-wasip2 --release --features debug/one-byte-page,recorder/one-byte-page --target-dir target/one-byte-page
@@ -19,6 +20,8 @@ build-components:
 	cp target/wasm32-wasip2/release/recorder.wasm assets/recorder.wasm
 	cp target/one-byte-page/wasm32-wasip2/release/debug.wasm assets/debug.one_byte_page.wasm
 	cp target/one-byte-page/wasm32-wasip2/release/recorder.wasm assets/recorder.one_byte_page.wasm
+	cargo build -p recorder --target wasm32-wasip2 --release --features recorder/fastly,recorder/one-byte-page --target-dir target/fastly
+	cp target/fastly/wasm32-wasip2/release/recorder.wasm assets/recorder.fastly.one_byte_page.wasm
 
 test: test-cargo test-fuzz test-record test-fixture test-dialog
 

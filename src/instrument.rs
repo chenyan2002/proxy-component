@@ -21,6 +21,10 @@ pub struct InstrumentArgs {
     /// Use 1-byte wasm pages for the generated and bundled components
     #[arg(long)]
     pub one_byte_page_size: bool,
+    /// Record on Fastly Compute: write the trace to the `proxy-trace` log endpoint instead of
+    /// stdout. Implies --one-byte-page-size.
+    #[arg(long)]
+    pub fastly: bool,
 }
 
 const DEBUG_WASM: &[u8] = include_bytes!("../assets/debug.wasm");
@@ -28,10 +32,18 @@ const RECORDER_WASM: &[u8] = include_bytes!("../assets/recorder.wasm");
 // Built with `--features one-byte-page` (see Makefile `build-components`).
 const DEBUG_WASM_ONE_BYTE_PAGE: &[u8] = include_bytes!("../assets/debug.one_byte_page.wasm");
 const RECORDER_WASM_ONE_BYTE_PAGE: &[u8] = include_bytes!("../assets/recorder.one_byte_page.wasm");
+// Built with `--features fastly,one-byte-page`.
+const RECORDER_WASM_FASTLY: &[u8] = include_bytes!("../assets/recorder.fastly.one_byte_page.wasm");
 
-pub fn run(args: InstrumentArgs) -> Result<()> {
+pub fn run(mut args: InstrumentArgs) -> Result<()> {
     if args.use_host_recorder && !matches!(args.mode, Mode::Record | Mode::Replay) {
         anyhow::bail!("--use-host-recorder only works in record or replay mode");
+    }
+    if args.fastly {
+        if !matches!(args.mode, Mode::Record) || args.use_host_recorder {
+            anyhow::bail!("--fastly only works in record mode, with the bundled recorder");
+        }
+        args.one_byte_page_size = true;
     }
     // 1. Create a tmp directory and initialize a new Rust project in it.
     let tmp_dir = init_rust_project()?;
@@ -65,7 +77,9 @@ pub fn run(args: InstrumentArgs) -> Result<()> {
     let imports = format!("import:proxy={}", imports_wasm_path.display());
     let exports = format!("export:proxy={}", exports_wasm_path.display());
     let root = format!("root:component={}", args.wasm_file.display());
-    let (debug_wasm, recorder_wasm) = if args.one_byte_page_size {
+    let (debug_wasm, recorder_wasm) = if args.fastly {
+        (DEBUG_WASM_ONE_BYTE_PAGE, RECORDER_WASM_FASTLY)
+    } else if args.one_byte_page_size {
         (DEBUG_WASM_ONE_BYTE_PAGE, RECORDER_WASM_ONE_BYTE_PAGE)
     } else {
         (DEBUG_WASM, RECORDER_WASM)
